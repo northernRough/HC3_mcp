@@ -1,0 +1,91 @@
+{
+  "name": "hc3-mcp-server",
+  "displayName": "HC3 MCP Server",
+  "description": "MCP server for Fibaro HC3 smart home system REST API integration",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "hc3-mcp-server.helloWorld",
+        "title": "Hello World",
+        "category": "HC3 MCP"
+      },
+      {
+        "command": "hc3-mcp-server.configure",
+        "title": "Configure Fibaro HC3 Connection",
+        "category": "HC3 MCP"
+      },
+      {
+        "command": "hc3-mcp-server.testConnection",
+        "title": "Test Fibaro HC3 Connection",
+        "category": "HC3 MCP"
+      }
+    ],
+    "configuration": {
+      "title": "HC3 MCP Server",
+      "properties": {
+        "hc3McpServer.host": {
+          "type": "string",
+          "description": "Fibaro HC3 IP address or hostname",
+          "default": ""
+        },
+        "hc3McpServer.username": {
+          "type": "string",
+          "description": "Fibaro HC3 username",
+          "default": ""
+        },
+        "hc3McpServer.password": {
+          "type": "string",
+          "description": "Fibaro HC3 password (stored securely)",
+          "default": ""
+        },
+        "hc3McpServer.port": {
+          "type": "number",
+          "description": "Fibaro HC3 port number",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "hc3-mcp-server.servers",
+        "label": "Fibaro HC3 Smart Home"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.103.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "@vscode/test-cli": "^0.0.4",
+    "@vscode/test-electron": "^2.3.9"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.0"
+  }
+}
