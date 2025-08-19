@@ -1,13 +1,44 @@
 {
   "name": "hc3-mcp-server",
   "displayName": "HC3 MCP Server",
-  "description": "MCP server for Fibaro HC3 smart home system REST API integration",
-  "version": "0.0.1",
+  "description": "Model Context Protocol server for Fibaro Home Center 3 smart home system integration with AI assistants",
+  "version": "1.0.3",
+  "publisher": "GsonSoft-development",
+  "author": {
+    "name": "GsonSoft Development"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jangabrielsson/HC3_mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jangabrielsson/HC3_mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jangabrielsson/HC3_mcp/issues"
+  },
+  "keywords": [
+    "fibaro",
+    "hc3",
+    "home-center-3",
+    "smart-home",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "assistant",
+    "home-automation",
+    "iot"
+  ],
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.103.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Extension Packs"
   ],
   "activationEvents": [
     "*"
@@ -28,6 +59,11 @@
       {
         "command": "hc3-mcp-server.testConnection",
         "title": "Test Fibaro HC3 Connection",
+        "category": "HC3 MCP"
+      },
+      {
+        "command": "hc3-mcp-server.configureCopilot",
+        "title": "Configure GitHub Copilot MCP",
         "category": "HC3 MCP"
       }
     ],
@@ -60,7 +96,7 @@
     },
     "mcpServerDefinitionProviders": [
       {
-        "id": "hc3-mcp-server.servers",
+        "id": "fibaro-hc3-mcp.servers",
         "label": "Fibaro HC3 Smart Home"
       }
     ]
@@ -74,15 +110,16 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.103.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "18.x",
+    "@types/vscode": "^1.103.0",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@typescript-eslint/parser": "^6.19.1",
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
     "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.9"
+    "@vscode/test-electron": "^2.3.9",
+    "canvas": "^3.2.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
   },
   "dependencies": {
     "axios": "^1.6.0",

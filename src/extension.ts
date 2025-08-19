@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { HC3McpServerProvider } from './mcp/mcpServerProvider.js';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -34,6 +35,13 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(testConnectionCommand);
 
+	// Register Copilot configuration helper command
+	console.log('🔧 Registering Copilot configuration command...');
+	const copilotConfigCommand = vscode.commands.registerCommand('hc3-mcp-server.configureCopilot', async () => {
+		await configureCopilotMcp();
+	});
+	context.subscriptions.push(copilotConfigCommand);
+
 	// Try to register MCP server provider if available
 	console.log('🔧 Checking for MCP API availability...');
 	console.log('VS Code version check - vscode.lm exists:', !!vscode.lm);
@@ -44,25 +52,24 @@ export function activate(context: vscode.ExtensionContext) {
 		if (vscode.lm && typeof vscode.lm.registerMcpServerDefinitionProvider === 'function') {
 			console.log('✅ MCP API detected, registering MCP server provider...');
 			
-			// Dynamically import the MCP provider
-			import('./mcp/mcpServerProvider.js').then(({ HC3McpServerProvider }) => {
+			try {
 				console.log('✅ MCP provider module loaded');
 				const mcpProvider = new HC3McpServerProvider(context);
 				console.log('✅ MCP provider instance created');
 				
 				const mcpDisposable = vscode.lm.registerMcpServerDefinitionProvider(
-					'hc3-mcp-server.servers',
+					'fibaro-hc3-mcp.servers',
 					mcpProvider
 				);
-				console.log('✅ MCP provider registered with ID: hc3-mcp-server.servers');
+				console.log('✅ MCP provider registered with ID: fibaro-hc3-mcp.servers');
 				
 				context.subscriptions.push(mcpDisposable);
 				console.log('✅ MCP server provider registered successfully!');
-				vscode.window.showInformationMessage('🤖 Fibaro HC3 MCP server is now available for AI assistants!');
-			}).catch(error => {
+				vscode.window.showInformationMessage('🤖 HC3 MCP server is now available for AI assistants!');
+			} catch (error) {
 				console.error('❌ Failed to load MCP provider:', error);
 				vscode.window.showWarningMessage('MCP functionality failed to load, but basic commands are still available.');
-			});
+			}
 		} else {
 			console.log('ℹ️ MCP API not available in this VS Code version.');
 			console.log('Current VS Code version appears to be 1.103.1 - MCP API may require a newer version.');
@@ -291,4 +298,55 @@ async function testFibaroConnection(): Promise<void> {
 // This method is called when your extension is deactivated
 export function deactivate() {
 	console.log('👋 Extension deactivated');
+}
+
+async function configureCopilotMcp(): Promise<void> {
+	const extensionPath = vscode.extensions.getExtension('GsonSoft-development.hc3-mcp-server')?.extensionPath;
+	const mcpServerPath = extensionPath ? `${extensionPath}/out/mcp/hc3-mcp-server.js` : '/path/to/your/extension/out/mcp/hc3-mcp-server.js';
+	
+	const config = vscode.workspace.getConfiguration('hc3McpServer');
+	const host = config.get<string>('host', '192.168.1.57');
+	const username = config.get<string>('username', 'admin');
+	const password = config.get<string>('password', 'your_password');
+	const port = config.get<number>('port', 80);
+
+	const configTemplate = `{
+  "github.copilot.chat.experimental.mcpServers": {
+    "hc3-smart-home": {
+      "command": "node",
+      "args": ["${mcpServerPath}"],
+      "env": {
+        "FIBARO_HOST": "${host}",
+        "FIBARO_USERNAME": "${username}",
+        "FIBARO_PASSWORD": "${password}",
+        "FIBARO_PORT": "${port}"
+      }
+    }
+  }
+}`;
+
+	const choice = await vscode.window.showInformationMessage(
+		'To use HC3 MCP Server with GitHub Copilot, you need to add configuration to your VS Code settings.',
+		'Copy Configuration',
+		'Open Settings JSON',
+		'Show Instructions'
+	);
+
+	switch (choice) {
+		case 'Copy Configuration':
+			await vscode.env.clipboard.writeText(configTemplate);
+			vscode.window.showInformationMessage('Configuration copied to clipboard! Paste it into your User Settings (JSON).');
+			break;
+
+		case 'Open Settings JSON':
+			await vscode.commands.executeCommand('workbench.action.openSettingsJson');
+			await vscode.env.clipboard.writeText(configTemplate);
+			vscode.window.showInformationMessage('Settings opened! Configuration copied to clipboard - paste it into the JSON file.');
+			break;
+
+		case 'Show Instructions':
+			const uri = vscode.Uri.file(extensionPath + '/MCP_CONFIGURATION_GUIDE.md');
+			await vscode.commands.executeCommand('markdown.showPreview', uri);
+			break;
+	}
 }

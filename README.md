@@ -63,6 +63,44 @@ HC3_PASSWORD=your_password
 - Run `HC3 MCP: Test Fibaro HC3 Connection` command
 - Verify successful connection to your HC3 system
 
+## GitHub Copilot Configuration
+
+For GitHub Copilot to use the MCP server, you need to configure it manually:
+
+1. **Open User Settings (JSON)** in VS Code:
+   - Press `Cmd+Shift+P` / `Ctrl+Shift+P`
+   - Type "Preferences: Open User Settings (JSON)"
+
+2. **Add MCP Server Configuration**:
+```json
+{
+  "github.copilot.chat.experimental.mcpServers": {
+    "hc3-smart-home": {
+      "command": "node",
+      "args": ["/path/to/your/extension/out/mcp/hc3-mcp-server.js"],
+      "env": {
+        "FIBARO_HOST": "192.168.1.57",
+        "FIBARO_USERNAME": "admin",
+        "FIBARO_PASSWORD": "your_password",
+        "FIBARO_PORT": "80"
+      }
+    }
+  }
+}
+```
+
+3. **Replace the configuration values**:
+   - Update the path to your compiled MCP server
+   - Set your HC3 IP address, username, and password
+   - Restart VS Code
+
+4. **Test in Copilot Chat**:
+   - **Important**: Start a new chat session after configuring the extension
+   - "List my HC3 devices"
+   - "@hc3-smart-home get all devices"
+
+**Note**: If the MCP server tools are not immediately available, start a new GitHub Copilot chat session to allow it to discover the MCP server.
+
 ## Extension Settings
 
 This extension contributes the following settings:

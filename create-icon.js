@@ -1,0 +1,17 @@
+// Simple script to create an icon using canvas
+const fs = require('fs');
+
+// Create a simple SVG icon
+const svgContent = `<svg width="128" height="128" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" fill="#0078d4"/>
+  <circle cx="64" cy="64" r="45" fill="#ffffff" stroke="#0078d4" stroke-width="2"/>
+  <text x="64" y="75" font-family="Arial, sans-serif" font-size="32" font-weight="bold" text-anchor="middle" fill="#0078d4">HC3</text>
+  <rect x="20" y="20" width="88" height="4" rx="2" fill="#ffffff"/>
+  <rect x="20" y="30" width="88" height="4" rx="2" fill="#ffffff"/>
+  <rect x="20" y="40" width="88" height="4" rx="2" fill="#ffffff"/>
+</svg>`;
+
+fs.writeFileSync('icon.svg', svgContent);
+console.log('Icon created as icon.svg');
+console.log('Convert this to PNG using an online converter or imagemagick:');
+console.log('convert icon.svg -resize 128x128 icon.png');

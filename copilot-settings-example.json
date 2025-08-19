@@ -1,0 +1,14 @@
+{
+  "github.copilot.chat.experimental.mcpServers": {
+    "hc3-smart-home": {
+      "command": "node",
+      "args": ["/Users/jangabrielsson/Documents/dev/HC3_mcp/out/mcp/hc3-mcp-server.js"],
+      "env": {
+        "FIBARO_HOST": "192.168.1.57",
+        "FIBARO_USERNAME": "admin", 
+        "FIBARO_PASSWORD": "your_password_here",
+        "FIBARO_PORT": "80"
+      }
+    }
+  }
+}

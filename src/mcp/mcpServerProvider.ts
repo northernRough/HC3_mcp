@@ -124,7 +124,7 @@ export class HC3McpServerProvider implements vscode.McpServerDefinitionProvider 
         this.context.extensionUri,
         'out',
         'mcp',
-        'fibaro-mcp-server.js'
+        'hc3-mcp-server.js'
       );
 
       try {
@@ -174,22 +174,28 @@ export class HC3McpServerProvider implements vscode.McpServerDefinitionProvider 
     server: vscode.McpStdioServerDefinition,
     token: vscode.CancellationToken
   ): Promise<vscode.McpStdioServerDefinition> {
+    console.log('🔧 resolveMcpServerDefinition called - VS Code is trying to start the MCP server');
     // This is called when VS Code needs to start the MCP server
     // We can perform any authentication or validation here
     
     const { host, username, password } = this.getConnectionConfig();
 
     if (!host || !username || !password) {
-      throw new Error('Fibaro HC3 configuration is incomplete. Please configure the extension settings or check your ~/.env file.');
+      console.log('❌ Configuration incomplete during resolve');
+      throw new Error('HC3 configuration is incomplete. Please configure the extension settings or check your ~/.env file.');
     }
 
+    console.log('🔧 Testing connection during resolve...');
     // Test connection (optional)
     try {
       await this.testConnection(host, username, password);
+      console.log('✅ Connection test passed during resolve');
     } catch (error) {
-      throw new Error(`Failed to connect to Fibaro HC3: ${error instanceof Error ? error.message : String(error)}`);
+      console.log('❌ Connection test failed during resolve:', error);
+      throw new Error(`Failed to connect to HC3: ${error instanceof Error ? error.message : String(error)}`);
     }
 
+    console.log('✅ MCP server resolved successfully');
     return server;
   }
 
@@ -219,6 +225,7 @@ export class HC3McpServerProvider implements vscode.McpServerDefinitionProvider 
   }
 
   refresh(): void {
+    console.log('🔄 MCP server definitions refreshed - triggering onDidChangeMcpServerDefinitions');
     this._onDidChangeMcpServerDefinitions.fire();
   }
 }

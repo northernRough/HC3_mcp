@@ -2272,7 +2272,11 @@ class HC3MCPServer {
         this.makeApiRequest('/api/globalVariables').catch(() => [])
       ]);
 
-      const suggestions = [];
+      const suggestions: Array<{
+        type: string;
+        description: string;
+        devices: Record<string, any>;
+      }> = [];
 
       // Motion sensor + light automation suggestions
       const motionSensors = devices.filter((d: any) => 
