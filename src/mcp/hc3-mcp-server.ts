@@ -1818,7 +1818,11 @@ class HC3MCPServer {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return await response.json();
+    const text = await response.text();
+    if (!text) {
+      return null;
+    }
+    return JSON.parse(text);
   }
 
   // Device Management Methods
