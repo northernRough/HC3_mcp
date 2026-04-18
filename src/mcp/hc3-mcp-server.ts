@@ -305,6 +305,28 @@ class HC3MCPServer {
           required: ['sceneId', 'properties'],
         },
       },
+      {
+        name: 'update_scene_content',
+        description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved. Returns both previous and current content so the caller has a last-known-good copy for recovery.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: {
+              type: 'number',
+              description: 'Scene ID',
+            },
+            actions: {
+              type: 'string',
+              description: 'Lua source for the scene actions block. If omitted, existing actions are preserved.',
+            },
+            conditions: {
+              type: 'string',
+              description: 'Conditions block source (Lua table as a string). If omitted, existing conditions are preserved. Only valid for Lua-type scenes.',
+            },
+          },
+          required: ['sceneId'],
+        },
+      },
 
       // System Information
       {
@@ -1505,6 +1527,9 @@ class HC3MCPServer {
         case 'modify_scene':
           result = await this.modifyScene(args);
           break;
+        case 'update_scene_content':
+          result = await this.updateSceneContent(args);
+          break;
 
         // System Information
         case 'get_system_info':
@@ -1914,6 +1939,63 @@ class HC3MCPServer {
     return {
       sceneId: args.sceneId,
       changedFields: Object.keys(args.properties),
+      scene: updated,
+    };
+  }
+
+  private async updateSceneContent(args: { sceneId: number; actions?: string; conditions?: string }): Promise<any> {
+    if (args.actions === undefined && args.conditions === undefined) {
+      throw new Error('update_scene_content requires at least one of actions or conditions.');
+    }
+
+    const existing = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+
+    if (existing.type !== 'lua') {
+      throw new Error(
+        `Scene ${args.sceneId} is type '${existing.type}'; this tool supports Lua scenes only. ` +
+        `Scenario scenes use structured JSON for conditions and would be corrupted by this tool.`
+      );
+    }
+
+    let previous: { conditions: string; actions: string } = { conditions: '', actions: '' };
+    try {
+      const parsed = JSON.parse(existing.content || '{}');
+      previous = {
+        conditions: typeof parsed.conditions === 'string' ? parsed.conditions : '',
+        actions: typeof parsed.actions === 'string' ? parsed.actions : '',
+      };
+    } catch {
+      // leave previous as empty defaults
+    }
+
+    const newContent = {
+      conditions: args.conditions !== undefined ? args.conditions : previous.conditions,
+      actions: args.actions !== undefined ? args.actions : previous.actions,
+    };
+
+    await this.makeApiRequest(`/api/scenes/${args.sceneId}`, 'PUT', { content: JSON.stringify(newContent) });
+    const updated = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+
+    let current: { conditions: string; actions: string } = { conditions: '', actions: '' };
+    try {
+      const parsed = JSON.parse(updated.content || '{}');
+      current = {
+        conditions: typeof parsed.conditions === 'string' ? parsed.conditions : '',
+        actions: typeof parsed.actions === 'string' ? parsed.actions : '',
+      };
+    } catch {
+      // leave current as empty defaults
+    }
+
+    const changedFields: string[] = [];
+    if (args.conditions !== undefined) changedFields.push('conditions');
+    if (args.actions !== undefined) changedFields.push('actions');
+
+    return {
+      sceneId: args.sceneId,
+      changedFields,
+      previous,
+      current,
       scene: updated,
     };
   }
