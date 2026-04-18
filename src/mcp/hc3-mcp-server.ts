@@ -3979,17 +3979,21 @@ end
     );
   }
 
-  private async updateMultipleQuickAppFiles(args: { 
-    deviceId: number; 
-    files: Array<{ name: string; content: string; type?: string; isOpen?: boolean }> 
+  private async updateMultipleQuickAppFiles(args: {
+    deviceId: number;
+    files: Array<{ name: string; content: string; type?: string; isOpen?: boolean }>
   }): Promise<any> {
     const { deviceId, files } = args;
+    const existing = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`);
+    const isMainByName = new Map<string, boolean>(
+      (existing ?? []).map((f: any) => [f.name, !!f.isMain])
+    );
     const filesData = files.map(file => ({
       name: file.name,
       content: file.content,
       type: file.type || 'lua',
       isOpen: file.isOpen || false,
-      isMain: false
+      isMain: isMainByName.get(file.name) ?? false
     }));
     return await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
   }
