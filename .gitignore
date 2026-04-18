@@ -4,3 +4,6 @@ node_modules
 .vscode-test/
 *.vsix
 fibaro_api_docs/
+
+# macOS
+.DS_Store
