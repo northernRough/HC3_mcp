@@ -272,6 +272,39 @@ class HC3MCPServer {
           required: ['sceneId'],
         },
       },
+      {
+        name: 'modify_scene',
+        description: 'Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: {
+              type: 'number',
+              description: 'Scene ID',
+            },
+            properties: {
+              type: 'object',
+              description: 'Scene fields to update. Any subset of the fields below is accepted; fields not supplied are left unchanged.',
+              properties: {
+                name: { type: 'string' },
+                enabled: { type: 'boolean' },
+                maxRunningInstances: { type: 'number' },
+                restart: { type: 'boolean' },
+                hidden: { type: 'boolean' },
+                stopOnAlarm: { type: 'boolean' },
+                protectedByPin: { type: 'boolean' },
+                mode: { type: 'string', enum: ['automatic', 'manual'] },
+                roomId: { type: 'number' },
+                icon: { type: 'string' },
+                description: { type: 'string' },
+                categories: { type: 'array', items: { type: 'number' } },
+              },
+              additionalProperties: false,
+            },
+          },
+          required: ['sceneId', 'properties'],
+        },
+      },
 
       // System Information
       {
@@ -1469,6 +1502,9 @@ class HC3MCPServer {
         case 'stop_scene':
           result = await this.stopScene(args);
           break;
+        case 'modify_scene':
+          result = await this.modifyScene(args);
+          break;
 
         // System Information
         case 'get_system_info':
@@ -1867,6 +1903,19 @@ class HC3MCPServer {
   private async stopScene(args: { sceneId: number }): Promise<any> {
     await this.makeApiRequest(`/api/scenes/${args.sceneId}/action/stop`, 'POST');
     return `Scene ${args.sceneId} stopped successfully.`;
+  }
+
+  private async modifyScene(args: { sceneId: number; properties: Record<string, any> }): Promise<any> {
+    if (!args?.properties || Object.keys(args.properties).length === 0) {
+      throw new Error('modify_scene requires at least one field in properties.');
+    }
+    await this.makeApiRequest(`/api/scenes/${args.sceneId}`, 'PUT', args.properties);
+    const updated = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+    return {
+      sceneId: args.sceneId,
+      changedFields: Object.keys(args.properties),
+      scene: updated,
+    };
   }
 
   // System Information Methods
