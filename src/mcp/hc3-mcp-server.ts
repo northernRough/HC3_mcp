@@ -1825,12 +1825,14 @@ class HC3MCPServer {
     }
 
     const response = await fetch(url, requestOptions);
+    const text = await response.text();
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const detail = text.trim();
+      const suffix = detail ? ` - ${detail}` : '';
+      throw new Error(`HTTP ${response.status}: ${response.statusText}${suffix}`);
     }
 
-    const text = await response.text();
     if (!text) {
       return null;
     }
