@@ -199,7 +199,7 @@ class HC3MCPServer {
       },
       {
         name: 'modify_device',
-        description: 'Modify device properties like name, room assignment, or configuration parameters',
+        description: 'Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`, `quickAppVariables`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -207,12 +207,16 @@ class HC3MCPServer {
               type: 'number',
               description: 'Device ID',
             },
+            topLevel: {
+              type: 'object',
+              description: 'Top-level device fields to modify (e.g., {name: "New Name", roomID: 5, enabled: true, visible: true}). Sent at the root of the PUT body.',
+            },
             properties: {
               type: 'object',
-              description: 'Device properties to modify (e.g., {name: "New Name", roomID: 5})',
+              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, quickAppVariables: [...]}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates.',
             },
           },
-          required: ['deviceId', 'properties'],
+          required: ['deviceId'],
         },
       },
 
@@ -1934,9 +1938,119 @@ class HC3MCPServer {
     return `Device ${args.deviceId} action '${args.action}' executed successfully.`;
   }
 
-  private async modifyDevice(args: { deviceId: number; properties: any }): Promise<any> {
-    const result = await this.makeApiRequest(`/api/devices/${args.deviceId}`, 'PUT', args.properties);
-    return `Device ${args.deviceId} modified successfully. Updated properties: ${JSON.stringify(result)}`;
+  private async modifyDevice(args: {
+    deviceId: number;
+    topLevel?: Record<string, any>;
+    properties?: Record<string, any>;
+  }): Promise<any> {
+    const { deviceId, topLevel, properties } = args;
+
+    const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
+    const propertiesKeys = properties ? Object.keys(properties) : [];
+    if (topLevelKeys.length === 0 && propertiesKeys.length === 0) {
+      throw new Error(
+        'modify_device requires at least one of topLevel or properties with at least one field.'
+      );
+    }
+
+    const body: Record<string, any> = {};
+    if (topLevelKeys.length > 0) {
+      Object.assign(body, topLevel);
+    }
+    if (propertiesKeys.length > 0) {
+      body.properties = { ...properties };
+    }
+
+    await this.makeApiRequest(`/api/devices/${deviceId}`, 'PUT', body);
+
+    // When this pattern gains a second caller, extract to a shared helper.
+    const after = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const mismatches: string[] = [];
+
+    const deepEqual = (a: any, b: any): boolean => {
+      if (a === b) return true;
+      if (typeof a !== typeof b) return false;
+      if (a === null || b === null) return a === b;
+      if (Array.isArray(a)) {
+        if (!Array.isArray(b) || a.length !== b.length) return false;
+        return a.every((v, i) => deepEqual(v, b[i]));
+      }
+      if (typeof a === 'object') {
+        const keys = Object.keys(a);
+        return keys.every(k => deepEqual(a[k], b[k]));
+      }
+      return false;
+    };
+
+    const subsetMatch = (submitted: any, stored: any): boolean => {
+      if (submitted === null || typeof submitted !== 'object' || Array.isArray(submitted)) {
+        return deepEqual(submitted, stored);
+      }
+      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+        return false;
+      }
+      return Object.keys(submitted).every(k => deepEqual(submitted[k], stored[k]));
+    };
+
+    const fmt = (v: any) =>
+      v === undefined ? 'undefined' :
+      typeof v === 'string' ? JSON.stringify(v) :
+      (typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+    const afterProps = after?.properties ?? {};
+
+    for (const key of topLevelKeys) {
+      const submitted = (topLevel as any)[key];
+      const stored = after?.[key];
+      const match = Array.isArray(submitted)
+        ? deepEqual(submitted, stored)
+        : (submitted !== null && typeof submitted === 'object'
+            ? subsetMatch(submitted, stored)
+            : submitted === stored);
+      if (!match) {
+        let line = `  - topLevel.${key}: submitted ${fmt(submitted)}, stored ${fmt(stored)}`;
+        if (stored === undefined && afterProps[key] !== undefined) {
+          line += ` (did you mean to put '${key}' in properties?)`;
+        }
+        mismatches.push(line);
+      }
+    }
+
+    for (const key of propertiesKeys) {
+      const submitted = (properties as any)[key];
+      const stored = afterProps[key];
+      const match = Array.isArray(submitted)
+        ? deepEqual(submitted, stored)
+        : (submitted !== null && typeof submitted === 'object'
+            ? subsetMatch(submitted, stored)
+            : submitted === stored);
+      if (!match) {
+        let line = `  - properties.${key}: submitted ${fmt(submitted)}, stored ${fmt(stored)}`;
+        if (stored === undefined && after?.[key] !== undefined) {
+          line += ` (did you mean to put '${key}' in topLevel?)`;
+        }
+        mismatches.push(line);
+      }
+    }
+
+    if (mismatches.length > 0) {
+      throw new Error(
+        `Post-write verification failed for device ${deviceId}.\n` +
+        `Mismatched fields:\n${mismatches.join('\n')}\n` +
+        `Likely causes: HC3 silently dropped the field (verify field name and location), ` +
+        `HC3 normalised the value (resubmit with HC3's representation), or the field is ` +
+        `under the wrong wrapper (top-level vs properties).`
+      );
+    }
+
+    const submittedSummary: Record<string, any> = {};
+    if (topLevelKeys.length > 0) submittedSummary.topLevel = topLevel;
+    if (propertiesKeys.length > 0) submittedSummary.properties = properties;
+    return {
+      deviceId,
+      submitted: submittedSummary,
+      verified: true
+    };
   }
 
   // Room Management Methods
