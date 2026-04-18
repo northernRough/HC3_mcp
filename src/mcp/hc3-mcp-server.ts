@@ -1141,6 +1141,46 @@ class HC3MCPServer {
         }
       },
       {
+        name: "get_quickapp_variable",
+        description: "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "QuickApp device ID"
+            },
+            name: {
+              type: "string",
+              description: "Variable name"
+            }
+          },
+          required: ["deviceId", "name"]
+        }
+      },
+      {
+        name: "set_quickapp_variable",
+        description: "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; create new variables via the HC3 UI.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "QuickApp device ID"
+            },
+            name: {
+              type: "string",
+              description: "Variable name. Must already exist on the device."
+            },
+            value: {
+              type: ["string", "number", "boolean"],
+              description: "Value to set. Will be coerced to match the variable's declared type. For string-typed variables, numeric inputs are stringified to preserve type."
+            }
+          },
+          required: ["deviceId", "name", "value"]
+        }
+      },
+      {
         name: "delete_quickapp_file",
         description: "Delete a QuickApp source file. Note: main files cannot be deleted.",
         inputSchema: {
@@ -1731,6 +1771,12 @@ class HC3MCPServer {
           break;
         case 'update_multiple_quickapp_files':
           result = await this.updateMultipleQuickAppFiles(args);
+          break;
+        case 'get_quickapp_variable':
+          result = await this.getQuickAppVariable(args);
+          break;
+        case 'set_quickapp_variable':
+          result = await this.setQuickAppVariable(args);
           break;
         case 'delete_quickapp_file':
           result = await this.deleteQuickAppFile(args);
@@ -4083,9 +4129,106 @@ end
   private async deleteQuickAppFile(args: { deviceId: number; fileName: string }): Promise<any> {
     const { deviceId, fileName } = args;
     return await this.makeApiRequest(
-      `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`, 
+      `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`,
       'DELETE'
     );
+  }
+
+  private async getQuickAppVariable(args: { deviceId: number; name: string }): Promise<any> {
+    const { deviceId, name } = args;
+    const device = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const vars: any[] = device?.properties?.quickAppVariables ?? [];
+    const found = vars.find(v => v.name === name);
+    if (!found) {
+      return { deviceId, name, exists: false };
+    }
+    return {
+      deviceId,
+      name,
+      type: found.type,
+      value: found.value,
+      exists: true
+    };
+  }
+
+  private async setQuickAppVariable(args: {
+    deviceId: number;
+    name: string;
+    value: string | number | boolean;
+  }): Promise<any> {
+    const { deviceId, name, value } = args;
+
+    const device = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const vars: any[] = device?.properties?.quickAppVariables ?? [];
+    const existing = vars.find(v => v.name === name);
+    if (!existing) {
+      const known = vars.map(v => v.name).join(', ') || '(none)';
+      throw new Error(
+        `QuickApp variable '${name}' does not exist on device ${deviceId}. ` +
+        `Known variables: ${known}. Create new variables via the HC3 UI.`
+      );
+    }
+
+    const declaredType = existing.type;
+    let coercedValue: any;
+    if (declaredType === 'string') {
+      coercedValue = String(value);
+    } else if (declaredType === 'number' || declaredType === 'integer') {
+      const n = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(n)) {
+        throw new Error(
+          `Cannot set numeric variable '${name}' to non-numeric value ${JSON.stringify(value)}.`
+        );
+      }
+      coercedValue = declaredType === 'integer' ? Math.trunc(n) : n;
+    } else if (declaredType === 'bool' || declaredType === 'boolean') {
+      if (typeof value === 'boolean') coercedValue = value;
+      else if (value === 'true' || value === 1) coercedValue = true;
+      else if (value === 'false' || value === 0) coercedValue = false;
+      else {
+        throw new Error(
+          `Cannot set boolean variable '${name}' to value ${JSON.stringify(value)}.`
+        );
+      }
+    } else {
+      coercedValue = value;
+    }
+
+    const newVars = vars.map(v =>
+      v.name === name ? { ...v, value: coercedValue } : v
+    );
+
+    await this.makeApiRequest(`/api/devices/${deviceId}`, 'PUT', {
+      properties: { quickAppVariables: newVars }
+    });
+
+    const after = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const afterVars: any[] = after?.properties?.quickAppVariables ?? [];
+    const afterVar = afterVars.find(v => v.name === name);
+    if (!afterVar) {
+      throw new Error(
+        `Post-write verification failed: variable '${name}' missing after set on device ${deviceId}.`
+      );
+    }
+    if (String(afterVar.value) !== String(coercedValue)) {
+      throw new Error(
+        `Post-write value mismatch for '${name}' on device ${deviceId}: ` +
+        `requested ${JSON.stringify(coercedValue)}, HC3 stored ${JSON.stringify(afterVar.value)}.`
+      );
+    }
+    if (afterVar.type !== declaredType) {
+      throw new Error(
+        `Post-write type mismatch for '${name}' on device ${deviceId}: ` +
+        `declared type was '${declaredType}', HC3 now reports '${afterVar.type}'.`
+      );
+    }
+
+    return {
+      deviceId,
+      name,
+      previous: { type: existing.type, value: existing.value },
+      current: { type: afterVar.type, value: afterVar.value }
+    };
   }
 
   private async exportQuickApp(args: { 
