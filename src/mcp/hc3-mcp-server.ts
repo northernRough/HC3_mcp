@@ -1817,6 +1817,7 @@ class HC3MCPServer {
     const requestOptions: RequestInit = {
       method,
       headers,
+      signal: AbortSignal.timeout(15000),
     };
 
     if (data && method !== 'GET') {
