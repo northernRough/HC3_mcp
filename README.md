@@ -227,7 +227,6 @@ The MCP server provides 66+ tools organized into the following categories:
 - `get_system_context` - Comprehensive system overview
 - `get_device_relationships` - Device relationships and room assignments
 - `get_automation_suggestions` - AI-powered automation recommendations
-- `get_device_usage_patterns` - Device usage analytics and patterns
 - `explain_device_capabilities` - Detailed device capability explanations
 
 ### HC3 Programming Documentation

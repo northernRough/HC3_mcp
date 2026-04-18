@@ -900,24 +900,6 @@ class HC3MCPServer {
         },
       },
       {
-        name: 'get_device_usage_patterns',
-        description: 'Get device usage patterns and statistics to help understand home automation behavior',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            timeframe: {
-              type: 'string',
-              description: 'Timeframe for usage analysis',
-              enum: ['today', 'week', 'month', 'year'],
-            },
-            roomId: {
-              type: 'number',
-              description: 'Optional: Filter by specific room',
-            },
-          },
-        },
-      },
-      {
         name: 'explain_device_capabilities',
         description: 'Get human-readable explanations of what devices can do and how to control them effectively',
         inputSchema: {
@@ -1678,9 +1660,6 @@ class HC3MCPServer {
         case 'get_automation_suggestions':
           result = await this.getAutomationSuggestions(args);
           break;
-        case 'get_device_usage_patterns':
-          result = await this.getDeviceUsagePatterns(args);
-          break;
         case 'explain_device_capabilities':
           result = await this.explainDeviceCapabilities(args);
           break;
@@ -2387,50 +2366,6 @@ class HC3MCPServer {
       };
     } catch (error) {
       throw new Error(`Failed to get automation suggestions: ${error}`);
-    }
-  }
-
-  private async getDeviceUsagePatterns(args: any): Promise<any> {
-    try {
-      const devices = await this.makeApiRequest('/api/devices').catch(() => []);
-      const deviceId = args.device_id;
-
-      if (deviceId) {
-        const device = devices.find((d: any) => d.id === parseInt(deviceId));
-        if (!device) {
-          throw new Error(`Device ${deviceId} not found`);
-        }
-
-        // Simulate usage pattern analysis (real implementation would analyze logs)
-        return {
-          device: device,
-          usage_pattern: {
-            most_active_hours: ['18:00-22:00', '07:00-09:00'],
-            weekly_pattern: 'Most active on weekdays',
-            energy_consumption: device.power ? `${device.power}W average` : 'N/A',
-            last_modified: device.modified || 'Unknown',
-            status_changes_today: Math.floor(Math.random() * 10)
-          }
-        };
-      }
-
-      // General usage overview
-      const activeDevices = devices.filter((d: any) => d.enabled !== false);
-      const deviceTypes = [...new Set(devices.map((d: any) => d.type))];
-
-      return {
-        total_devices: devices.length,
-        active_devices: activeDevices.length,
-        device_types: deviceTypes,
-        usage_summary: {
-          lights: devices.filter((d: any) => d.type?.includes('Switch') || d.type?.includes('Dimmer')).length,
-          sensors: devices.filter((d: any) => d.type?.includes('Sensor')).length,
-          security: devices.filter((d: any) => d.type?.includes('doorSensor') || d.type?.includes('Camera')).length,
-          climate: devices.filter((d: any) => d.type?.includes('thermostat') || d.type?.includes('Temperature')).length
-        }
-      };
-    } catch (error) {
-      throw new Error(`Failed to get device usage patterns: ${error}`);
     }
   }
 
