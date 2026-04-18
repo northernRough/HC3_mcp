@@ -222,7 +222,6 @@ The MCP server provides 66+ tools organized into the following categories:
 - `get_system_diagnostics` - System health diagnostics
 - `get_ios_devices` - iOS device management
 - `get_quickapps` - Quick Apps management
-- `get_quickapp_logs` - Quick App log analysis
 
 ### System Intelligence & Context
 - `get_system_context` - Comprehensive system overview

@@ -834,25 +834,6 @@ class HC3MCPServer {
           required: ['quickAppId'],
         },
       },
-      {
-        name: 'get_quickapp_logs',
-        description: 'Get QuickApp logs',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            quickAppId: {
-              type: 'number',
-              description: 'QuickApp ID',
-            },
-            limit: {
-              type: 'number',
-              description: 'Limit number of log entries (default: 100)',
-            },
-          },
-          required: ['quickAppId'],
-        },
-      },
-
       // System Context & Intelligence
       {
         name: 'get_system_context',
@@ -1674,9 +1655,6 @@ class HC3MCPServer {
         case 'restart_quickapp':
           result = await this.restartQuickApp(args);
           break;
-        case 'get_quickapp_logs':
-          result = await this.getQuickAppLogs(args);
-          break;
 
         // System Context & Intelligence
         case 'get_system_context':
@@ -2192,14 +2170,6 @@ class HC3MCPServer {
   private async restartQuickApp(args: { quickAppId: number }): Promise<any> {
     await this.makeApiRequest(`/api/quickApp/${args.quickAppId}/restart`, 'POST');
     return `QuickApp ${args.quickAppId} restarted successfully.`;
-  }
-
-  private async getQuickAppLogs(args: { quickAppId: number; limit?: number }): Promise<any> {
-    let url = `/api/quickApp/${args.quickAppId}/logs`;
-    if (args.limit) {
-      url += `?limit=${args.limit}`;
-    }
-    return await this.makeApiRequest(url);
   }
 
   // System Context & Intelligence Methods
