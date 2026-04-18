@@ -7,3 +7,6 @@ fibaro_api_docs/
 
 # macOS
 .DS_Store
+
+# Local Claude Code context, not for upstream
+CLAUDE.md
