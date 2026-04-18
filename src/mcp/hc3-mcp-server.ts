@@ -852,24 +852,7 @@ class HC3MCPServer {
         description: 'Get comprehensive system context including device capabilities, room layouts, scene purposes, and system intelligence data',
         inputSchema: {
           type: 'object',
-          properties: {
-            includeDeviceCapabilities: {
-              type: 'boolean',
-              description: 'Include detailed device capabilities and interfaces (default: true)',
-            },
-            includeRoomContext: {
-              type: 'boolean', 
-              description: 'Include room layouts and device groupings (default: true)',
-            },
-            includeSceneContext: {
-              type: 'boolean',
-              description: 'Include scene purposes and automation context (default: true)',
-            },
-            includeEnergyContext: {
-              type: 'boolean',
-              description: 'Include energy usage patterns and consumption data (default: false)',
-            },
-          },
+          properties: {},
         },
       },
       {
@@ -890,13 +873,7 @@ class HC3MCPServer {
         description: 'Get intelligent automation suggestions based on device usage patterns, time of day, and system state',
         inputSchema: {
           type: 'object',
-          properties: {
-            context: {
-              type: 'string',
-              description: 'Context for suggestions (morning, evening, away, home, security, energy)',
-              enum: ['morning', 'evening', 'away', 'home', 'security', 'energy', 'all'],
-            },
-          },
+          properties: {},
         },
       },
       {
