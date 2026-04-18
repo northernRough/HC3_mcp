@@ -82,9 +82,20 @@ class HC3MCPServer {
   }
 
   private async handleMessage(message: string): Promise<void> {
+    let request: MCPRequest;
     try {
-      const request: MCPRequest = JSON.parse(message);
-      
+      request = JSON.parse(message);
+    } catch (error) {
+      this.sendError(undefined, -32700, 'Parse error');
+      return;
+    }
+
+    // Notifications (no id, or method starts with "notifications/") must not receive a response.
+    if (request.id === undefined || request.method?.startsWith('notifications/')) {
+      return;
+    }
+
+    try {
       switch (request.method) {
         case 'initialize':
           this.handleInitialize(request);
@@ -99,7 +110,7 @@ class HC3MCPServer {
           this.sendError(request.id, -32601, `Method not found: ${request.method}`);
       }
     } catch (error) {
-      this.sendError(undefined, -32700, 'Parse error');
+      this.sendError(request.id, -32603, 'Internal error');
     }
   }
 
@@ -4202,4 +4213,3 @@ end
 
 // Start the server
 const server = new HC3MCPServer();
-console.error('Fibaro HC3 MCP server running on stdio');
