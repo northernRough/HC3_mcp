@@ -2273,7 +2273,7 @@ class HC3MCPServer {
 
   private async getDeviceRelationships(args: any): Promise<any> {
     try {
-      const deviceId = args.device_id;
+      const deviceId = args.deviceId;
       const [devices, rooms, scenes] = await Promise.all([
         this.makeApiRequest('/api/devices').catch(() => []),
         this.makeApiRequest('/api/rooms').catch(() => []),
@@ -2436,11 +2436,11 @@ class HC3MCPServer {
 
   private async explainDeviceCapabilities(args: any): Promise<any> {
     try {
-      const deviceId = args.device_id;
+      const deviceId = args.deviceId;
       const devices = await this.makeApiRequest('/api/devices').catch(() => []);
-      
+
       if (!deviceId) {
-        throw new Error('device_id is required');
+        throw new Error('deviceId is required');
       }
 
       const device = devices.find((d: any) => d.id === parseInt(deviceId));
