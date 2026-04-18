@@ -108,7 +108,7 @@ class HC3MCPServer {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        protocolVersion: '0.1.0',
+        protocolVersion: '2024-11-05',
         capabilities: {
           tools: {},
         },
