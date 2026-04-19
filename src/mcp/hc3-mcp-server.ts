@@ -699,16 +699,20 @@ class HC3MCPServer {
       },
       {
         name: 'update_location_settings',
-        description: 'Update location and geofencing settings',
+        description: 'Update a single location/geofence by ID in a verified PUT. Fetches the current location, deep-merges submitted `fields` into it, and PUTs the full merged object to /api/panels/location/{id}. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. Read-only fields (`id`, `created`, `modified`) are rejected if submitted. Get the full list of configured locations with `get_location_info` first to find the ID you want to edit.',
         inputSchema: {
           type: 'object',
           properties: {
-            settings: {
+            locationId: {
+              type: 'number',
+              description: 'ID of the location/geofence to update (from get_location_info)',
+            },
+            fields: {
               type: 'object',
-              description: 'Location settings to update',
+              description: 'Fields to update (e.g. {name: "Home", latitude: 51.1, longitude: -0.77, radius: 500, address: "..."}). Submitted fields are deep-merged into the current location; unspecified fields are preserved. Read-only fields (id, created, modified) will be rejected.',
             },
           },
-          required: ['settings'],
+          required: ['locationId', 'fields'],
         },
       },
 
@@ -2403,9 +2407,37 @@ class HC3MCPServer {
     return await this.makeApiRequest('/api/panels/location');
   }
 
-  private async updateLocationSettings(args: { settings: any }): Promise<any> {
-    await this.makeApiRequest('/api/panels/location', 'PUT', args.settings);
-    return 'Location settings updated successfully.';
+  private async updateLocationSettings(args: {
+    locationId: number;
+    fields: Record<string, any>;
+  }): Promise<any> {
+    const { locationId, fields } = args;
+
+    if (!fields || Object.keys(fields).length === 0) {
+      throw new Error(
+        'update_location_settings requires fields with at least one key.'
+      );
+    }
+
+    const readOnly = ['id', 'created', 'modified'];
+    const submittedReadOnly = Object.keys(fields).filter(k => readOnly.includes(k));
+    if (submittedReadOnly.length > 0) {
+      throw new Error(
+        `update_location_settings cannot change read-only fields: ${submittedReadOnly.join(', ')}.`
+      );
+    }
+
+    const current = await this.makeApiRequest(`/api/panels/location/${locationId}`);
+    const merged = this.deepMerge(current, fields);
+    await this.makeApiRequest(`/api/panels/location/${locationId}`, 'PUT', merged);
+    const after = await this.makeApiRequest(`/api/panels/location/${locationId}`);
+    this.verifyWrite(fields, undefined, after, `location ${locationId}`);
+
+    return {
+      locationId,
+      submitted: { fields },
+      verified: true
+    };
   }
 
   // Notifications Management Methods
