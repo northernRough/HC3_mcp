@@ -199,7 +199,7 @@ class HC3MCPServer {
       },
       {
         name: 'modify_device',
-        description: 'Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`, `quickAppVariables`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding.',
+        description: "Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. HC3's PUT semantics for nested properties: top-level fields merge, but array-valued properties under `properties.*` (such as `quickAppVariables`, `categories`, `parameters`, `uiCallbacks`) are fully replaced. Submitting a partial array destroys entries not in the submission. `quickAppVariables` is explicitly rejected by this tool — use `set_quickapp_variable` instead. For other array-valued properties, fetch the full current array, modify, and submit the complete modified array.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -213,7 +213,7 @@ class HC3MCPServer {
             },
             properties: {
               type: 'object',
-              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, quickAppVariables: [...]}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates.',
+              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Note: quickAppVariables is rejected here — use set_quickapp_variable for single-variable writes; array-valued properties like categories/parameters/uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
             },
           },
           required: ['deviceId'],
@@ -1944,6 +1944,12 @@ class HC3MCPServer {
     properties?: Record<string, any>;
   }): Promise<any> {
     const { deviceId, topLevel, properties } = args;
+
+    if (properties && 'quickAppVariables' in properties) {
+      throw new Error(
+        'modify_device does not accept quickAppVariables — use set_quickapp_variable to update a single variable, or create / delete / rename via the HC3 UI.'
+      );
+    }
 
     const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
     const propertiesKeys = properties ? Object.keys(properties) : [];
