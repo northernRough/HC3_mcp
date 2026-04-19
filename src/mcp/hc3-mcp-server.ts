@@ -483,7 +483,7 @@ class HC3MCPServer {
       },
       {
         name: 'update_climate_zone',
-        description: 'Update climate zone settings',
+        description: 'Update climate zone fields in a single atomic PUT. Use `topLevel` for zone-body fields (e.g., `name`, `active`, `mode`) and `properties` for nested zone properties (e.g., `handSetPointHeating`, `vacationMode`, schedule objects like `monday.morning`). At least one must be provided. `properties` is written via read-modify-write: the tool fetches the current zone, deep-merges submitted scalars and nested-object keys into the existing properties, then PUTs the merged result. This preserves unsubmitted sibling keys inside schedule sub-objects. Array-valued properties (`devices`, `incompatibleDevices`, `temperatureSensors`) are fully replaced by whatever is submitted, so submit the complete array if editing them. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -491,12 +491,16 @@ class HC3MCPServer {
               type: 'number',
               description: 'Climate zone ID',
             },
-            settings: {
+            topLevel: {
               type: 'object',
-              description: 'Climate zone settings to update',
+              description: 'Top-level zone fields to modify (e.g., {name: "New Name", active: true, mode: "Schedule"}). Sent at the root of the PUT body.',
+            },
+            properties: {
+              type: 'object',
+              description: 'Nested zone properties to modify. Scalars (handSetPointHeating, vacationMode, etc.) and schedule sub-objects (monday.morning, etc.) are deep-merged into the current zone via read-modify-write, so sibling keys are preserved. Array-valued properties (devices, incompatibleDevices, temperatureSensors) are fully replaced — submit the full current array if editing them.',
             },
           },
-          required: ['zoneId', 'settings'],
+          required: ['zoneId'],
         },
       },
 
@@ -1968,34 +1972,75 @@ class HC3MCPServer {
     }
 
     await this.makeApiRequest(`/api/devices/${deviceId}`, 'PUT', body);
-
-    // When this pattern gains a second caller, extract to a shared helper.
     const after = await this.makeApiRequest(`/api/devices/${deviceId}`);
-    const mismatches: string[] = [];
+    this.verifyWrite(topLevel, properties, after, `device ${deviceId}`);
 
-    const deepEqual = (a: any, b: any): boolean => {
-      if (a === b) return true;
-      if (typeof a !== typeof b) return false;
-      if (a === null || b === null) return a === b;
-      if (Array.isArray(a)) {
-        if (!Array.isArray(b) || a.length !== b.length) return false;
-        return a.every((v, i) => deepEqual(v, b[i]));
-      }
-      if (typeof a === 'object') {
-        const keys = Object.keys(a);
-        return keys.every(k => deepEqual(a[k], b[k]));
-      }
-      return false;
+    const submittedSummary: Record<string, any> = {};
+    if (topLevelKeys.length > 0) submittedSummary.topLevel = topLevel;
+    if (propertiesKeys.length > 0) submittedSummary.properties = properties;
+    return {
+      deviceId,
+      submitted: submittedSummary,
+      verified: true
     };
+  }
 
+  private deepEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null) return a === b;
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      return a.every((v, i) => this.deepEqual(v, b[i]));
+    }
+    if (typeof a === 'object') {
+      const keys = Object.keys(a);
+      return keys.every(k => this.deepEqual(a[k], b[k]));
+    }
+    return false;
+  }
+
+  private deepMerge(base: any, overlay: any): any {
+    if (overlay === null || typeof overlay !== 'object' || Array.isArray(overlay)) {
+      return overlay;
+    }
+    if (base === null || typeof base !== 'object' || Array.isArray(base)) {
+      return { ...overlay };
+    }
+    const result: Record<string, any> = { ...base };
+    for (const key of Object.keys(overlay)) {
+      const submittedVal = overlay[key];
+      const baseVal = base[key];
+      if (
+        submittedVal !== null &&
+        typeof submittedVal === 'object' &&
+        !Array.isArray(submittedVal) &&
+        baseVal !== null &&
+        typeof baseVal === 'object' &&
+        !Array.isArray(baseVal)
+      ) {
+        result[key] = this.deepMerge(baseVal, submittedVal);
+      } else {
+        result[key] = submittedVal;
+      }
+    }
+    return result;
+  }
+
+  private verifyWrite(
+    topLevel: Record<string, any> | undefined,
+    properties: Record<string, any> | undefined,
+    after: any,
+    entityLabel: string
+  ): void {
     const subsetMatch = (submitted: any, stored: any): boolean => {
       if (submitted === null || typeof submitted !== 'object' || Array.isArray(submitted)) {
-        return deepEqual(submitted, stored);
+        return this.deepEqual(submitted, stored);
       }
       if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
         return false;
       }
-      return Object.keys(submitted).every(k => deepEqual(submitted[k], stored[k]));
+      return Object.keys(submitted).every(k => this.deepEqual(submitted[k], stored[k]));
     };
 
     const fmt = (v: any) =>
@@ -2003,13 +2048,16 @@ class HC3MCPServer {
       typeof v === 'string' ? JSON.stringify(v) :
       (typeof v === 'object' ? JSON.stringify(v) : String(v));
 
+    const mismatches: string[] = [];
     const afterProps = after?.properties ?? {};
+    const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
+    const propertiesKeys = properties ? Object.keys(properties) : [];
 
     for (const key of topLevelKeys) {
       const submitted = (topLevel as any)[key];
       const stored = after?.[key];
       const match = Array.isArray(submitted)
-        ? deepEqual(submitted, stored)
+        ? this.deepEqual(submitted, stored)
         : (submitted !== null && typeof submitted === 'object'
             ? subsetMatch(submitted, stored)
             : submitted === stored);
@@ -2026,7 +2074,7 @@ class HC3MCPServer {
       const submitted = (properties as any)[key];
       const stored = afterProps[key];
       const match = Array.isArray(submitted)
-        ? deepEqual(submitted, stored)
+        ? this.deepEqual(submitted, stored)
         : (submitted !== null && typeof submitted === 'object'
             ? subsetMatch(submitted, stored)
             : submitted === stored);
@@ -2041,22 +2089,13 @@ class HC3MCPServer {
 
     if (mismatches.length > 0) {
       throw new Error(
-        `Post-write verification failed for device ${deviceId}.\n` +
+        `Post-write verification failed for ${entityLabel}.\n` +
         `Mismatched fields:\n${mismatches.join('\n')}\n` +
         `Likely causes: HC3 silently dropped the field (verify field name and location), ` +
         `HC3 normalised the value (resubmit with HC3's representation), or the field is ` +
         `under the wrong wrapper (top-level vs properties).`
       );
     }
-
-    const submittedSummary: Record<string, any> = {};
-    if (topLevelKeys.length > 0) submittedSummary.topLevel = topLevel;
-    if (propertiesKeys.length > 0) submittedSummary.properties = properties;
-    return {
-      deviceId,
-      submitted: submittedSummary,
-      verified: true
-    };
   }
 
   // Room Management Methods
@@ -2229,9 +2268,45 @@ class HC3MCPServer {
     return await this.makeApiRequest(`/api/panels/climate/${args.zoneId}`);
   }
 
-  private async updateClimateZone(args: { zoneId: number; settings: any }): Promise<any> {
-    await this.makeApiRequest(`/api/panels/climate/${args.zoneId}`, 'PUT', args.settings);
-    return `Climate zone ${args.zoneId} updated successfully.`;
+  private async updateClimateZone(args: {
+    zoneId: number;
+    topLevel?: Record<string, any>;
+    properties?: Record<string, any>;
+  }): Promise<any> {
+    const { zoneId, topLevel, properties } = args;
+
+    const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
+    const propertiesKeys = properties ? Object.keys(properties) : [];
+    if (topLevelKeys.length === 0 && propertiesKeys.length === 0) {
+      throw new Error(
+        'update_climate_zone requires at least one of topLevel or properties with at least one field.'
+      );
+    }
+
+    const body: Record<string, any> = {};
+    if (topLevelKeys.length > 0) {
+      Object.assign(body, topLevel);
+    }
+    if (propertiesKeys.length > 0) {
+      // Read-modify-write so partial submissions in nested schedule objects
+      // (e.g. {monday: {morning: {...}}}) don't wipe sibling keys.
+      const current = await this.makeApiRequest(`/api/panels/climate/${zoneId}`);
+      const currentProps = current?.properties ?? {};
+      body.properties = this.deepMerge(currentProps, properties);
+    }
+
+    await this.makeApiRequest(`/api/panels/climate/${zoneId}`, 'PUT', body);
+    const after = await this.makeApiRequest(`/api/panels/climate/${zoneId}`);
+    this.verifyWrite(topLevel, properties, after, `climate zone ${zoneId}`);
+
+    const submittedSummary: Record<string, any> = {};
+    if (topLevelKeys.length > 0) submittedSummary.topLevel = topLevel;
+    if (propertiesKeys.length > 0) submittedSummary.properties = properties;
+    return {
+      zoneId,
+      submitted: submittedSummary,
+      verified: true
+    };
   }
 
   // Alarm System Management Methods
