@@ -7,7 +7,7 @@ A VS Code extension that provides Model Context Protocol (MCP) server integratio
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 66+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 80+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -171,97 +171,128 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 66+ tools organized into the following categories:
+The MCP server provides 80+ tools. Names below match the MCP tool names exactly.
 
-### Core System Management
-- `get_system_info` - Get basic HC3 system information
-- `get_devices` - List all devices with filtering options
-- `get_device` - Get specific device details  
-- `control_device` - Control device actions (turnOn, turnOff, setValue, etc.)
-- `get_rooms` - List all rooms and sections
-- `get_scenes` - List all scenes
-- `get_scene` - Get specific scene details
-- `start_scene` - Execute scenes
-- `stop_scene` - Stop running scenes
+### Devices and Rooms
+- `get_devices` - List devices, with filters for type, room, interface, visibility, and more
+- `get_device_info` - Get a single device by ID
+- `control_device` - Invoke device actions (turnOn, turnOff, setValue, setColor, etc.)
+- `modify_device` - Edit top-level fields (name, roomID, enabled, visible) and nested properties in a single verified PUT
+- `get_rooms` - List rooms and sections
 
-### Advanced Device Management
-- `get_device_actions` - Get available actions for devices
-- `get_device_events` - Get device event history
-- `get_global_variables` - Manage global variables
-- `set_global_variable` - Set global variable values
-- `delete_global_variable` - Delete global variables
+### Scenes
+- `get_scenes` - List scenes with filters
+- `run_scene` - Start a scene
+- `stop_scene` - Stop a running scene
+- `modify_scene` - Update scene metadata (name, icon, room, etc.)
+- `update_scene_content` - Replace scene Lua (actions/conditions) content
 
-### Climate & Environment
-- `get_climate_panels` - Climate control panel information
-- `get_climate_zones` - Climate zones and settings
-- `get_climate_schedules` - Heating/cooling schedules
-- `update_climate_schedule` - Modify climate schedules
-- `get_weather_data` - Current weather information
-
-### Security & Access Control
-- `get_alarm_partitions` - Alarm system partitions
-- `get_alarm_zones` - Alarm zones configuration
-- `get_alarm_devices` - Security devices list
-- `arm_alarm_partition` - Arm specific alarm partitions
-- `disarm_alarm_partition` - Disarm alarm partitions
-- `get_users` - System users and permissions
-- `get_user_locations` - User location tracking
-
-### Network & Connectivity
+### System
+- `get_system_info` - HC3 version, serial, and system details
 - `get_network_status` - Network connectivity status
-- `get_wifi_networks` - Available Wi-Fi networks
-- `get_network_devices` - Connected network devices
+- `get_energy_data` - Energy consumption data
+- `get_diagnostics` - System health diagnostics
+- `get_weather` - Current weather data
+- `get_home_status` - Current home mode
+- `set_home_status` - Set home mode (Home/Away/Vacation/Night)
+- `get_location_info` - Home location settings
+- `update_location_settings` - Update location, timezone, and related settings
 
-### Advanced Features
-- `get_sprinkler_zones` - Irrigation system management
-- `control_sprinkler_zone` - Sprinkler zone control
-- `get_custom_events` - Custom event definitions
-- `emit_custom_event` - Trigger custom events
-- `get_system_backups` - System backup management
-- `create_system_backup` - Create new backups
-- `get_system_diagnostics` - System health diagnostics
-- `get_ios_devices` - iOS device management
-- `get_quickapps` - Quick Apps management
+### Global Variables
+- `get_global_variables` - List all global variables
+- `set_global_variable` - Create or update a global variable
 
-### System Intelligence & Context
-- `get_system_context` - Comprehensive system overview
-- `get_device_relationships` - Device relationships and room assignments
-- `get_automation_suggestions` - AI-powered automation recommendations
-- `explain_device_capabilities` - Detailed device capability explanations
+### Users
+- `get_users` - List users and permissions
 
-### HC3 Programming Documentation
-- `get_hc3_configuration_guide` - Complete HC3 configuration documentation
-- `get_hc3_quickapp_programming_guide` - Quick Apps programming reference
-- `get_hc3_lua_scenes_guide` - Lua Scenes programming documentation
-- `get_hc3_programming_examples` - Practical code examples and snippets
+### Climate
+- `get_climate_zones` - List climate zones
+- `get_climate_zone` - Get a single climate zone
+- `update_climate_zone` - Update climate zone settings
+
+### Alarm
+- `get_alarm_partitions` - List alarm partitions
+- `get_alarm_partition` - Get a single alarm partition
+- `arm_alarm_partition` - Arm a partition
+- `disarm_alarm_partition` - Disarm a partition
+- `get_alarm_history` - Alarm event history
+- `get_alarm_devices` - Security devices
+
+### Sprinklers
+- `get_sprinkler_systems` - List sprinkler systems
+- `get_sprinkler_system` - Get a single sprinkler system
+- `control_sprinkler_system` - Start/stop irrigation with duration and delay
+
+### Custom Events
+- `get_custom_events` - List custom event definitions
+- `create_custom_event` - Create a new custom event
+- `trigger_custom_event` - Emit a custom event
+
+### Notifications
+- `get_notifications` - List notifications
+- `mark_notification_read` - Mark a notification read
+- `clear_all_notifications` - Clear all notifications
+
+### Backups
+- `can_create_backup` - Check whether backups can be created
+- `get_local_backup_status` - Local backup status
+- `get_remote_backup_status` - Remote backup status
+- `get_backups` - List backups
+- `create_backup` - Create a new backup
+
+### iOS Devices
+- `get_ios_devices` - List registered iOS devices
+- `register_ios_device` - Register a new iOS device
+
+### Debug
+- `get_debug_messages` - Retrieve debug messages with client-side filtering
+
+### QuickApps
+- `get_quickapps` - List QuickApps
+- `get_quickapp` - Get a single QuickApp
+- `restart_quickapp` - Restart a QuickApp
+- `get_quickapp_variable` - Read a single quickAppVariable
+- `set_quickapp_variable` - Write a single quickAppVariable
 
 ### QuickApp File Management
-- `list_quickapp_files` - Get list of all source files for a QuickApp
-- `get_quickapp_file` - Get detailed information about a specific QuickApp file including content
-- `create_quickapp_file` - Create new source files for QuickApps
-- `update_quickapp_file` - Update existing QuickApp source files
-- `update_multiple_quickapp_files` - Update multiple QuickApp files at once
-- `delete_quickapp_file` - Delete QuickApp source files (main files cannot be deleted)
-- `export_quickapp` - Export QuickApp to .fqa file format (open source or encrypted)
-- `import_quickapp` - Import QuickApp from .fqa/.fqax file (requires file upload)
+- `list_quickapp_files` - List source files for a QuickApp
+- `get_quickapp_file` - Get a single file's content
+- `create_quickapp_file` - Create a new source file
+- `update_quickapp_file` - Update an existing source file
+- `update_multiple_quickapp_files` - Batch update multiple files
+- `delete_quickapp_file` - Delete a source file (main files cannot be deleted)
+- `export_quickapp` - Export as .fqa (open) or .fqax (encrypted)
+- `import_quickapp` - Import from .fqa/.fqax
 
-### Plugin Management & Configuration
-- `get_plugins` - Get all available plugins including installed and available plugins
-- `get_installed_plugins` - Get list of installed plugins on the system
-- `get_plugin_types` - Get information about all plugin types with categories
-- `get_plugin_view` - Get plugin view/configuration interface for devices
-- `update_plugin_view` - Update plugin view component properties
+### System Intelligence and Context
+- `get_system_context` - Comprehensive system overview
+- `get_device_relationships` - Device relationships and room assignments
+- `get_automation_suggestions` - Automation recommendations
+- `explain_device_capabilities` - Detailed capability explanations
+
+### HC3 Programming Documentation
+- `get_hc3_configuration_guide` - HC3 configuration reference
+- `get_hc3_quickapp_programming_guide` - QuickApp programming guide
+- `get_hc3_lua_scenes_guide` - Lua scenes programming guide
+- `get_hc3_programming_examples` - Code examples and snippets
+
+### Plugin Management
+- `get_plugins` - All plugins (installed plus available)
+- `get_installed_plugins` - Installed plugins
+- `get_plugin_types` - Plugin type catalogue
+- `get_plugin_view` - Plugin view/configuration interface
+- `update_plugin_view` - Update plugin view components
 - `call_ui_event` - Trigger UI events on plugin interface elements
-- `create_child_device` - Create child devices for plugins (multi-channel devices)
+- `create_child_device` - Create child devices
 - `manage_plugin_interfaces` - Add or remove interfaces from devices
-- `restart_plugin` - Restart plugins/devices
+- `restart_plugin` - Restart a plugin
 - `update_device_property` - Update device property values directly
-- `publish_plugin_event` - Publish various system events through plugin system
-- `get_ip_cameras` - Get available IP camera types for installation
-- `install_plugin` - Install plugins by type
-- `delete_plugin` - Delete/uninstall plugins by type
+- `publish_plugin_event` - Publish system events through the plugin system
+- `get_ip_cameras` - Available IP camera types
+- `install_plugin` - Install a plugin
+- `delete_plugin` - Uninstall a plugin
 
-Each tool includes comprehensive input validation, error handling, and detailed response data to help AI assistants understand and work with your Fibaro HC3 system effectively.
+Each tool includes input validation, error handling, and detailed response data to help AI assistants understand and work with your Fibaro HC3 system effectively.
 
 ## Development
 
@@ -355,12 +386,7 @@ Contributions are welcome! Please:
 
 ## Release Notes
 
-### 0.0.1
-
-- Initial release
-- Basic MCP server integration
-- Core HC3 device and scene management
-- Configuration and testing commands
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
@@ -369,7 +395,6 @@ Contributions are welcome! Please:
 ## Support
 
 For issues and questions:
-- [GitHub Issues](https://github.com/your-repo/issues)
 - [Fibaro Community](https://forum.fibaro.com/)
 
 ---
