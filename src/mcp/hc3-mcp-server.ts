@@ -1450,7 +1450,7 @@ class HC3MCPServer {
       },
       {
         name: "update_device_property",
-        description: "Update a device property value directly.",
+        description: "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record).",
         inputSchema: {
           type: "object",
           properties: {
