@@ -1,6 +1,10 @@
 # HC3 MCP Server
 
-A VS Code extension that provides Model Context Protocol (MCP) server integration for Fibaro Home Center 3 (HC3) smart home systems. This extension allows AI assistants in VS Code to interact with your Fibaro HC3 devices, scenes, and system information through natural language commands.
+Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). Lets any MCP-speaking AI assistant (Claude Code, Claude Desktop, Cursor, Cline, Continue, the VS Code extension build, etc.) read and control your HC3 with just network access and credentials.
+
+> **Fork notice.** This is an actively maintained fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp). The original author ([jgab](https://github.com/jangabrielsson)) has moved to a [skills + plua](https://forum.fibaro.com/topic/80041-quickapp-agent-skills-support/) workflow for QuickApp development and is no longer maintaining the MCP server. He greenlit this fork to evolve independently. The fork focuses on keeping the MCP server complete and standalone (no plua dependency) for users who just want live HC3 access from an agent. Thanks to jgab for the original implementation and for the handover.
+>
+> **What the fork has changed since 1.0.3**: verified write guardrails on all significant write tools (read-modify-write, post-write verification, explicit rejection of footgun actions), ~20 bug fixes (camelCase/snake_case parameter mismatches, fabricated tools removed, protocol notifications, empty-body crashes, 15-second HTTP timeout, accurate README), and four new tools (`modify_scene`, `update_scene_content`, `get_quickapp_variable`, `set_quickapp_variable`). See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Features
 

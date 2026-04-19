@@ -1,20 +1,26 @@
 {
-  "name": "hc3-mcp-server",
-  "displayName": "HC3 MCP Server",
-  "description": "Model Context Protocol server for Fibaro Home Center 3 smart home system integration with AI assistants",
-  "version": "1.0.3",
-  "publisher": "GsonSoft-development",
-  "author": {
-    "name": "GsonSoft Development"
-  },
+  "name": "@northernrough/hc3-mcp-server",
+  "version": "2.0.0",
+  "description": "Standalone Model Context Protocol server for Fibaro Home Center 3. Actively maintained fork of jangabrielsson/HC3_mcp with verified write guardrails, bug fixes, and no local dependencies.",
   "license": "MIT",
-  "homepage": "https://github.com/jangabrielsson/HC3_mcp",
+  "author": {
+    "name": "northernRough",
+    "email": "nick@cheetham.org",
+    "url": "https://github.com/northernRough"
+  },
+  "contributors": [
+    {
+      "name": "Jan Gabrielsson",
+      "url": "https://github.com/jangabrielsson"
+    }
+  ],
+  "homepage": "https://github.com/northernRough/HC3_mcp#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jangabrielsson/HC3_mcp.git"
+    "url": "git+https://github.com/northernRough/HC3_mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/jangabrielsson/HC3_mcp/issues"
+    "url": "https://github.com/northernRough/HC3_mcp/issues"
   },
   "keywords": [
     "fibaro",
@@ -23,18 +29,15 @@
     "smart-home",
     "mcp",
     "model-context-protocol",
-    "ai",
-    "assistant",
     "home-automation",
     "iot"
   ],
+  "displayName": "HC3 MCP Server",
+  "publisher": "GsonSoft-development",
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
-  },
-  "engines": {
-    "vscode": "^1.103.0"
   },
   "categories": [
     "Other",
@@ -43,7 +46,21 @@
   "activationEvents": [
     "*"
   ],
-  "main": "./out/extension.js",
+  "main": "./out/mcp/hc3-mcp-server.js",
+  "bin": {
+    "hc3-mcp-server": "./out/mcp/hc3-mcp-server.js"
+  },
+  "files": [
+    "out/mcp/**/*.js",
+    "out/mcp/**/*.d.ts",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18",
+    "vscode": "^1.103.0"
+  },
   "contributes": {
     "commands": [
       {
@@ -105,6 +122,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "prepublishOnly": "npm run compile",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "vscode-test"
