@@ -370,11 +370,6 @@ class HC3MCPServer {
               type: 'number',
               description: 'Optional: Specific device ID to get energy data for',
             },
-            interval: {
-              type: 'string',
-              description: 'Time interval (hour, day, week, month, year)',
-              enum: ['hour', 'day', 'week', 'month', 'year'],
-            },
           },
         },
       },
@@ -961,10 +956,6 @@ class HC3MCPServer {
             deviceId: {
               type: 'number',
               description: 'Device ID to explain',
-            },
-            includeExamples: {
-              type: 'boolean',
-              description: 'Include usage examples and best practices (default: true)',
             },
           },
           required: ['deviceId'],
@@ -2237,7 +2228,7 @@ class HC3MCPServer {
   }
 
   // Energy Management Methods
-  private async getEnergyData(args: { deviceId?: number; interval?: string }): Promise<any> {
+  private async getEnergyData(args: { deviceId?: number }): Promise<any> {
     if (args?.deviceId) {
       return await this.makeApiRequest(`/api/energy/${args.deviceId}`);
     } else {
