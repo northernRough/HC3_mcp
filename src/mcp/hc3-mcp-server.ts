@@ -106,6 +106,15 @@ class HC3MCPServer {
         case 'tools/call':
           await this.handleCallTool(request);
           break;
+        case 'ping':
+          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: {} });
+          break;
+        case 'resources/list':
+          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: { resources: [] } });
+          break;
+        case 'prompts/list':
+          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: { prompts: [] } });
+          break;
         default:
           this.sendError(request.id, -32601, `Method not found: ${request.method}`);
       }
@@ -172,7 +181,7 @@ class HC3MCPServer {
       },
       {
         name: 'control_device',
-        description: 'Control a device by calling an action (e.g., turnOn, turnOff, setValue, setColor)',
+        description: "Control a device by calling an action (e.g., turnOn, turnOff, setValue, setColor). The `setVariable` action is rejected here — use `set_quickapp_variable` instead, which preserves declared variable types (setVariable via the action endpoint silently coerces numeric-looking strings to numbers and breaks the HC3 UI).",
         inputSchema: {
           type: 'object',
           properties: {
@@ -1931,17 +1940,26 @@ class HC3MCPServer {
   }
 
   private async controlDevice(args: { deviceId: number; action: string; args?: any[]; delay?: number }): Promise<any> {
+    if (args.action === 'setVariable') {
+      throw new Error(
+        "control_device does not accept action 'setVariable' — the underlying POST /api/devices/{id}/action/setVariable " +
+        "endpoint coerces numeric-looking string values (e.g. '3.0') to numbers while leaving the variable's declared " +
+        "type as 'string', which breaks the HC3 web UI (the edit affordance disappears for that row). Use " +
+        "set_quickapp_variable instead — it reads the declared type, coerces the value to match, and writes via the " +
+        "documented PUT /api/devices/{id} endpoint with post-write verification."
+      );
+    }
     const endpoint = `/api/devices/${args.deviceId}/action/${args.action}`;
     const requestData: any = {};
-    
+
     if (args.args && args.args.length > 0) {
       requestData.args = args.args;
     }
-    
+
     if (args.delay) {
       requestData.delay = args.delay;
     }
-    
+
     await this.makeApiRequest(endpoint, 'POST', requestData);
     return `Device ${args.deviceId} action '${args.action}' executed successfully.`;
   }
