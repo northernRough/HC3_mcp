@@ -1940,7 +1940,7 @@ class HC3MCPServer {
         "documented PUT /api/devices/{id} endpoint with post-write verification."
       );
     }
-    const endpoint = `/api/devices/${args.deviceId}/action/${args.action}`;
+    const endpoint = `/api/devices/${args.deviceId}/action/${encodeURIComponent(args.action)}`;
     const requestData: any = {};
 
     if (args.args && args.args.length > 0) {
@@ -4593,7 +4593,7 @@ end
   }): Promise<any> {
     const { deviceId, elementName, eventType, value } = args;
     
-    let url = `/api/plugins/callUIEvent?deviceID=${deviceId}&elementName=${encodeURIComponent(elementName)}&eventType=${eventType}`;
+    let url = `/api/plugins/callUIEvent?deviceID=${deviceId}&elementName=${encodeURIComponent(elementName)}&eventType=${encodeURIComponent(eventType)}`;
     if (value) {
       url += `&value=${encodeURIComponent(value)}`;
     }
