@@ -2040,6 +2040,17 @@ class HC3MCPServer {
     return result;
   }
 
+  private async tolerantFetch<T>(
+    label: string,
+    promise: Promise<T>
+  ): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+    try {
+      return { ok: true, value: await promise };
+    } catch (err) {
+      return { ok: false, error: (err as Error)?.message ?? String(err) };
+    }
+  }
+
   private verifyWrite(
     topLevel: Record<string, any> | undefined,
     properties: Record<string, any> | undefined,
@@ -2613,15 +2624,23 @@ class HC3MCPServer {
   // System Context & Intelligence Methods
   private async getSystemContext(args: any): Promise<any> {
     try {
-      // Gather comprehensive system information
-      const [info, devices, rooms, scenes, variables, weather] = await Promise.all([
-        this.makeApiRequest('/api/settings/info').catch(() => null),
-        this.makeApiRequest('/api/devices').catch(() => []),
-        this.makeApiRequest('/api/rooms').catch(() => []),
-        this.makeApiRequest('/api/scenes').catch(() => []),
-        this.makeApiRequest('/api/globalVariables').catch(() => []),
-        this.makeApiRequest('/api/weather').catch(() => null)
+      // Primary fetches (devices/rooms/scenes/variables) propagate errors so
+      // HC3 unreachability surfaces instead of returning empty arrays.
+      // Ancillary (info/weather) tolerated and reported via _fetch_errors.
+      const [infoResult, devices, rooms, scenes, variables, weatherResult] = await Promise.all([
+        this.tolerantFetch('system_info', this.makeApiRequest('/api/settings/info')),
+        this.makeApiRequest('/api/devices'),
+        this.makeApiRequest('/api/rooms'),
+        this.makeApiRequest('/api/scenes'),
+        this.makeApiRequest('/api/globalVariables'),
+        this.tolerantFetch('weather', this.makeApiRequest('/api/weather'))
       ]);
+
+      const info = infoResult.ok ? infoResult.value : null;
+      const weather = weatherResult.ok ? weatherResult.value : null;
+      const fetchErrors: Record<string, string> = {};
+      if (!infoResult.ok) fetchErrors.system_info = infoResult.error;
+      if (!weatherResult.ok) fetchErrors.weather = weatherResult.error;
 
       return {
         system_info: info,
@@ -2633,7 +2652,8 @@ class HC3MCPServer {
         devices: devices.slice(0, 10), // First 10 devices as sample
         rooms: rooms,
         recent_scenes: scenes.slice(0, 5),
-        key_variables: variables.slice(0, 10)
+        key_variables: variables.slice(0, 10),
+        ...(Object.keys(fetchErrors).length > 0 ? { _fetch_errors: fetchErrors } : {})
       };
     } catch (error) {
       throw new Error(`Failed to get system context: ${error}`);
@@ -2644,9 +2664,9 @@ class HC3MCPServer {
     try {
       const deviceId = args.deviceId;
       const [devices, rooms, scenes] = await Promise.all([
-        this.makeApiRequest('/api/devices').catch(() => []),
-        this.makeApiRequest('/api/rooms').catch(() => []),
-        this.makeApiRequest('/api/scenes').catch(() => [])
+        this.makeApiRequest('/api/devices'),
+        this.makeApiRequest('/api/rooms'),
+        this.makeApiRequest('/api/scenes')
       ]);
 
       if (deviceId) {
@@ -2692,11 +2712,17 @@ class HC3MCPServer {
 
   private async getAutomationSuggestions(args: any): Promise<any> {
     try {
-      const [devices, scenes, variables] = await Promise.all([
-        this.makeApiRequest('/api/devices').catch(() => []),
-        this.makeApiRequest('/api/scenes').catch(() => []),
-        this.makeApiRequest('/api/globalVariables').catch(() => [])
+      const [devices, scenesResult, variablesResult] = await Promise.all([
+        this.makeApiRequest('/api/devices'),
+        this.tolerantFetch('scenes', this.makeApiRequest('/api/scenes')),
+        this.tolerantFetch('variables', this.makeApiRequest('/api/globalVariables'))
       ]);
+
+      const scenes: any[] = scenesResult.ok ? scenesResult.value : [];
+      const variables: any[] = variablesResult.ok ? variablesResult.value : [];
+      const fetchErrors: Record<string, string> = {};
+      if (!scenesResult.ok) fetchErrors.scenes = scenesResult.error;
+      if (!variablesResult.ok) fetchErrors.variables = variablesResult.error;
 
       const suggestions: Array<{
         type: string;
@@ -2752,7 +2778,8 @@ class HC3MCPServer {
         suggestions: suggestions,
         available_scenes: scenes.length,
         available_variables: variables.length,
-        automation_potential: suggestions.length > 0 ? 'High' : 'Medium'
+        automation_potential: suggestions.length > 0 ? 'High' : 'Medium',
+        ...(Object.keys(fetchErrors).length > 0 ? { _fetch_errors: fetchErrors } : {})
       };
     } catch (error) {
       throw new Error(`Failed to get automation suggestions: ${error}`);
@@ -2762,7 +2789,7 @@ class HC3MCPServer {
   private async explainDeviceCapabilities(args: any): Promise<any> {
     try {
       const deviceId = args.deviceId;
-      const devices = await this.makeApiRequest('/api/devices').catch(() => []);
+      const devices = await this.makeApiRequest('/api/devices');
 
       if (!deviceId) {
         throw new Error('deviceId is required');
