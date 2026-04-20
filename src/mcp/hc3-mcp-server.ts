@@ -421,6 +421,14 @@ class HC3MCPServer {
           properties: {},
         },
       },
+      {
+        name: 'get_zwave_mesh_health',
+        description: 'Summarise Z-wave mesh health: counts of dead/unconfigured devices, dead devices listed with node IDs and reasons, and breakdowns by room and manufacturer to help identify mesh dead zones. Uses /api/devices?interface=zwave (documented) rather than undocumented /api/diagnostics/* subpaths.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
 
       // Weather Information
       {
@@ -1613,6 +1621,9 @@ class HC3MCPServer {
         case 'get_diagnostics':
           result = await this.getDiagnostics();
           break;
+        case 'get_zwave_mesh_health':
+          result = await this.getZwaveMeshHealth();
+          break;
 
         // Weather Information
         case 'get_weather':
@@ -2265,6 +2276,54 @@ class HC3MCPServer {
   // Diagnostic Methods
   private async getDiagnostics(): Promise<any> {
     return await this.makeApiRequest('/api/diagnostics');
+  }
+
+  private async getZwaveMeshHealth(): Promise<any> {
+    const [devices, rooms] = await Promise.all([
+      this.makeApiRequest('/api/devices?interface=zwave'),
+      this.makeApiRequest('/api/rooms')
+    ]);
+
+    const roomNameById: Record<number, string> = {};
+    for (const r of rooms) roomNameById[r.id] = r.name;
+
+    const nodes: any[] = (devices as any[]).filter(d => d?.properties?.nodeId !== undefined);
+    const dead = nodes.filter(d => d.properties.dead === true);
+    const unconfigured = nodes.filter(d => d.properties.configured === false);
+
+    const deadByRoom: Record<string, number> = {};
+    const deadByManufacturer: Record<string, number> = {};
+    for (const d of dead) {
+      const roomName = roomNameById[d.roomID] ?? `room ${d.roomID}`;
+      deadByRoom[roomName] = (deadByRoom[roomName] ?? 0) + 1;
+      const mfr = d.properties.zwaveCompany || 'Unknown';
+      deadByManufacturer[mfr] = (deadByManufacturer[mfr] ?? 0) + 1;
+    }
+
+    return {
+      total_zwave_devices: nodes.length,
+      dead_count: dead.length,
+      dead_rate_pct: nodes.length > 0 ? Math.round((dead.length / nodes.length) * 1000) / 10 : 0,
+      unconfigured_count: unconfigured.length,
+      dead_devices: dead.map(d => ({
+        id: d.id,
+        name: d.name,
+        nodeId: d.properties.nodeId,
+        roomID: d.roomID,
+        roomName: roomNameById[d.roomID] ?? null,
+        deadReason: d.properties.deadReason || null,
+        zwaveCompany: d.properties.zwaveCompany || null
+      })),
+      unconfigured_devices: unconfigured.map(d => ({
+        id: d.id,
+        name: d.name,
+        nodeId: d.properties.nodeId,
+        roomID: d.roomID,
+        roomName: roomNameById[d.roomID] ?? null
+      })),
+      dead_by_room: deadByRoom,
+      dead_by_manufacturer: deadByManufacturer
+    };
   }
 
   // Weather Methods
