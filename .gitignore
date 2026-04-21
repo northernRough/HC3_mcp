@@ -10,3 +10,4 @@ fibaro_api_docs/
 
 # Local Claude Code context, not for upstream
 CLAUDE.md
+.claude/
