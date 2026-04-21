@@ -459,6 +459,14 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'get_zwave_reconfiguration_tasks',
+        description: 'Active Z-Wave reconfiguration tasks: what HC3 is currently reconfiguring over the mesh. Each task surfaces the device being reconfigured, its nodeId, the task status (Completed, Failed, InProgress, Queued, Downloading, Reconfiguring), whether it is a soft or full reconfiguration, and the count/names of affected child devices. Sources the undocumented endpoint /api/zwaveReconfigurationTasks (read-only); may break across HC3 firmware updates. Use when a reconfigure has been initiated and you want to check progress without opening the HC3 UI. Returns empty list if no task is active.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
         name: 'get_zwave_node_diagnostics',
         description: 'Per-node Z-Wave transmission counters: incoming/outgoing frame totals, outgoing failures, incoming CRC/S0/S2/TransportService/MultiChannel failures, and nonce exchange counts. Enriches each node with device name, room, and a computed outgoingFailedPercent so problem nodes surface immediately. Counters are cumulative since the controller last reset them. Sources the undocumented endpoint /api/zwave/nodes/diagnostics/transmissions (read-only); may break across HC3 firmware updates. Use for identifying which Z-Wave nodes are experiencing retries, CRC errors, or security-layer negotiation problems.',
         inputSchema: {
@@ -1677,6 +1685,9 @@ class HC3MCPServer {
             args?.sort_by as string | undefined
           );
           break;
+        case 'get_zwave_reconfiguration_tasks':
+          result = await this.getZwaveReconfigurationTasks();
+          break;
         case 'get_event_history':
           result = await this.getEventHistory(
             args?.limit as number | undefined,
@@ -2501,6 +2512,47 @@ class HC3MCPServer {
       counters_are: 'cumulative since last controller reset',
       node_count: sorted.length,
       nodes: sorted
+    };
+  }
+
+  private async getZwaveReconfigurationTasks(): Promise<any> {
+    const [tasks, devices, rooms] = await Promise.all([
+      this.makeApiRequest('/api/zwaveReconfigurationTasks'),
+      this.makeApiRequest('/api/devices?interface=zwave'),
+      this.makeApiRequest('/api/rooms')
+    ]);
+
+    const roomNameById: Record<number, string> = {};
+    for (const r of rooms) roomNameById[r.id] = r.name;
+
+    const roomIdByDeviceId: Record<number, number> = {};
+    for (const d of devices as any[]) {
+      if (d?.id !== undefined && d?.roomID !== undefined) roomIdByDeviceId[d.id] = d.roomID;
+    }
+
+    const items: any[] = Array.isArray(tasks) ? tasks : [];
+    const enriched = items.map((t: any) => {
+      const roomId = roomIdByDeviceId[t.deviceId];
+      const children: any[] = Array.isArray(t.childDevices) ? t.childDevices : [];
+      return {
+        id: t.id,
+        status: t.status,
+        deviceId: t.deviceId,
+        deviceName: t.name ?? null,
+        roomName: roomId !== undefined ? (roomNameById[roomId] ?? null) : null,
+        nodeId: t.nodeId,
+        softReconfiguration: t.softReconfiguration,
+        battery: t.battery,
+        remoteGateway: t.remoteGateway || null,
+        childDeviceCount: children.length,
+        childDeviceNames: children.map(c => c?.data?.name).filter((n: any) => typeof n === 'string').slice(0, 20)
+      };
+    });
+
+    return {
+      source: '/api/zwaveReconfigurationTasks (undocumented)',
+      task_count: enriched.length,
+      tasks: enriched
     };
   }
 
