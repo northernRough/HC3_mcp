@@ -431,17 +431,17 @@ class HC3MCPServer {
       },
       {
         name: 'get_event_history',
-        description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns a chronological list; filter to a specific device/scene with object_id+object_type, to an event type, or to a time window.',
+        description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first.',
         inputSchema: {
           type: 'object',
           properties: {
             limit: {
               type: 'number',
-              description: 'Maximum events to return (maps to numberOfRecords). Default 30.'
+              description: 'Maximum events to return. Default 30, capped at 1000 client-side to prevent hangs (HC3 has no server-side cap and large requests time out).'
             },
             event_type: {
               type: 'string',
-              description: 'Filter to one event type, e.g. "SceneStartedEvent", "DevicePropertyUpdatedEvent", "DeviceActionRanEvent", "CentralSceneEvent".'
+              description: 'Filter to one event type. Case-sensitive exact match — typos return an empty array silently. Examples: "SceneStartedEvent", "DevicePropertyUpdatedEvent", "DeviceActionRanEvent", "CentralSceneEvent".'
             },
             object_id: {
               type: 'number',
@@ -453,7 +453,7 @@ class HC3MCPServer {
             },
             since_timestamp: {
               type: 'number',
-              description: 'Unix epoch seconds; return events strictly after this time. Combine with a large limit to sweep a window.'
+              description: 'Unix epoch seconds; return only events whose timestamp >= this value. Filtered client-side after fetch (HC3 silently ignores server-side time params on this endpoint). For a time window, fetch with a large limit then rely on this filter.'
             }
           },
         },
@@ -2033,6 +2033,18 @@ class HC3MCPServer {
         "documented PUT /api/devices/{id} endpoint with post-write verification."
       );
     }
+    const device = await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+    const declared = (device?.actions && typeof device.actions === 'object') ? device.actions : {};
+    const declaredNames = Object.keys(declared);
+    if (declaredNames.length > 0 && !(args.action in declared)) {
+      throw new Error(
+        `Device ${args.deviceId} (${device?.name}) does not declare action '${args.action}'. ` +
+        `Valid actions for this device: ${declaredNames.sort().join(', ')}. ` +
+        `Note: HC3 silently accepts and drops invalid actions on QuickApps with empty actions map, ` +
+        `so this pre-check enforces declared actions when present.`
+      );
+    }
+
     const endpoint = `/api/devices/${args.deviceId}/action/${encodeURIComponent(args.action)}`;
     const requestData: any = {};
 
@@ -2499,13 +2511,17 @@ class HC3MCPServer {
     objectType?: string,
     sinceTimestamp?: number
   ): Promise<any> {
+    const cappedLimit = Math.min(limit ?? 30, 1000);
     const params = new URLSearchParams();
-    params.set('numberOfRecords', String(limit ?? 30));
+    params.set('numberOfRecords', String(cappedLimit));
     if (eventType) params.set('eventType', eventType);
     if (objectId !== undefined) params.set('objectId', String(objectId));
     if (objectType) params.set('objectType', objectType);
-    if (sinceTimestamp !== undefined) params.set('timestamp', String(sinceTimestamp));
-    return await this.makeApiRequest(`/api/events/history?${params.toString()}`);
+    const events: any[] = await this.makeApiRequest(`/api/events/history?${params.toString()}`);
+    if (sinceTimestamp !== undefined) {
+      return events.filter(e => (e?.timestamp ?? 0) >= sinceTimestamp);
+    }
+    return events;
   }
 
   // Weather Methods
