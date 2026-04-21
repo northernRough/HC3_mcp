@@ -2278,12 +2278,12 @@ class HC3MCPServer {
   }
 
   private async runScene(args: { sceneId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}/action/start`, 'POST');
+    await this.makeApiRequest(`/api/scenes/${args.sceneId}/execute`, 'POST', {});
     return `Scene ${args.sceneId} started successfully.`;
   }
 
   private async stopScene(args: { sceneId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}/action/stop`, 'POST');
+    await this.makeApiRequest(`/api/scenes/${args.sceneId}/kill`, 'POST', {});
     return `Scene ${args.sceneId} stopped successfully.`;
   }
 
@@ -2382,8 +2382,65 @@ class HC3MCPServer {
   }
 
   private async setGlobalVariable(args: { varName: string; value: any }): Promise<any> {
-    await this.makeApiRequest(`/api/globalVariables/${encodeURIComponent(args.varName)}`, 'PUT', { value: args.value });
-    return `Global variable '${args.varName}' set to '${args.value}' successfully.`;
+    const encoded = encodeURIComponent(args.varName);
+    const existing: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+
+    if (existing?.readOnly) {
+      throw new Error(
+        `Global variable '${args.varName}' is read-only (HC3 system variable) and cannot be set via this tool.`
+      );
+    }
+
+    let coerced: any;
+    if (existing?.isEnum) {
+      const enumValues: string[] = Array.isArray(existing.enumValues) ? existing.enumValues : [];
+      const candidate = String(args.value);
+      if (!enumValues.includes(candidate)) {
+        throw new Error(
+          `Global variable '${args.varName}' is an enum with values [${enumValues.map(v => `'${v}'`).join(', ')}]. ` +
+          `Submitted value ${JSON.stringify(args.value)} is not in the set (match is case-sensitive).`
+        );
+      }
+      coerced = candidate;
+    } else {
+      const storedType = typeof existing?.value;
+      if (storedType === 'number') {
+        const n = typeof args.value === 'number' ? args.value : Number(args.value);
+        if (!Number.isFinite(n)) {
+          throw new Error(
+            `Global variable '${args.varName}' is numeric; submitted value ${JSON.stringify(args.value)} is not a number.`
+          );
+        }
+        coerced = n;
+      } else if (storedType === 'boolean') {
+        if (typeof args.value === 'boolean') coerced = args.value;
+        else if (args.value === 'true' || args.value === 1) coerced = true;
+        else if (args.value === 'false' || args.value === 0) coerced = false;
+        else {
+          throw new Error(
+            `Global variable '${args.varName}' is boolean; submitted value ${JSON.stringify(args.value)} cannot be coerced to boolean.`
+          );
+        }
+      } else {
+        coerced = typeof args.value === 'string' ? args.value : String(args.value);
+      }
+    }
+
+    await this.makeApiRequest(`/api/globalVariables/${encoded}`, 'PUT', { value: coerced });
+
+    const after: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    if (String(after?.value) !== String(coerced)) {
+      throw new Error(
+        `Post-write verification failed for global variable '${args.varName}': ` +
+        `submitted ${JSON.stringify(coerced)}, HC3 stored ${JSON.stringify(after?.value)}.`
+      );
+    }
+
+    return {
+      name: args.varName,
+      previous: { value: existing?.value, isEnum: !!existing?.isEnum },
+      current: { value: after?.value, isEnum: !!after?.isEnum }
+    };
   }
 
   // User Management Methods
