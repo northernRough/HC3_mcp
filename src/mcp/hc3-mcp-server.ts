@@ -1912,7 +1912,27 @@ class HC3MCPServer {
     if (!text) {
       return null;
     }
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+
+    // HC3 action endpoints return HTTP 202 with a JSON-RPC envelope
+    // ({jsonrpc, id, error, result, ...}). A non-null `error` means the
+    // request was accepted but failed — "not implemented" etc. Without
+    // this check, those failures masquerade as success.
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      'jsonrpc' in parsed &&
+      parsed.error !== null &&
+      parsed.error !== undefined &&
+      typeof parsed.error === 'object'
+    ) {
+      const code = (parsed.error as any).code;
+      const msg = (parsed.error as any).message ?? JSON.stringify(parsed.error);
+      throw new Error(`HC3 action failed for ${method} ${endpoint} (code ${code}): ${msg}`);
+    }
+
+    return parsed;
   }
 
   // Device Management Methods
