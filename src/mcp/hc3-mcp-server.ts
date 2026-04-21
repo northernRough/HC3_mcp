@@ -2270,6 +2270,7 @@ class HC3MCPServer {
     }
     await this.makeApiRequest(`/api/scenes/${args.sceneId}`, 'PUT', args.properties);
     const updated = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+    this.verifyWrite(args.properties, undefined, updated, `scene ${args.sceneId}`);
     return {
       sceneId: args.sceneId,
       changedFields: Object.keys(args.properties),
@@ -2358,7 +2359,7 @@ class HC3MCPServer {
   }
 
   private async setGlobalVariable(args: { varName: string; value: any }): Promise<any> {
-    await this.makeApiRequest(`/api/globalVariables/${args.varName}`, 'PUT', { value: args.value });
+    await this.makeApiRequest(`/api/globalVariables/${encodeURIComponent(args.varName)}`, 'PUT', { value: args.value });
     return `Global variable '${args.varName}' set to '${args.value}' successfully.`;
   }
 
@@ -2518,6 +2519,10 @@ class HC3MCPServer {
   }
 
   private async setHomeStatus(args: { status: string }): Promise<any> {
+    const validModes = ['Home', 'Away', 'Night', 'Vacation'];
+    if (!validModes.includes(args.status)) {
+      throw new Error(`set_home_status: invalid status '${args.status}'. Must be one of: ${validModes.join(', ')}.`);
+    }
     await this.makeApiRequest('/api/panels/location', 'PUT', { mode: args.status });
     return `Home status set to '${args.status}' successfully.`;
   }
@@ -4570,12 +4575,12 @@ end
     return await this.makeApiRequest(`/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`);
   }
 
-  private async createQuickAppFile(args: { 
-    deviceId: number; 
-    name: string; 
-    type?: string; 
-    content?: string; 
-    isOpen?: boolean 
+  private async createQuickAppFile(args: {
+    deviceId: number;
+    name: string;
+    type?: string;
+    content?: string;
+    isOpen?: boolean
   }): Promise<any> {
     const { deviceId, name, type = 'lua', content = '', isOpen = false } = args;
     const fileData = {
@@ -4585,14 +4590,29 @@ end
       isOpen,
       isMain: false
     };
-    return await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'POST', fileData);
+    const postResult = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'POST', fileData);
+
+    const after = await this.makeApiRequest(
+      `/api/quickApp/${deviceId}/files/${encodeURIComponent(name)}`
+    );
+    if (!after) {
+      throw new Error(`create_quickapp_file: file '${name}' not present after POST on device ${deviceId}.`);
+    }
+    if (after.content !== content) {
+      throw new Error(
+        `create_quickapp_file: content mismatch after POST on device ${deviceId}, file '${name}'. ` +
+        `Submitted ${content.length} chars, HC3 stored ${(after.content ?? '').length} chars.`
+      );
+    }
+
+    return postResult;
   }
 
-  private async updateQuickAppFile(args: { 
-    deviceId: number; 
-    fileName: string; 
-    content?: string; 
-    isOpen?: boolean 
+  private async updateQuickAppFile(args: {
+    deviceId: number;
+    fileName: string;
+    content?: string;
+    isOpen?: boolean
   }): Promise<any> {
     const { deviceId, fileName, content, isOpen } = args;
     const updateData: any = {};
@@ -4602,12 +4622,27 @@ end
     if (isOpen !== undefined) {
       updateData.isOpen = isOpen;
     }
-    
-    return await this.makeApiRequest(
-      `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`, 
-      'PUT', 
+
+    const putResult = await this.makeApiRequest(
+      `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`,
+      'PUT',
       updateData
     );
+
+    if (content !== undefined) {
+      const after = await this.makeApiRequest(
+        `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`
+      );
+      if (after?.content !== content) {
+        throw new Error(
+          `update_quickapp_file: content mismatch after PUT on device ${deviceId}, file '${fileName}'. ` +
+          `Submitted ${content.length} chars, HC3 stored ${(after?.content ?? '').length} chars. ` +
+          `The write was silently altered or dropped.`
+        );
+      }
+    }
+
+    return putResult;
   }
 
   private async updateMultipleQuickAppFiles(args: {
@@ -4626,7 +4661,35 @@ end
       isOpen: file.isOpen || false,
       isMain: isMainByName.get(file.name) ?? false
     }));
-    return await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
+    const putResult = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
+
+    const stored = await Promise.all(
+      files.map(f =>
+        this.makeApiRequest(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.name)}`)
+          .then((v: any) => ({ name: f.name, content: v?.content ?? null }))
+          .catch(() => ({ name: f.name, content: null }))
+      )
+    );
+    const storedByName = new Map(stored.map(s => [s.name, s.content]));
+    const mismatches: string[] = [];
+    for (const submitted of files) {
+      const c = storedByName.get(submitted.name);
+      if (c === null || c === undefined) {
+        mismatches.push(`  - '${submitted.name}': missing after PUT (not created or fetch failed)`);
+      } else if (c !== submitted.content) {
+        mismatches.push(
+          `  - '${submitted.name}': content mismatch (submitted ${submitted.content.length} chars, stored ${c.length} chars)`
+        );
+      }
+    }
+    if (mismatches.length > 0) {
+      throw new Error(
+        `update_multiple_quickapp_files: ${mismatches.length}/${files.length} files did not round-trip correctly on device ${deviceId}:\n` +
+        mismatches.join('\n')
+      );
+    }
+
+    return putResult;
   }
 
   private async deleteQuickAppFile(args: { deviceId: number; fileName: string }): Promise<any> {
