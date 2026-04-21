@@ -222,7 +222,7 @@ class HC3MCPServer {
             },
             properties: {
               type: 'object',
-              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Note: quickAppVariables is rejected here — use set_quickapp_variable for single-variable writes; array-valued properties like categories/parameters/uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
+              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable) and parameters (HC3 firmware 5.x caches but does not transmit Z-wave parameter writes — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
             },
           },
           required: ['deviceId'],
@@ -1976,6 +1976,12 @@ class HC3MCPServer {
     if (properties && 'quickAppVariables' in properties) {
       throw new Error(
         'modify_device does not accept quickAppVariables — use set_quickapp_variable to update a single variable, or create / delete / rename via the HC3 UI.'
+      );
+    }
+
+    if (properties && 'parameters' in properties) {
+      throw new Error(
+        "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration without transmitting the new value to the device, producing a misleading success state (UI shows the new value, physical device still behaves on the old). The dedicated Z-wave action endpoints (getParameter / setParameter / reconfigure) return 'not implemented' on this firmware. Set Z-wave configuration parameters via the HC3 Web UI (which uses a native protocol) until a transmitting REST path is available."
       );
     }
 
