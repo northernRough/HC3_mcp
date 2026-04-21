@@ -222,7 +222,7 @@ class HC3MCPServer {
             },
             properties: {
               type: 'object',
-              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable) and parameters (HC3 firmware 5.x caches but does not transmit Z-wave parameter writes — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
+              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters / associations / multichannelAssociations (HC3 firmware 5.x caches Z-wave mesh-config writes without transmitting — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
             },
           },
           required: ['deviceId'],
@@ -2002,6 +2002,12 @@ class HC3MCPServer {
     if (properties && 'parameters' in properties) {
       throw new Error(
         "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration without transmitting the new value to the device, producing a misleading success state (UI shows the new value, physical device still behaves on the old). The dedicated Z-wave action endpoints (getParameter / setParameter / reconfigure) return 'not implemented' on this firmware. Set Z-wave configuration parameters via the HC3 Web UI (which uses a native protocol) until a transmitting REST path is available."
+      );
+    }
+
+    if (properties && ('associations' in properties || 'multichannelAssociations' in properties)) {
+      throw new Error(
+        "modify_device does not accept properties.associations or properties.multichannelAssociations — precautionary reject based on the S14 finding (properties.parameters on the same firmware caches without transmitting, and every dedicated Z-wave action endpoint tested returns 'not implemented'). These mesh-management fields are structurally the same 'write-to-HC3, expected-to-push-downstream' pattern and are assumed to share the silent cache trap until proven otherwise. Set associations via the HC3 Web UI until a transmitting REST path is verified."
       );
     }
 
