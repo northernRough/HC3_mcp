@@ -430,6 +430,35 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'get_event_history',
+        description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns a chronological list; filter to a specific device/scene with object_id+object_type, to an event type, or to a time window.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: {
+              type: 'number',
+              description: 'Maximum events to return (maps to numberOfRecords). Default 30.'
+            },
+            event_type: {
+              type: 'string',
+              description: 'Filter to one event type, e.g. "SceneStartedEvent", "DevicePropertyUpdatedEvent", "DeviceActionRanEvent", "CentralSceneEvent".'
+            },
+            object_id: {
+              type: 'number',
+              description: 'Filter to events for a specific object (usually device or scene id). Requires object_type to narrow correctly.'
+            },
+            object_type: {
+              type: 'string',
+              description: 'Object type for object_id filter (e.g. "device", "scene").'
+            },
+            since_timestamp: {
+              type: 'number',
+              description: 'Unix epoch seconds; return events strictly after this time. Combine with a large limit to sweep a window.'
+            }
+          },
+        },
+      },
+      {
         name: 'get_zwave_node_diagnostics',
         description: 'Per-node Z-Wave transmission counters: incoming/outgoing frame totals, outgoing failures, incoming CRC/S0/S2/TransportService/MultiChannel failures, and nonce exchange counts. Enriches each node with device name, room, and a computed outgoingFailedPercent so problem nodes surface immediately. Counters are cumulative since the controller last reset them. Sources the undocumented endpoint /api/zwave/nodes/diagnostics/transmissions (read-only); may break across HC3 firmware updates. Use for identifying which Z-Wave nodes are experiencing retries, CRC errors, or security-layer negotiation problems.',
         inputSchema: {
@@ -1648,6 +1677,15 @@ class HC3MCPServer {
             args?.sort_by as string | undefined
           );
           break;
+        case 'get_event_history':
+          result = await this.getEventHistory(
+            args?.limit as number | undefined,
+            args?.event_type as string | undefined,
+            args?.object_id as number | undefined,
+            args?.object_type as string | undefined,
+            args?.since_timestamp as number | undefined
+          );
+          break;
 
         // Weather Information
         case 'get_weather':
@@ -2451,6 +2489,22 @@ class HC3MCPServer {
       node_count: sorted.length,
       nodes: sorted
     };
+  }
+
+  private async getEventHistory(
+    limit?: number,
+    eventType?: string,
+    objectId?: number,
+    objectType?: string,
+    sinceTimestamp?: number
+  ): Promise<any> {
+    const params = new URLSearchParams();
+    params.set('numberOfRecords', String(limit ?? 30));
+    if (eventType) params.set('eventType', eventType);
+    if (objectId !== undefined) params.set('objectId', String(objectId));
+    if (objectType) params.set('objectType', objectType);
+    if (sinceTimestamp !== undefined) params.set('timestamp', String(sinceTimestamp));
+    return await this.makeApiRequest(`/api/events/history?${params.toString()}`);
   }
 
   // Weather Methods
