@@ -429,6 +429,24 @@ class HC3MCPServer {
           properties: {},
         },
       },
+      {
+        name: 'get_zwave_node_diagnostics',
+        description: 'Per-node Z-Wave transmission counters: incoming/outgoing frame totals, outgoing failures, incoming CRC/S0/S2/TransportService/MultiChannel failures, and nonce exchange counts. Enriches each node with device name, room, and a computed outgoingFailedPercent so problem nodes surface immediately. Counters are cumulative since the controller last reset them. Sources the undocumented endpoint /api/zwave/nodes/diagnostics/transmissions (read-only); may break across HC3 firmware updates. Use for identifying which Z-Wave nodes are experiencing retries, CRC errors, or security-layer negotiation problems.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            min_outgoing_failed_percent: {
+              type: 'number',
+              description: 'If set, only return nodes whose outgoingFailedPercent is >= this threshold (0-100). Useful to filter to problem nodes only.'
+            },
+            sort_by: {
+              type: 'string',
+              enum: ['outgoingFailedPercent', 'outgoingFailed', 'incomingTotal', 'outgoingTotal', 'nodeId'],
+              description: 'Field to sort nodes by, descending (except nodeId which is ascending). Defaults to outgoingFailedPercent.'
+            }
+          },
+        },
+      },
 
       // Weather Information
       {
@@ -1624,6 +1642,12 @@ class HC3MCPServer {
         case 'get_zwave_mesh_health':
           result = await this.getZwaveMeshHealth();
           break;
+        case 'get_zwave_node_diagnostics':
+          result = await this.getZwaveNodeDiagnostics(
+            args?.min_outgoing_failed_percent as number | undefined,
+            args?.sort_by as string | undefined
+          );
+          break;
 
         // Weather Information
         case 'get_weather':
@@ -2355,6 +2379,77 @@ class HC3MCPServer {
       })),
       dead_by_room: deadByRoom,
       dead_by_manufacturer: deadByManufacturer
+    };
+  }
+
+  private async getZwaveNodeDiagnostics(minOutgoingFailedPercent?: number, sortBy?: string): Promise<any> {
+    const [transmissions, devices, rooms] = await Promise.all([
+      this.makeApiRequest('/api/zwave/nodes/diagnostics/transmissions'),
+      this.makeApiRequest('/api/devices?interface=zwave'),
+      this.makeApiRequest('/api/rooms')
+    ]);
+
+    const roomNameById: Record<number, string> = {};
+    for (const r of rooms) roomNameById[r.id] = r.name;
+
+    const deviceByNodeId: Record<number, any> = {};
+    for (const d of devices as any[]) {
+      const nid = d?.properties?.nodeId;
+      if (nid !== undefined && deviceByNodeId[nid] === undefined) deviceByNodeId[nid] = d;
+    }
+
+    const items: any[] = (transmissions?.items as any[]) || [];
+    const enriched = items.map(n => {
+      const dev = deviceByNodeId[n.nodeId];
+      const incomingFailedTotal =
+        (n.incomingFailedUndefined || 0) +
+        (n.incomingFailedCrc || 0) +
+        (n.incomingFailedS0 || 0) +
+        (n.incomingFailedS2 || 0) +
+        (n.incomingFailedTransportService || 0) +
+        (n.incomingFailedMultiChannel || 0);
+      const outgoingFailedPercent = n.outgoingTotal > 0
+        ? Math.round((n.outgoingFailed / n.outgoingTotal) * 1000) / 10
+        : 0;
+      return {
+        nodeId: n.nodeId,
+        deviceName: dev?.name ?? null,
+        deviceId: dev?.id ?? null,
+        roomName: dev ? (roomNameById[dev.roomID] ?? null) : null,
+        zwaveCompany: dev?.properties?.zwaveCompany ?? null,
+        incomingTotal: n.incomingTotal,
+        incomingFailedTotal,
+        incomingFailedUndefined: n.incomingFailedUndefined,
+        incomingFailedCrc: n.incomingFailedCrc,
+        incomingFailedS0: n.incomingFailedS0,
+        incomingFailedS2: n.incomingFailedS2,
+        incomingFailedTransportService: n.incomingFailedTransportService,
+        incomingFailedMultiChannel: n.incomingFailedMultiChannel,
+        incomingNonceGet: n.incomingNonceGet,
+        incomingNonceReport: n.incomingNonceReport,
+        outgoingTotal: n.outgoingTotal,
+        outgoingFailed: n.outgoingFailed,
+        outgoingFailedPercent,
+        outgoingNonceGet: n.outgoingNonceGet,
+        outgoingNonceReport: n.outgoingNonceReport
+      };
+    });
+
+    const filtered = typeof minOutgoingFailedPercent === 'number'
+      ? enriched.filter(n => n.outgoingFailedPercent >= minOutgoingFailedPercent)
+      : enriched;
+
+    const sortKey = sortBy || 'outgoingFailedPercent';
+    const sorted = [...filtered].sort((a: any, b: any) => {
+      if (sortKey === 'nodeId') return a.nodeId - b.nodeId;
+      return (b[sortKey] ?? 0) - (a[sortKey] ?? 0);
+    });
+
+    return {
+      source: '/api/zwave/nodes/diagnostics/transmissions (undocumented)',
+      counters_are: 'cumulative since last controller reset',
+      node_count: sorted.length,
+      nodes: sorted
     };
   }
 
