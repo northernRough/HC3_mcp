@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.2.0] - 2026-04-22
+
+### Added
+- `get_device_parameters` — read a Z-Wave device's configuration parameters with human-readable labels and descriptions, sourced by merging `/api/zwave/configuration_parameters/{addr}` (current values) and `/api/zwave/parameters_templates/{addr}` (template catalogue). Returns per parameter: number, value, size, source provenance, label, description, default value, format. Honest about the HC3 5.x mesh-read limitation: every parameter carries a `source` field passed through verbatim from HC3; on current firmware the value is almost always `"template"` (catalogue default, not a physical-device read-back) because the mesh read-back path (`getParameter`, `reconfigure`, `pollConfigurationParameter`) is not-implemented or no-ops silently. A top-level `all_values_are_template_defaults` boolean flags when every returned value carries `source: "template"`, and a `provenance_warning` string explains what to trust. Live-tested against AEON MultiSensor 6, FGD212 Dimmer, and Zooz ZEN52. Parameter writes remain scoped out — `modify_device` still rejects `properties.parameters` per S14. Sources undocumented endpoints under `/api/zwave/*`.
+
 ## [2.1.1] - 2026-04-22
 
 Bug-fix release covering two regressions surfaced immediately after the 2.1.0 tag was cut.

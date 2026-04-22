@@ -459,6 +459,20 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'get_device_parameters',
+        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels and descriptions. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. IMPORTANT PROVENANCE CAVEAT: the `source` field is verbatim from HC3 and must be believed — `"template"` means the value shown is the catalogue default, NOT a real read-back from the physical device over the Z-Wave mesh. On HC3 firmware 5.x the mesh parameter read-back path (`getParameter`, `reconfigure`, `pollConfigurationParameter`) returns "not implemented" or silently no-ops, so most values will carry `source: "template"`. Use this tool to discover which parameters exist on a device and what they mean (labels/descriptions/allowed ranges), not to confirm the physical device\'s actual current configuration. Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: {
+              type: 'number',
+              description: 'HC3 device id of a Z-Wave device. Must have a nodeId in its properties.'
+            }
+          },
+          required: ['deviceId']
+        },
+      },
+      {
         name: 'get_zwave_reconfiguration_tasks',
         description: 'Active Z-Wave reconfiguration tasks: what HC3 is currently reconfiguring over the mesh. Each task surfaces the device being reconfigured, its nodeId, the task status (Completed, Failed, InProgress, Queued, Downloading, Reconfiguring), whether it is a soft or full reconfiguration, and the count/names of affected child devices. Sources the undocumented endpoint /api/zwaveReconfigurationTasks (read-only); may break across HC3 firmware updates. Use when a reconfigure has been initiated and you want to check progress without opening the HC3 UI. Returns empty list if no task is active.',
         inputSchema: {
@@ -1688,6 +1702,9 @@ class HC3MCPServer {
         case 'get_zwave_reconfiguration_tasks':
           result = await this.getZwaveReconfigurationTasks();
           break;
+        case 'get_device_parameters':
+          result = await this.getDeviceParameters(args?.deviceId as number);
+          break;
         case 'get_event_history':
           result = await this.getEventHistory(
             args?.limit as number | undefined,
@@ -2569,6 +2586,76 @@ class HC3MCPServer {
       counters_are: 'cumulative since last controller reset',
       node_count: sorted.length,
       nodes: sorted
+    };
+  }
+
+  private async getDeviceParameters(deviceId: number): Promise<any> {
+    if (typeof deviceId !== 'number') {
+      throw new Error('get_device_parameters requires a numeric deviceId.');
+    }
+    const device: any = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const nodeId = device?.properties?.nodeId;
+    if (nodeId === undefined || nodeId === null) {
+      throw new Error(
+        `Device ${deviceId} (${device?.name}) has no Z-Wave nodeId; get_device_parameters only supports Z-Wave devices.`
+      );
+    }
+    const endpoint = device?.properties?.endPointId ?? 0;
+    const addr = `${nodeId}.${endpoint}`;
+    const encodedAddr = encodeURIComponent(addr);
+
+    const [valuesRes, templateRes] = await Promise.all([
+      this.makeApiRequest(`/api/zwave/configuration_parameters/${encodedAddr}`)
+        .catch((e: any) => ({ __error: String(e?.message ?? e) })),
+      this.makeApiRequest(`/api/zwave/parameters_templates/${encodedAddr}`)
+        .catch((e: any) => ({ __error: String(e?.message ?? e) }))
+    ]);
+
+    const values: any[] = Array.isArray((valuesRes as any)?.items) ? (valuesRes as any).items : [];
+    const templateParams: any[] = Array.isArray((templateRes as any)?.parameters) ? (templateRes as any).parameters : [];
+    const templateByNumber = new Map<number, any>(
+      templateParams.map(p => [p.parameterNumber, p])
+    );
+
+    const pickEn = (localised: any): string | null => {
+      if (typeof localised === 'string') return localised;
+      if (localised && typeof localised === 'object') return localised.en ?? null;
+      return null;
+    };
+
+    const merged = values.map(v => {
+      const tpl = templateByNumber.get(v.parameterNumber) ?? {};
+      return {
+        parameterNumber: v.parameterNumber,
+        value: v.configurationValue,
+        size: v.size,
+        source: v.source?.type ?? null,
+        label: pickEn(tpl.label),
+        description: pickEn(tpl.description),
+        defaultValue: tpl.defaultValue ?? null,
+        format: tpl.format ?? null
+      };
+    });
+
+    const templateOnly = values.every(v => v.source?.type === 'template');
+
+    return {
+      deviceId,
+      deviceName: device?.name ?? null,
+      nodeId,
+      endpoint,
+      addr,
+      productType: (templateRes as any)?.description ?? null,
+      parameters: merged,
+      provenance_warning:
+        'Each parameter\'s `source` field indicates where HC3 sourced its reported value. ' +
+        '"template" means this is the catalogue default, NOT a real read-back from the device. ' +
+        'On HC3 firmware 5.x the mesh parameter read-back path does not reliably work, so most ' +
+        'parameters report source "template" even when the physical device is configured differently. ' +
+        'Trust only source values other than "template" (e.g. "user", "device", "polled") as reflecting ' +
+        'physical-device state. This tool is intended for discovering which parameters exist and ' +
+        'what they mean, not for confirming physical device configuration.',
+      all_values_are_template_defaults: templateOnly
     };
   }
 
