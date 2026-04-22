@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.2.2] - 2026-04-22
+
+### Changed
+- `modify_device` reject message for `properties.parameters` now (a) softens the "does not transmit" claim to match what we actually observed (in direct testing against a Zooz ZEN52 the cache updated, HC3 reported success, and the physical device's behaviour did not change — but HC3 5.x has no working REST path to verify whether any given write transmitted, so "does not reliably transmit" is the defensible claim, not "never transmits"), and (b) points callers at `get_device_parameters(deviceId)` for inspecting HC3's stored parameter values, labels, and formats without opening the Web UI.
+
 ## [2.2.1] - 2026-04-22
 
 ### Fixed

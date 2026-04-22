@@ -2103,7 +2103,7 @@ class HC3MCPServer {
 
     if (properties && 'parameters' in properties) {
       throw new Error(
-        "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration without transmitting the new value to the device, producing a misleading success state (UI shows the new value, physical device still behaves on the old). The dedicated Z-wave action endpoints (getParameter / setParameter / reconfigure) return 'not implemented' on this firmware. Set Z-wave configuration parameters via the HC3 Web UI (which uses a native protocol) until a transmitting REST path is available."
+        "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration, but the physical device does not reliably pick up the new value. In direct testing against a Zooz ZEN52 the cache updated and HC3 reported success, but the device's behaviour did not change. HC3 5.x has no working REST path to verify whether a given write transmitted, and the dedicated action endpoints (getParameter / setParameter / reconfigure) return 'not implemented' on this firmware. Treat writes via this path as unreliable. Set Z-wave configuration parameters via the HC3 Web UI (which uses a native protocol) until a verifiable REST path is available. To inspect what HC3 has currently stored for this device's parameters (with labels, descriptions, defaults, and format), call get_device_parameters(deviceId)."
       );
     }
 
