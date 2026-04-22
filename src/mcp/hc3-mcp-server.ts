@@ -460,7 +460,7 @@ class HC3MCPServer {
       },
       {
         name: 'get_device_parameters',
-        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels and descriptions. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. IMPORTANT PROVENANCE CAVEAT: the `source` field is verbatim from HC3 and must be believed — `"template"` means the value shown is the catalogue default, NOT a real read-back from the physical device over the Z-Wave mesh. On HC3 firmware 5.x the mesh parameter read-back path (`getParameter`, `reconfigure`, `pollConfigurationParameter`) returns "not implemented" or silently no-ops, so most values will carry `source: "template"`. Use this tool to discover which parameters exist on a device and what they mean (labels/descriptions/allowed ranges), not to confirm the physical device\'s actual current configuration. Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
+        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels, descriptions, defaults, and format. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. PROVENANCE: the `source` field is verbatim from HC3. `"template"` does NOT mean "catalogue default returned as placeholder" — empirically, parameters with non-default values still carry `source: "template"`. It means the value is from HC3\'s template-backed storage layer: what HC3 recorded the device as being configured to, usually via the HC3 UI\'s native Z-Wave configuration path (which transmits). In normal operation these values match the physical device. What HC3 5.x cannot do over REST is re-verify the stored value against the physical device on demand (the mesh read-back path — `getParameter`, `reconfigure`, `pollConfigurationParameter` — is not-implemented or silently no-ops). So treat returned values as "HC3\'s best knowledge, almost certainly accurate", not "guaranteed live readback". Drift from physical reality only occurs if the device was reset physically, a different controller reached it, or someone used the broken PUT `/api/devices/{id}` `{properties: {parameters: [...]}}` path (see S14 — `modify_device` rejects it for this reason). Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2637,7 +2637,7 @@ class HC3MCPServer {
       };
     });
 
-    const templateOnly = values.every(v => v.source?.type === 'template');
+    const storedOnly = values.every(v => v.source?.type === 'template');
 
     return {
       deviceId,
@@ -2647,15 +2647,18 @@ class HC3MCPServer {
       addr,
       productType: (templateRes as any)?.description ?? null,
       parameters: merged,
-      provenance_warning:
-        'Each parameter\'s `source` field indicates where HC3 sourced its reported value. ' +
-        '"template" means this is the catalogue default, NOT a real read-back from the device. ' +
-        'On HC3 firmware 5.x the mesh parameter read-back path does not reliably work, so most ' +
-        'parameters report source "template" even when the physical device is configured differently. ' +
-        'Trust only source values other than "template" (e.g. "user", "device", "polled") as reflecting ' +
-        'physical-device state. This tool is intended for discovering which parameters exist and ' +
-        'what they mean, not for confirming physical device configuration.',
-      all_values_are_template_defaults: templateOnly
+      provenance_note:
+        'Values are from HC3\'s stored-values layer, normally populated when the device was configured ' +
+        'via HC3\'s native Z-Wave path (the HC3 UI, which transmits). In normal operation they match ' +
+        'the physical device. HC3 5.x cannot re-verify them over REST on demand — the mesh read-back ' +
+        'path is not-implemented on this firmware — so treat the values as "almost certainly correct, ' +
+        'not programmatically re-provable". Drift from physical reality only occurs if the device was ' +
+        'physically reset, a different controller reached it, or someone used the PUT ' +
+        '/api/devices/{id} {properties: {parameters:[...]}} path (cache-only — modify_device rejects ' +
+        'this for the same reason). `source: "template"` on a parameter means "stored in HC3\'s ' +
+        'template-backed storage", NOT "this is the catalogue default". Empirically, parameters with ' +
+        'non-default values still carry source "template".',
+      all_values_are_hc3_stored: storedOnly
     };
   }
 

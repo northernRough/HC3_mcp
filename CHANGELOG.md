@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.2.1] - 2026-04-22
+
+### Fixed
+- `get_device_parameters` provenance wording was too pessimistic. Empirical check on an FGD212 dimmer showed multiple parameters whose values **differ** from their template `defaultValue` yet still carry `source: "template"` — so `"template"` does not mean "catalogue default returned as a placeholder" (the earlier framing). It means the value is from HC3's template-backed storage layer: what HC3 recorded the device as being configured to when the HC3 UI's native Z-Wave path wrote to it. In normal operation these values match the physical device; HC3 5.x just can't re-verify them over REST on demand. Revised the tool's description, the response `provenance_note` field, and renamed the response flag `all_values_are_template_defaults` → `all_values_are_hc3_stored` so callers know what the data actually is: "HC3's best knowledge of the device's configuration, almost certainly correct, not programmatically re-provable".
+
 ## [2.2.0] - 2026-04-22
 
 ### Added
