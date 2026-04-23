@@ -166,6 +166,32 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'find_devices_by_name',
+        description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId === 0) — child endpoints of multi-endpoint Z-Wave devices (FGRGBW442 channels, ZEN52 endpoints, etc.) are excluded; a separate tool will handle child-endpoint resolution. HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name to search for. Case-insensitive substring match by default.'
+            },
+            roomId: {
+              type: 'number',
+              description: 'Optional: only consider devices in this room. Disambiguates common names (e.g. "blind") that recur across rooms.'
+            },
+            exactMatch: {
+              type: 'boolean',
+              description: 'If true, require exact name equality (still case-insensitive). Defaults to false (substring match).'
+            },
+            visibleOnly: {
+              type: 'boolean',
+              description: 'If true, only return devices where visible === true. Defaults to false.'
+            }
+          },
+          required: ['name']
+        }
+      },
+      {
         name: 'get_device_info',
         description: 'Get detailed information about a specific device including properties, capabilities, and current state',
         inputSchema: {
@@ -1675,6 +1701,9 @@ class HC3MCPServer {
         case 'get_device_info':
           result = await this.getDeviceInfo(args);
           break;
+        case 'find_devices_by_name':
+          result = await this.findDevicesByName(args);
+          break;
         case 'control_device':
           result = await this.controlDevice(args);
           break;
@@ -2099,6 +2128,42 @@ class HC3MCPServer {
 
   private async getDeviceInfo(args: { deviceId: number }): Promise<any> {
     return await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+  }
+
+  private async findDevicesByName(args: {
+    name: string;
+    roomId?: number;
+    exactMatch?: boolean;
+    visibleOnly?: boolean;
+  }): Promise<any> {
+    if (typeof args?.name !== 'string' || args.name.length === 0) {
+      throw new Error('find_devices_by_name requires a non-empty name.');
+    }
+    const needle = args.name.toLowerCase();
+    const exact = !!args.exactMatch;
+    const visibleOnly = !!args.visibleOnly;
+
+    const endpoint = args.roomId !== undefined
+      ? `/api/devices?roomID=${args.roomId}`
+      : '/api/devices';
+    const devices: any[] = await this.makeApiRequest(endpoint);
+
+    const matches = devices.filter(d => {
+      if (d?.parentId !== 0) return false;
+      if (visibleOnly && d?.visible !== true) return false;
+      const name: string = typeof d?.name === 'string' ? d.name.toLowerCase() : '';
+      return exact ? name === needle : name.includes(needle);
+    });
+
+    return matches.map(d => ({
+      id: d.id,
+      name: d.name,
+      roomID: d.roomID,
+      type: d.type,
+      visible: d.visible,
+      enabled: d.enabled,
+      dead: d?.properties?.dead ?? false
+    }));
   }
 
   private async controlDevice(args: { deviceId: number; action: string; args?: any[]; delay?: number }): Promise<any> {

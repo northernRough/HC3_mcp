@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.4.0] - 2026-04-23
+
+### Added
+- `find_devices_by_name` — resolve a human-readable device name to one or more HC3 devices without pulling the full `/api/devices` payload (~4 MB on a 1000-device install). Case-insensitive substring match by default, `exactMatch` opt-in, optional `roomId` narrowing and `visibleOnly` flag. Filters to parent/top-level devices only (`parentId === 0`) — child endpoints of multi-endpoint Z-Wave devices and child QAs are excluded; a separate sibling tool will handle child-endpoint resolution. HC3 has no native name filter on `/api/devices` (the documented `?property=...&value=...` filter only applies to `properties.*` fields, not top-level `name`), so this filters in-process. Returns minimal `{id, name, roomID, type, visible, enabled, dead}` records. Building block for manifest-driven name→id resolution that survives Z-Wave re-inclusion.
+
 ## [2.3.0] - 2026-04-23
 
 Gap-filling release after an audit of HC3's authoritative OpenAPI specs at `/assets/docs/hc/plugins.json` and `/assets/docs/hc/quickapp.json` (not linked from the public Swagger UI — credit jgab for surfacing them).
