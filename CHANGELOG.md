@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.5.0] - 2026-04-23
+
+### Added
+- `find_device_by_endpoint` — resolve a multi-endpoint child device by its `(parentId, endpointId)` pair. Stable identity for children that survives Z-Wave re-inclusion: `parentId` is resolved via the parent's (stable) name, `endPointId` is the Z-Wave endpoint number which never shifts. Pairs with `find_devices_by_name`. Returns an ARRAY of matches (not single + null) because endpoint 0 is commonly ambiguous: multi-endpoint parents expose multiple child roles at endpoint 0 (e.g. a ZEN52 wrapper has both a binarySwitch and a remoteController at endpoint 0; an AEON MultiSensor has motion/temp/lux/humidity siblings there). Non-zero endpoints are usually unique. Building block — together with `find_devices_by_name` — for manifest-driven sync that survives Z-Wave re-inclusion.
+
 ## [2.4.1] - 2026-04-23
 
 ### Fixed

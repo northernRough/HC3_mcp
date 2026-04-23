@@ -192,6 +192,24 @@ class HC3MCPServer {
         }
       },
       {
+        name: 'find_device_by_endpoint',
+        description: 'Resolve a multi-endpoint child device by its (parentId, endPointId) pair. Stable identity for children that survives Z-Wave re-inclusion: parentId resolves via the parent\'s (stable) name, endPointId is the Z-Wave endpoint number which never shifts. Pairs with find_devices_by_name (for parents). Returns an ARRAY of matching children — endPointId 0 is commonly ambiguous because multi-endpoint parents expose multiple child roles at endpoint 0 (e.g. a ZEN52 parent has both a binarySwitch and a remoteController at endpoint 0). Non-zero endpoints are usually unique. Examples: (4753, 1) → "Patio seating"; (4753, 2) → "Tub lights"; (4753, 0) → ["patio lights" binarySwitch, "patio lights remote" remoteController]. Returns minimal {id, name, type, roomID, visible, enabled, dead, endPointId} records. Fetches /api/devices?parentId={parentId} and filters by properties.endPointId in-process.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            parentId: {
+              type: 'number',
+              description: 'HC3 device id of the multi-endpoint parent (e.g. the ZEN52 wrapper, the FGRGBW442 master).'
+            },
+            endpointId: {
+              type: 'number',
+              description: 'Z-Wave endpoint number. 0 is the primary/root endpoint (often ambiguous), 1..N are the distinct channels/outputs.'
+            }
+          },
+          required: ['parentId', 'endpointId']
+        }
+      },
+      {
         name: 'get_device_info',
         description: 'Get detailed information about a specific device including properties, capabilities, and current state',
         inputSchema: {
@@ -1704,6 +1722,9 @@ class HC3MCPServer {
         case 'find_devices_by_name':
           result = await this.findDevicesByName(args);
           break;
+        case 'find_device_by_endpoint':
+          result = await this.findDeviceByEndpoint(args);
+          break;
         case 'control_device':
           result = await this.controlDevice(args);
           break;
@@ -2128,6 +2149,27 @@ class HC3MCPServer {
 
   private async getDeviceInfo(args: { deviceId: number }): Promise<any> {
     return await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+  }
+
+  private async findDeviceByEndpoint(args: {
+    parentId: number;
+    endpointId: number;
+  }): Promise<any> {
+    if (typeof args?.parentId !== 'number' || typeof args?.endpointId !== 'number') {
+      throw new Error('find_device_by_endpoint requires numeric parentId and endpointId.');
+    }
+    const children: any[] = await this.makeApiRequest(`/api/devices?parentId=${args.parentId}`);
+    const matches = children.filter(c => c?.properties?.endPointId === args.endpointId);
+    return matches.map(c => ({
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      roomID: c.roomID,
+      visible: c.visible,
+      enabled: c.enabled,
+      dead: c?.properties?.dead ?? false,
+      endPointId: c?.properties?.endPointId ?? null
+    }));
   }
 
   private async findDevicesByName(args: {

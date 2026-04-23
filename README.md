@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 87+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 88+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,12 +175,13 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 87+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 88+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
 - `get_device_info` - Get a single device by ID
 - `find_devices_by_name` - Resolve a name to parent/top-level devices (substring / exact, optional roomId and visibleOnly filters). Trimmed record output — much smaller than get_devices for lookup workflows
+- `find_device_by_endpoint` - Resolve a multi-endpoint child device by (parentId, endpointId). Stable identity for children that survives Z-Wave re-inclusion. Returns an array — endpoint 0 is commonly ambiguous
 - `control_device` - Invoke device actions (turnOn, turnOff, setValue, setColor, etc.)
 - `modify_device` - Edit top-level fields (name, roomID, enabled, visible) and nested properties in a single verified PUT
 - `get_rooms` - List rooms and sections
