@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.4.1] - 2026-04-23
+
+### Fixed
+- `find_devices_by_name` top-level filter broadened from `parentId === 0` to `parentId in {0, 1}`. On HC3 the physical Z-Wave device nodes are children of the Z-Wave root controller (device id 1), not `parentId==0`, so the original filter missed 187 of the 252 genuinely top-level devices on a typical household install (all the blinds, Walli switches, single-node sensors). 2.4.0 returned empty for most real-world name searches. Known follow-up (not in this patch): multi-sensor children whose parent is a Z-Wave node (e.g. AEON MultiSensor 6 — the "right nite motion" child is at `parentId=<node>`, `endPointId=0`, distinguished from its "right nite temp" and "right nite lux" siblings by `type` rather than endpoint) — still not findable via this tool; would need a separate `find_child_by_type(parentId, type)` or equivalent.
+
 ## [2.4.0] - 2026-04-23
 
 ### Added

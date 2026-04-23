@@ -167,7 +167,7 @@ class HC3MCPServer {
       },
       {
         name: 'find_devices_by_name',
-        description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId === 0) — child endpoints of multi-endpoint Z-Wave devices (FGRGBW442 channels, ZEN52 endpoints, etc.) are excluded; a separate tool will handle child-endpoint resolution. HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
+        description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId in {0, 1}) — i.e. system/root devices (QAs, HC3 controllers, grouping wrappers) and direct Z-Wave nodes (the physical device as a whole). Child endpoints of multi-endpoint parents (FGRGBW channels, ZEN52 endpoints 1/2, AEON MultiSensor\'s motion/temp/lux children, etc.) are excluded. For children-of-multi-endpoint-devices use find_device_by_endpoint (by endPointId). HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2149,7 +2149,8 @@ class HC3MCPServer {
     const devices: any[] = await this.makeApiRequest(endpoint);
 
     const matches = devices.filter(d => {
-      if (d?.parentId !== 0) return false;
+      const pid = d?.parentId;
+      if (pid !== 0 && pid !== 1) return false;
       if (visibleOnly && d?.visible !== true) return false;
       const name: string = typeof d?.name === 'string' ? d.name.toLowerCase() : '';
       return exact ? name === needle : name.includes(needle);
