@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 89+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 90+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 89+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 90+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -195,6 +195,7 @@ The MCP server provides 89+ tools. Names below match the MCP tool names exactly.
 
 ### System
 - `get_system_info` - HC3 version, serial, and system details
+- `snapshot` - Single-call dump of every mutable HC3 configuration surface (devices, rooms, scenes, QAs with files, globals, custom events, alarm, climate, system, users, HC3 API docs) for backup regimes and drift detection. Per-surface atomicity; opt-in zwave-parameters surface
 - `get_network_status` - Network connectivity status
 - `get_energy_data` - Energy consumption data
 - `get_diagnostics` - System health diagnostics

@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.7.0] - 2026-04-23
+
+### Added
+- `snapshot` — single-call dump of every mutable HC3 configuration surface for backup regimes and drift detection. Read-only. Per-surface atomicity via `Promise.allSettled`: one failing surface doesn't abort others; failures land in `surfaceErrors`. Default set (`devices`, `rooms`, `scenes`, `quickapps` with per-file content, `globals`, `custom-events`, `alarm`, `climate`, `system`, `users`, `hc3-docs`) runs in ~1s on a household HC3 (1006 devices, 20 QAs, 36 QA files). Opt-in surface `zwave-parameters` iterates per-Z-Wave-device with `concurrency=8`; ~3s for 185 devices / 3141 params on this firmware. Include-list and exclude-list filters; unknown surface names silently dropped. Returns `{capturedAt, elapsedMs, surfaces, surfaceErrors, includeResolved}`. Motivated by the 2026-04-23 user-rights incident where recovery required scavenging state from a Claude Code transcript — a routine snapshot regime would have prevented the scramble.
+
 ## [2.6.0] - 2026-04-23
 
 ### Added
