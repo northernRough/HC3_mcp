@@ -2,6 +2,12 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.6.0] - 2026-04-23
+
+### Added
+- `update_user_rights` — write counterpart to `get_users` for modifying a user's access rights (`devices` / `scenes` / `climateZones` / `profiles` / `alarmPartitions`). Follows the standard read-modify-write + post-write-verify pattern: reads current user, deep-merges the submitted `rights.*` subkeys onto current, full-array-replaces leaf arrays (matching HC3 PUT semantics). Post-write refetch verifies every submitted array member is present; mismatches throw. **Send-shape detail:** PUTs only `{rights: merged}` rather than the full user record — HC3 rejects full-record echo-back with `403 "Terms of service acceptance change forbidden"` because admin users cannot toggle another user's `tosAccepted` / `privacyPolicyAccepted` flags. Completes the bundle alongside `find_devices_by_name` / `find_device_by_endpoint` for manifest-driven user-rights sync resilient to Z-Wave re-inclusion.
+- Safety guards: rejects `rights.advanced.*` writes unless `allow_advanced_rights=true` (17 sensitive subkeys including `zWave`/`backup`/`access`/`update` — privilege-escalation footgun); rejects `rights.<category>.all=true` mass-grants unless `allow_grant_all=true`; rejects writes targeting `type: "superuser"` users outright.
+
 ## [2.5.0] - 2026-04-23
 
 ### Added
