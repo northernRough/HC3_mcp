@@ -1289,7 +1289,7 @@ class HC3MCPServer {
       },
       {
         name: "export_quickapp",
-        description: "Export a QuickApp to .fqa file format. Can export as open source or encrypted.",
+        description: "Export a QuickApp to .fqa (open source) or .fqax (encrypted) file. Wraps POST /api/quickApp/export/{deviceId}. Encrypted export produces a .fqax locked to a list of HC3 serial numbers — only those controllers can import it. Use encrypted + serialNumbers together when distributing a QA to specific third-party HC3 units without allowing further redistribution; leave encrypted false (default) for ordinary backup or sharing to anyone.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1329,6 +1329,50 @@ class HC3MCPServer {
             }
           },
           required: ["filePath"]
+        }
+      },
+      {
+        name: "create_quickapp",
+        description: "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Display name for the new QuickApp."
+            },
+            type: {
+              type: "string",
+              description: "Fibaro device type, e.g. 'com.fibaro.temperatureSensor', 'com.fibaro.binarySwitch', 'com.fibaro.genericDevice'. Call get_quickapp_available_types for the full firmware-current list."
+            },
+            roomId: {
+              type: "number",
+              description: "Room ID the new QA should belong to (from get_rooms). Defaults to the Default Room if omitted."
+            },
+            initialProperties: {
+              type: "object",
+              description: "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole)."
+            },
+            initialInterfaces: {
+              type: "array",
+              description: "Optional list of Fibaro interface names to attach at creation time.",
+              items: { type: "string" }
+            },
+            initialView: {
+              type: "object",
+              description: "Optional initial UI view definition (see HC3 QuickApp view schema)."
+            }
+          },
+          required: ["name", "type"]
+        }
+      },
+      {
+        name: "get_quickapp_available_types",
+        description: "List the QuickApp device types that the current HC3 firmware knows about. Returns an array of {type, label} pairs — e.g. {type: 'com.fibaro.temperatureSensor', label: 'Temperature sensor'}. Use as the authoritative list when picking a `type` for create_quickapp or when validating plua `--%%type=...` headers. Wraps GET /api/quickApp/availableTypes.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: []
         }
       },
 
@@ -1896,6 +1940,12 @@ class HC3MCPServer {
           break;
         case 'export_quickapp':
           result = await this.exportQuickApp(args);
+          break;
+        case 'create_quickapp':
+          result = await this.createQuickApp(args);
+          break;
+        case 'get_quickapp_available_types':
+          result = await this.getQuickAppAvailableTypes();
           break;
         case 'import_quickapp':
           result = await this.importQuickApp(args);
@@ -5029,6 +5079,61 @@ end
       // Export as open source
       return await this.makeApiRequest(`/api/quickApp/export/${deviceId}`, 'POST', { encrypted: false });
     }
+  }
+
+  private async createQuickApp(args: {
+    name: string;
+    type: string;
+    roomId?: number;
+    initialProperties?: Record<string, any>;
+    initialInterfaces?: string[];
+    initialView?: Record<string, any>;
+  }): Promise<any> {
+    if (!args?.name || !args?.type) {
+      throw new Error('create_quickapp requires name and type.');
+    }
+    const body: Record<string, any> = {
+      name: args.name,
+      type: args.type,
+    };
+    if (args.roomId !== undefined) body.roomId = args.roomId;
+    if (args.initialProperties !== undefined) body.initialProperties = args.initialProperties;
+    if (args.initialInterfaces !== undefined) body.initialInterfaces = args.initialInterfaces;
+    if (args.initialView !== undefined) body.initialView = args.initialView;
+
+    const created: any = await this.makeApiRequest('/api/quickApp', 'POST', body);
+    const newId = created?.id;
+    if (typeof newId !== 'number') {
+      throw new Error(
+        `create_quickapp: HC3 accepted the POST but did not return a device id. Raw response: ${JSON.stringify(created).slice(0, 400)}`
+      );
+    }
+
+    const after: any = await this.makeApiRequest(`/api/devices/${newId}`);
+    if (after?.name !== args.name) {
+      throw new Error(
+        `create_quickapp: post-create name mismatch for device ${newId}. ` +
+        `Submitted name ${JSON.stringify(args.name)}, HC3 stored ${JSON.stringify(after?.name)}.`
+      );
+    }
+    if (after?.type !== args.type) {
+      throw new Error(
+        `create_quickapp: post-create type mismatch for device ${newId}. ` +
+        `Submitted type ${JSON.stringify(args.type)}, HC3 stored ${JSON.stringify(after?.type)}.`
+      );
+    }
+
+    return {
+      deviceId: newId,
+      name: after.name,
+      type: after.type,
+      roomID: after.roomID,
+      device: after
+    };
+  }
+
+  private async getQuickAppAvailableTypes(): Promise<any> {
+    return await this.makeApiRequest('/api/quickApp/availableTypes');
   }
 
   private async importQuickApp(args: { filePath: string; roomId?: number }): Promise<any> {

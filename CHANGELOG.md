@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.3.0] - 2026-04-23
+
+Gap-filling release after an audit of HC3's authoritative OpenAPI specs at `/assets/docs/hc/plugins.json` and `/assets/docs/hc/quickapp.json` (not linked from the public Swagger UI — credit jgab for surfacing them).
+
+### Added
+- `create_quickapp` — create a brand-new empty QuickApp on HC3 from scratch (as opposed to `import_quickapp`, which loads a .fqa). Wraps `POST /api/quickApp`. Accepts `name`, `type`, optional `roomId` / `initialProperties` / `initialInterfaces` / `initialView`. Returns the HC3-assigned `deviceId` and the created device; post-create verified by refetching and confirming name + type match.
+- `get_quickapp_available_types` — list the QuickApp device types this firmware knows about. Returns 32 `{type, label}` pairs on HC3 5.202.54. Use as the authoritative list when picking `type` for `create_quickapp` or validating plua `--%%type=...` headers. Wraps `GET /api/quickApp/availableTypes`.
+
+### Changed
+- `export_quickapp` description tightened to explain what encrypted export actually does: produces a .fqax locked to a list of HC3 serial numbers that are the only controllers permitted to import it. Useful for distributing a QA to specific third-party HC3 units without allowing further redistribution. No behaviour change.
+
 ## [2.2.2] - 2026-04-22
 
 ### Changed
