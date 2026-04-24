@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.14.0] - 2026-04-24
+
+### Added
+- `create_global_variable` — pair for `delete_global_variable`. Wraps `POST /api/globalVariables`. Refuses to overwrite an existing variable (use `set_global_variable` to update). Pre-validates name against HC3's required regex `[A-Za-z][A-Za-z0-9_]*`. Supports isEnum globals with `enumValues`; validates initial value against the enum (case-sensitive) before POSTing. Post-create verify by refetch + stringified-value compare.
+
 ## [2.13.0] - 2026-04-24
 
 ### Added
