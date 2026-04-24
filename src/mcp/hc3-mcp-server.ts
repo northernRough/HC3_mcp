@@ -1140,6 +1140,41 @@ class HC3MCPServer {
           required: ['eventId'],
         },
       },
+      {
+        name: 'get_custom_event',
+        description: 'Read a single custom event by name. Wraps GET /api/customEvents/{name}. Returns {name, userDescription}. HTTP 404 if unknown.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Custom event name' }
+          },
+          required: ['name']
+        }
+      },
+      {
+        name: 'update_custom_event',
+        description: 'Update a custom event\'s userDescription and/or rename it. Wraps PUT /api/customEvents/{name}. Read-modify-write: reads current, merges submitted fields, PUTs. If newName is supplied, verifies by refetching via the new name. Otherwise verifies under the original name. Throws on mismatch.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Current custom event name' },
+            userDescription: { type: 'string', description: 'New description. Omit to leave unchanged.' },
+            newName: { type: 'string', description: 'New name. Omit to leave unchanged.' }
+          },
+          required: ['name']
+        }
+      },
+      {
+        name: 'delete_custom_event',
+        description: 'Delete a custom event by name. Wraps DELETE /api/customEvents/{name}. Reads the event first to capture userDescription as a recovery trail. Post-delete verifies by refetch expecting 404.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Custom event name to delete' }
+          },
+          required: ['name']
+        }
+      },
 
       // Location Management
       {
@@ -2316,6 +2351,15 @@ class HC3MCPServer {
           break;
         case 'create_custom_event':
           result = await this.createCustomEvent(args);
+          break;
+        case 'get_custom_event':
+          result = await this.getCustomEvent(args);
+          break;
+        case 'update_custom_event':
+          result = await this.updateCustomEvent(args);
+          break;
+        case 'delete_custom_event':
+          result = await this.deleteCustomEvent(args);
           break;
         case 'trigger_custom_event':
           result = await this.triggerCustomEvent(args);
@@ -4150,6 +4194,57 @@ class HC3MCPServer {
   private async triggerCustomEvent(args: { eventId: number }): Promise<any> {
     await this.makeApiRequest(`/api/customEvents/${args.eventId}`, 'POST');
     return `Custom event ${args.eventId} triggered successfully.`;
+  }
+
+  private async getCustomEvent(args: { name: string }): Promise<any> {
+    if (!args?.name) throw new Error('get_custom_event requires name.');
+    return await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`);
+  }
+
+  private async updateCustomEvent(args: {
+    name: string;
+    userDescription?: string;
+    newName?: string;
+  }): Promise<any> {
+    if (!args?.name) throw new Error('update_custom_event requires name.');
+    if (args.userDescription === undefined && args.newName === undefined) {
+      throw new Error('update_custom_event requires at least one of userDescription or newName.');
+    }
+    const current: any = await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`);
+    const body: Record<string, any> = { ...current };
+    if (args.userDescription !== undefined) body.userDescription = args.userDescription;
+    if (args.newName !== undefined) body.name = args.newName;
+    await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`, 'PUT', body);
+    const verifyName = args.newName ?? args.name;
+    const after: any = await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(verifyName)}`);
+    if (args.userDescription !== undefined && after.userDescription !== args.userDescription) {
+      throw new Error(
+        `update_custom_event: post-write userDescription mismatch. Submitted ${JSON.stringify(args.userDescription)}, stored ${JSON.stringify(after.userDescription)}.`
+      );
+    }
+    if (args.newName !== undefined && after.name !== args.newName) {
+      throw new Error(
+        `update_custom_event: post-write name mismatch. Submitted ${JSON.stringify(args.newName)}, stored ${JSON.stringify(after.name)}.`
+      );
+    }
+    return { event: after, renamed: args.newName !== undefined && args.newName !== args.name };
+  }
+
+  private async deleteCustomEvent(args: { name: string }): Promise<any> {
+    if (!args?.name) throw new Error('delete_custom_event requires name.');
+    const encoded = encodeURIComponent(args.name);
+    const existing: any = await this.makeApiRequest(`/api/customEvents/${encoded}`);
+    await this.makeApiRequest(`/api/customEvents/${encoded}`, 'DELETE');
+    try {
+      await this.makeApiRequest(`/api/customEvents/${encoded}`);
+      throw new Error(`delete_custom_event: post-delete verify failed — '${args.name}' still exists.`);
+    } catch (e: any) {
+      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+    }
+    return {
+      deleted: args.name,
+      lastUserDescription: existing?.userDescription ?? null
+    };
   }
 
   // Location Management Methods
