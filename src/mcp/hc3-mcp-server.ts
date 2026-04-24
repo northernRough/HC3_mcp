@@ -1732,16 +1732,60 @@ class HC3MCPServer {
       },
       {
         name: "delete_plugin",
-        description: "Delete/uninstall a plugin by type.",
+        description: "BULK uninstall of every device of a given plugin type via DELETE /api/plugins/installed?type={type}. Affects all devices of that type, not just one. For per-device deletion (including individual QuickApps), use delete_device instead. When more than one device of the type exists, this tool refuses unless allow_bulk=true — intended to prevent accidental mass-delete when the caller thinks they're removing a single device.",
         inputSchema: {
           type: "object",
           properties: {
             type: {
               type: "string",
-              description: "Plugin type to delete"
+              description: "Plugin type (e.g. 'com.fibaro.yrWeather'). All devices of this type are deleted."
+            },
+            allow_bulk: {
+              type: "boolean",
+              description: "Required when >1 device of the type exists. Defaults false."
             }
           },
           required: ["type"]
+        }
+      },
+      {
+        name: "delete_device",
+        description: "Delete a single device by id via DELETE /api/devices/{id}. Intended for QuickApps and explicitly-installed plugins. Guards: (1) refuses ids < 10 (reserved HC3 system devices); (2) reads the device first to inspect interfaces + children; (3) refuses Z-Wave devices (interfaces includes 'zwave' with no quickApp) unless allow_physical=true — the REST delete does not perform a proper Z-Wave exclusion, leaving the mesh with a ghost node entry; exclude via the HC3 Web UI for Z-Wave hardware; (4) refuses devices with children unless cascade=true, listing them in the rejection so the caller knows the blast radius. Post-delete verifies by refetch (expects HTTP 404).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "HC3 device id to delete. Must be >= 10."
+            },
+            cascade: {
+              type: "boolean",
+              description: "Allow deletion even when the device has children (children are deleted with it). Defaults false."
+            },
+            allow_physical: {
+              type: "boolean",
+              description: "Allow deletion of Z-Wave physical devices via REST. Defaults false — REST delete skips mesh exclusion."
+            }
+          },
+          required: ["deviceId"]
+        }
+      },
+      {
+        name: "delete_global_variable",
+        description: "Delete a global variable by name via DELETE /api/globalVariables/{name}. Reads the variable first to capture the last value (returned in the response as a recovery trail) and to check readOnly. Refuses readOnly globals unless allow_system=true. Post-delete verifies by refetch (expects HTTP 404).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            varName: {
+              type: "string",
+              description: "Name of the global variable to delete."
+            },
+            allow_system: {
+              type: "boolean",
+              description: "Required to delete readOnly (system) globals. Defaults false."
+            }
+          },
+          required: ["varName"]
         }
       },
     ];
@@ -2096,6 +2140,12 @@ class HC3MCPServer {
           break;
         case 'install_plugin':
           result = await this.installPlugin(args);
+          break;
+        case 'delete_device':
+          result = await this.deleteDevice(args);
+          break;
+        case 'delete_global_variable':
+          result = await this.deleteGlobalVariable(args);
           break;
         case 'delete_plugin':
           result = await this.deletePlugin(args);
@@ -5709,10 +5759,116 @@ end
     return await this.makeApiRequest(url, 'POST');
   }
 
-  private async deletePlugin(args: { type: string }): Promise<any> {
+  private async deletePlugin(args: { type: string; allow_bulk?: boolean }): Promise<any> {
     const { type } = args;
+    if (!type) throw new Error('delete_plugin requires type.');
+    const devices: any[] = await this.makeApiRequest(`/api/devices?type=${encodeURIComponent(type)}`);
+    if (devices.length > 1 && !args.allow_bulk) {
+      throw new Error(
+        `delete_plugin would uninstall ${devices.length} devices of type '${type}' (ids: ${devices.map(d => d.id).slice(0, 10).join(', ')}${devices.length > 10 ? ', …' : ''}). ` +
+        `Pass allow_bulk=true to proceed, or use delete_device(deviceId) for a single-device removal.`
+      );
+    }
     const url = `/api/plugins/installed?type=${encodeURIComponent(type)}`;
-    return await this.makeApiRequest(url, 'DELETE');
+    const res = await this.makeApiRequest(url, 'DELETE');
+    return {
+      type,
+      devicesAffected: devices.length,
+      deviceIds: devices.map(d => d.id),
+      raw: res
+    };
+  }
+
+  private async deleteDevice(args: { deviceId: number; cascade?: boolean; allow_physical?: boolean }): Promise<any> {
+    if (typeof args?.deviceId !== 'number') {
+      throw new Error('delete_device requires numeric deviceId.');
+    }
+    if (args.deviceId < 10) {
+      throw new Error(
+        `delete_device refuses deviceId ${args.deviceId}: ids < 10 are reserved HC3 system devices.`
+      );
+    }
+
+    const device: any = await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+    const interfaces: string[] = Array.isArray(device?.interfaces) ? device.interfaces : [];
+    const isQuickApp = interfaces.includes('quickApp');
+    const isPlugin = !!device?.isPlugin;
+    const isZwave = interfaces.includes('zwave');
+
+    if (isZwave && !isQuickApp && !args.allow_physical) {
+      throw new Error(
+        `delete_device refuses device ${args.deviceId} (${device.name}): it is a Z-Wave physical device (interfaces=${JSON.stringify(interfaces)}). ` +
+        `REST delete skips mesh exclusion and leaves a ghost node on the controller. Exclude via the HC3 Web UI, or pass allow_physical=true to override.`
+      );
+    }
+    if (!isQuickApp && !isPlugin && !args.allow_physical) {
+      throw new Error(
+        `delete_device refuses device ${args.deviceId} (${device.name}): not a QuickApp and not an explicitly-installed plugin (isPlugin=${isPlugin}, interfaces=${JSON.stringify(interfaces)}). Pass allow_physical=true to override.`
+      );
+    }
+
+    const children: any[] = await this.makeApiRequest(`/api/devices?parentId=${args.deviceId}`);
+    if (children.length > 0 && !args.cascade) {
+      const childSummary = children.slice(0, 10).map(c => `${c.id} (${c.name})`).join(', ');
+      throw new Error(
+        `delete_device refuses device ${args.deviceId} (${device.name}): has ${children.length} children. ` +
+        `HC3 will delete them silently. Pass cascade=true to proceed. Children: ${childSummary}${children.length > 10 ? ', …' : ''}`
+      );
+    }
+
+    await this.makeApiRequest(`/api/devices/${args.deviceId}`, 'DELETE');
+
+    try {
+      await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+      throw new Error(
+        `delete_device: post-delete verify failed — device ${args.deviceId} still exists after DELETE.`
+      );
+    } catch (e: any) {
+      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+    }
+
+    return {
+      deleted: args.deviceId,
+      name: device.name,
+      type: device.type,
+      wasQuickApp: isQuickApp,
+      wasPlugin: isPlugin,
+      childrenRemovedWith: children.length > 0
+        ? children.map(c => ({ id: c.id, name: c.name }))
+        : []
+    };
+  }
+
+  private async deleteGlobalVariable(args: { varName: string; allow_system?: boolean }): Promise<any> {
+    if (typeof args?.varName !== 'string' || args.varName.length === 0) {
+      throw new Error('delete_global_variable requires a non-empty varName.');
+    }
+    const encoded = encodeURIComponent(args.varName);
+
+    const existing: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    if (existing?.readOnly && !args.allow_system) {
+      throw new Error(
+        `delete_global_variable refuses '${args.varName}': variable is readOnly (HC3 system variable). Pass allow_system=true to override.`
+      );
+    }
+
+    await this.makeApiRequest(`/api/globalVariables/${encoded}`, 'DELETE');
+
+    try {
+      await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+      throw new Error(
+        `delete_global_variable: post-delete verify failed — '${args.varName}' still exists after DELETE.`
+      );
+    } catch (e: any) {
+      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+    }
+
+    return {
+      deleted: args.varName,
+      lastValue: existing?.value,
+      wasEnum: !!existing?.isEnum,
+      wasReadOnly: !!existing?.readOnly
+    };
   }
 
   private sendResponse(response: MCPResponse): void {

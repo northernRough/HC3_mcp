@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.8.0] - 2026-04-24
+
+### Added
+- `delete_device` — per-device deletion by id via DELETE /api/devices/{id}. Guards: refuses ids < 10 (system-reserved); refuses Z-Wave physical devices unless `allow_physical=true` (REST delete skips mesh exclusion and leaves a ghost node on the controller); refuses devices with children unless `cascade=true` (rejection includes child count + first 10 names so the blast radius is visible). Post-delete verified by refetch expecting 404. Returns `{deleted, name, type, wasQuickApp, wasPlugin, childrenRemovedWith}`.
+- `delete_global_variable` — global-variable deletion by name via DELETE /api/globalVariables/{name}. Reads the variable first to capture `lastValue` (returned in the response as a recovery trail) and the readOnly / isEnum flags. Refuses readOnly system globals unless `allow_system=true`. Post-delete verified by refetch expecting 404.
+
+### Changed
+- `delete_plugin` semantics clarified (non-breaking): description now makes plain this is a BULK uninstall of every device of a given plugin type, and directs callers to the new `delete_device` for per-device removal. Added a safety guard — when more than one device of the type exists, the tool refuses unless `allow_bulk=true`. Guard caught a real risk on a live HC3: `type: com.fibaro.genericDevice` would uninstall three unrelated user QAs at once; old unguarded behaviour would silently wipe them.
+
 ## [2.7.0] - 2026-04-23
 
 ### Added
