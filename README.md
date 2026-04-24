@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 92+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 94+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 92+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 94+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -189,7 +189,8 @@ The MCP server provides 92+ tools. Names below match the MCP tool names exactly.
 
 ### Scenes
 - `get_scenes` - List scenes with filters
-- `run_scene` - Start a scene
+- `run_scene` - Start a scene (async, returns immediately)
+- `run_scene_sync` - Run a scene synchronously, waiting for completion. Useful for sequenced automation steps
 - `stop_scene` - Stop a running scene
 - `modify_scene` - Update scene metadata (name, icon, room, etc.)
 - `update_scene_content` - Replace scene Lua (actions/conditions) content
@@ -256,6 +257,7 @@ The MCP server provides 92+ tools. Names below match the MCP tool names exactly.
 
 ### Debug
 - `get_debug_messages` - Retrieve debug messages with client-side filtering
+- `clear_debug_messages` - Clear all debug messages (returns count cleared). Useful for test loops
 
 ### System Events
 - `get_event_history` - HC3 system event feed (scene starts, device property changes, device actions) — the data behind /app/history. Supports event_type, object_id/object_type, since_timestamp (client-side) and limit (capped at 1000).

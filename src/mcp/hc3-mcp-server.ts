@@ -330,6 +330,17 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'run_scene_sync',
+        description: 'Run a scene synchronously via POST /api/scenes/{id}/executeSync. Unlike run_scene (fires async and returns immediately), this waits until the scene has finished running before returning. Useful for sequencing dependent automation steps. Returns HC3\'s response (204 No Content on success — no return payload).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: { type: 'number', description: 'Scene ID' }
+          },
+          required: ['sceneId']
+        }
+      },
+      {
         name: 'modify_scene',
         description: 'Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.',
         inputSchema: {
@@ -992,6 +1003,11 @@ class HC3MCPServer {
       },
 
       // Debug Messages
+      {
+        name: 'clear_debug_messages',
+        description: 'Clear all debug messages on HC3 via DELETE /api/debugMessages. Useful for test loops — clear before running a scene or QA action, then read get_debug_messages to see only the fresh logs. Read-then-delete: counts messages before deletion so the response reports how many were cleared.',
+        inputSchema: { type: 'object', properties: {} }
+      },
       {
         name: 'get_debug_messages',
         description: 'Read HC3 debug messages with client-side filtering. HC3 returns a fixed page of 30 messages newest-first and ignores query-param filters, so this tool paginates via the "last" cursor and applies filters locally. Returns a summary object plus the matching messages.',
@@ -1841,6 +1857,9 @@ class HC3MCPServer {
         case 'stop_scene':
           result = await this.stopScene(args);
           break;
+        case 'run_scene_sync':
+          result = await this.runSceneSync(args);
+          break;
         case 'modify_scene':
           result = await this.modifyScene(args);
           break;
@@ -2012,6 +2031,9 @@ class HC3MCPServer {
           break;
 
         // Debug Messages
+        case 'clear_debug_messages':
+          result = await this.clearDebugMessages();
+          break;
         case 'get_debug_messages':
           result = await this.getDebugMessages(args);
           break;
@@ -2566,6 +2588,19 @@ class HC3MCPServer {
   private async stopScene(args: { sceneId: number }): Promise<any> {
     await this.makeApiRequest(`/api/scenes/${args.sceneId}/kill`, 'POST', {});
     return `Scene ${args.sceneId} stopped successfully.`;
+  }
+
+  private async runSceneSync(args: { sceneId: number }): Promise<any> {
+    if (typeof args?.sceneId !== 'number') {
+      throw new Error('run_scene_sync requires numeric sceneId.');
+    }
+    const started = Date.now();
+    await this.makeApiRequest(`/api/scenes/${args.sceneId}/executeSync`, 'POST', {});
+    return {
+      sceneId: args.sceneId,
+      mode: 'sync',
+      elapsedMs: Date.now() - started
+    };
   }
 
   private async modifyScene(args: { sceneId: number; properties: Record<string, any> }): Promise<any> {
@@ -3482,6 +3517,19 @@ class HC3MCPServer {
   }
 
   // Debug Messages Methods
+  private async clearDebugMessages(): Promise<any> {
+    let cleared: number | null = null;
+    try {
+      const before: any = await this.makeApiRequest('/api/debugMessages');
+      cleared = Array.isArray(before) ? before.length
+        : (Array.isArray(before?.messages) ? before.messages.length : null);
+    } catch {
+      // non-fatal; DELETE still proceeds, just no count
+    }
+    await this.makeApiRequest('/api/debugMessages', 'DELETE');
+    return { cleared };
+  }
+
   private async getDebugMessages(args: {
     tagContains?: string;
     since?: number;

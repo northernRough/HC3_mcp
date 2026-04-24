@@ -2,6 +2,12 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.9.0] - 2026-04-24
+
+### Added
+- `run_scene_sync` — synchronous scene execution via `POST /api/scenes/{id}/executeSync`. Unlike `run_scene` (fires async and returns immediately), this waits for the scene to finish before returning. Useful for sequencing dependent automation steps. Returns `{sceneId, mode: 'sync', elapsedMs}`.
+- `clear_debug_messages` — `DELETE /api/debugMessages`. Reads the current count first and returns `{cleared: N}` so the caller knows how many were dropped. Useful for test loops — clear before a scene/QA action, then `get_debug_messages` to see only the fresh logs.
+
 ## [2.8.0] - 2026-04-24
 
 ### Added
