@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.12.0] - 2026-04-24
+
+### Added
+- `filter_devices` — server-side multi-criteria device filter via `POST /api/devices/filter`. Richer than `get_devices`' query-string filters: supports multiple ANDed predicates and projects only requested attributes (huge token-saving on a 1000-device HC3). Accepts `filters: [{filter, value[]}]` and `attributes: [...]`. Common filter keys: `deviceID`, `enabled`, `visible`, `roomID`, `parentId`, `deviceState`, `type`, `baseType`, `interface`, `isPlugin`, `hasProperty`, `hasNoProperty`.
+
 ## [2.11.0] - 2026-04-24
 
 ### Added

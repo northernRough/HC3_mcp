@@ -166,6 +166,33 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'filter_devices',
+        description: 'Server-side multi-criteria device filter via POST /api/devices/filter. Richer than get_devices\' query-string filters: accepts multiple ANDed filter predicates and projects only requested attributes — much smaller payload than get_devices when you already know which fields you need. Body: {filters: [{filter, value}], attributes: {main: [...]}}. Common filter keys: deviceID (array of ids), enabled, visible, roomID, parentId, deviceState, type, baseType, interface, isPlugin, hasProperty, hasNoProperty. Values are arrays (coerce to string if HC3 expects strings). attributes.main picks which fields to return per device.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            filters: {
+              type: 'array',
+              description: 'Array of {filter: string, value: any[]} predicates. All predicates ANDed.',
+              items: {
+                type: 'object',
+                properties: {
+                  filter: { type: 'string', description: 'Filter key, e.g. "deviceID", "enabled", "roomID", "type"' },
+                  value: { type: 'array', description: 'Values to match. Arrays of strings, numbers, or booleans.' }
+                },
+                required: ['filter', 'value']
+              }
+            },
+            attributes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Attribute names to return per device. E.g. ["id", "name", "roomID", "type"]. Omit to get all.'
+            }
+          },
+          required: ['filters']
+        }
+      },
+      {
         name: 'find_devices_by_name',
         description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId in {0, 1}) — i.e. system/root devices (QAs, HC3 controllers, grouping wrappers) and direct Z-Wave nodes (the physical device as a whole). Child endpoints of multi-endpoint parents (FGRGBW channels, ZEN52 endpoints 1/2, AEON MultiSensor\'s motion/temp/lux children, etc.) are excluded. For children-of-multi-endpoint-devices use find_device_by_endpoint (by endPointId). HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
         inputSchema: {
@@ -1927,6 +1954,9 @@ class HC3MCPServer {
         case 'get_device_info':
           result = await this.getDeviceInfo(args);
           break;
+        case 'filter_devices':
+          result = await this.filterDevices(args);
+          break;
         case 'find_devices_by_name':
           result = await this.findDevicesByName(args);
           break;
@@ -2423,6 +2453,20 @@ class HC3MCPServer {
       dead: c?.properties?.dead ?? false,
       endPointId: c?.properties?.endPointId ?? null
     }));
+  }
+
+  private async filterDevices(args: {
+    filters: Array<{ filter: string; value: any[] }>;
+    attributes?: string[];
+  }): Promise<any> {
+    if (!Array.isArray(args?.filters)) {
+      throw new Error('filter_devices requires filters array.');
+    }
+    const body: Record<string, any> = {
+      filters: args.filters,
+      attributes: { main: args.attributes && args.attributes.length > 0 ? args.attributes : [] }
+    };
+    return await this.makeApiRequest('/api/devices/filter', 'POST', body);
   }
 
   private async findDevicesByName(args: {
