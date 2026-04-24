@@ -1263,6 +1263,39 @@ class HC3MCPServer {
           properties: {},
         },
       },
+      {
+        name: 'get_notification',
+        description: 'Read a single notification by id. Wraps GET /api/notificationCenter/{id}. 404 if unknown.',
+        inputSchema: {
+          type: 'object',
+          properties: { notificationId: { type: 'number', description: 'Notification id' } },
+          required: ['notificationId']
+        }
+      },
+      {
+        name: 'update_notification',
+        description: 'Update a notification via PUT /api/notificationCenter/{id}. Read-modify-write + post-write verify on submitted fields. Typically used to mark as read or to amend the data payload.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notificationId: { type: 'number', description: 'Notification id' },
+            fields: { type: 'object', description: 'Partial update (wasRead, priority, data, canBeDeleted, etc.)' }
+          },
+          required: ['notificationId', 'fields']
+        }
+      },
+      {
+        name: 'delete_notification',
+        description: 'Delete a notification via DELETE /api/notificationCenter/{id}. Reads first to capture the data payload as a recovery trail. Refuses if canBeDeleted=false (HC3-system-protected) unless allow_system=true. Post-delete verifies by refetch expecting 404.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notificationId: { type: 'number', description: 'Notification id' },
+            allow_system: { type: 'boolean', description: 'Required to delete notifications where canBeDeleted=false. Default false.' }
+          },
+          required: ['notificationId']
+        }
+      },
 
       // Backup Management
       {
@@ -2401,6 +2434,15 @@ class HC3MCPServer {
           break;
         case 'mark_notification_read':
           result = await this.markNotificationRead(args);
+          break;
+        case 'get_notification':
+          result = await this.getNotification(args);
+          break;
+        case 'update_notification':
+          result = await this.updateNotification(args);
+          break;
+        case 'delete_notification':
+          result = await this.deleteNotification(args);
           break;
         case 'clear_all_notifications':
           result = await this.clearAllNotifications();
@@ -4387,6 +4429,49 @@ class HC3MCPServer {
   private async clearAllNotifications(): Promise<any> {
     await this.makeApiRequest('/api/panels/notifications/clear', 'POST');
     return 'All notifications cleared successfully.';
+  }
+
+  private async getNotification(args: { notificationId: number }): Promise<any> {
+    if (typeof args?.notificationId !== 'number') throw new Error('get_notification requires numeric notificationId.');
+    return await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+  }
+
+  private async updateNotification(args: {
+    notificationId: number;
+    fields: Record<string, any>;
+  }): Promise<any> {
+    if (typeof args?.notificationId !== 'number') throw new Error('update_notification requires numeric notificationId.');
+    if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
+      throw new Error('update_notification requires a non-empty fields object.');
+    }
+    const current: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    const merged = this.deepMerge(current, args.fields);
+    await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`, 'PUT', merged);
+    const after: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    this.verifyWrite(args.fields, undefined, after, `notification ${args.notificationId}`);
+    return { notificationId: args.notificationId, changedFields: Object.keys(args.fields), notification: after };
+  }
+
+  private async deleteNotification(args: { notificationId: number; allow_system?: boolean }): Promise<any> {
+    if (typeof args?.notificationId !== 'number') throw new Error('delete_notification requires numeric notificationId.');
+    const existing: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    if (existing?.canBeDeleted === false && !args.allow_system) {
+      throw new Error(
+        `delete_notification refuses notification ${args.notificationId}: canBeDeleted=false (HC3-system-protected). Pass allow_system=true to override.`
+      );
+    }
+    await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`, 'DELETE');
+    try {
+      await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+      throw new Error(`delete_notification: post-delete verify failed — notification ${args.notificationId} still exists.`);
+    } catch (e: any) {
+      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+    }
+    return {
+      deleted: args.notificationId,
+      lastType: existing?.type,
+      lastData: existing?.data
+    };
   }
 
   // Backup Management Methods
