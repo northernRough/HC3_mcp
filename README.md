@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 94+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 98+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 94+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 98+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -204,6 +204,10 @@ The MCP server provides 94+ tools. Names below match the MCP tool names exactly.
 - `get_weather` - Current weather data
 - `get_home_status` - Current home mode
 - `set_home_status` - Set home mode (Home/Away/Vacation/Night)
+- `get_profiles` - List HC3 profiles + activeProfile id (Home/Away/Vacation orchestration)
+- `get_profile` - Get one profile's detail (devices/scenes/climateZones/partitions)
+- `activate_profile` - Switch the active profile with post-activation verify
+- `modify_profile` - Update a profile (name/icon/devices/scenes/climateZones/partitions) with read-modify-write + verify
 - `get_location_info` - Home location settings
 - `update_location_settings` - Update location, timezone, and related settings
 

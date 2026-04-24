@@ -638,6 +638,44 @@ class HC3MCPServer {
           required: ['status'],
         },
       },
+      {
+        name: 'get_profiles',
+        description: 'List all HC3 profiles plus the activeProfile id. Profiles group scenes/climateZones/partitions/devices into mode-based orchestrations (Home/Away/Vacation/Night). Wraps GET /api/profiles.',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'get_profile',
+        description: 'Get a single profile by id. Wraps GET /api/profiles/{id}.',
+        inputSchema: {
+          type: 'object',
+          properties: { profileId: { type: 'number', description: 'Profile id' } },
+          required: ['profileId']
+        }
+      },
+      {
+        name: 'activate_profile',
+        description: 'Switch the active profile via POST /api/profiles/activeProfile/{id}. Triggers HC3\'s profile-activation cascade: scenes listed as "kill on activate" are killed, scenes listed as "run on activate" are run, etc. Post-activation verifies by refetching /api/profiles and confirming activeProfile has changed. Use this as the agent-level equivalent of tapping a mode button in the HC3 mobile app.',
+        inputSchema: {
+          type: 'object',
+          properties: { profileId: { type: 'number', description: 'Profile id to activate' } },
+          required: ['profileId']
+        }
+      },
+      {
+        name: 'modify_profile',
+        description: 'Modify a profile\'s configuration (name, iconId, or the devices / scenes / climateZones / partitions arrays that define what the profile orchestrates). Follows the standard read-modify-write + post-write-verify pattern: reads current, deep-merges submitted fields, PUTs, refetches, asserts merge result matches. Wraps PUT /api/profiles/{id}.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            profileId: { type: 'number', description: 'Profile id to modify' },
+            fields: {
+              type: 'object',
+              description: 'Partial update. Any of: name (string), iconId (number), devices (array), scenes (array), climateZones (array), partitions (array). Array fields fully replace — HC3 PUT semantics on array-valued properties.'
+            }
+          },
+          required: ['profileId', 'fields']
+        }
+      },
 
       // Climate Management
       {
@@ -1936,6 +1974,18 @@ class HC3MCPServer {
         // Home/Away Status
         case 'get_home_status':
           result = await this.getHomeStatus();
+          break;
+        case 'get_profiles':
+          result = await this.getProfiles();
+          break;
+        case 'get_profile':
+          result = await this.getProfile(args);
+          break;
+        case 'activate_profile':
+          result = await this.activateProfile(args);
+          break;
+        case 'modify_profile':
+          result = await this.modifyProfile(args);
           break;
         case 'set_home_status':
           result = await this.setHomeStatus(args);
@@ -3278,6 +3328,63 @@ class HC3MCPServer {
     }
     await this.makeApiRequest('/api/panels/location', 'PUT', { mode: args.status });
     return `Home status set to '${args.status}' successfully.`;
+  }
+
+  // Profile Methods
+  private async getProfiles(): Promise<any> {
+    return await this.makeApiRequest('/api/profiles');
+  }
+
+  private async getProfile(args: { profileId: number }): Promise<any> {
+    if (typeof args?.profileId !== 'number') {
+      throw new Error('get_profile requires numeric profileId.');
+    }
+    return await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+  }
+
+  private async activateProfile(args: { profileId: number }): Promise<any> {
+    if (typeof args?.profileId !== 'number') {
+      throw new Error('activate_profile requires numeric profileId.');
+    }
+    const before: any = await this.makeApiRequest('/api/profiles');
+    const profile = (before?.profiles ?? []).find((p: any) => p.id === args.profileId);
+    if (!profile) {
+      throw new Error(`activate_profile: profile ${args.profileId} not found.`);
+    }
+    await this.makeApiRequest(`/api/profiles/activeProfile/${args.profileId}`, 'POST', {});
+    const after: any = await this.makeApiRequest('/api/profiles');
+    if (after?.activeProfile !== args.profileId) {
+      throw new Error(
+        `activate_profile: post-activation verify failed. Submitted activeProfile=${args.profileId}, HC3 reports activeProfile=${after?.activeProfile}.`
+      );
+    }
+    return {
+      activated: args.profileId,
+      name: profile.name,
+      previousActive: before?.activeProfile
+    };
+  }
+
+  private async modifyProfile(args: {
+    profileId: number;
+    fields: Record<string, any>;
+  }): Promise<any> {
+    if (typeof args?.profileId !== 'number') {
+      throw new Error('modify_profile requires numeric profileId.');
+    }
+    if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
+      throw new Error('modify_profile requires a non-empty fields object.');
+    }
+    const current: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    const merged = this.deepMerge(current, args.fields);
+    await this.makeApiRequest(`/api/profiles/${args.profileId}`, 'PUT', merged);
+    const after: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    this.verifyWrite(args.fields, undefined, after, `profile ${args.profileId}`);
+    return {
+      profileId: args.profileId,
+      changedFields: Object.keys(args.fields),
+      profile: after
+    };
   }
 
   // Climate Management Methods

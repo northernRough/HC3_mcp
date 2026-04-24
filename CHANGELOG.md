@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.10.0] - 2026-04-24
+
+### Added
+- Profile management — four tools covering the practical Home/Away/Vacation orchestration workflow, wrapping the `/api/profiles` surface:
+  - `get_profiles` — list profiles + activeProfile id
+  - `get_profile` — one profile's devices/scenes/climateZones/partitions detail
+  - `activate_profile` — switch active profile, with post-activation refetch verify
+  - `modify_profile` — read-modify-write + verifyWrite on a partial fields update (name, iconId, devices, scenes, climateZones, partitions)
+
+Profile CRUD (`create_profile`, `delete_profile`), `reset_profiles`, and per-child-entity PUTs (`/profiles/{id}/scenes/{sid}` etc.) intentionally skipped for now as edge cases; the four shipped cover the practical orchestration workflow.
+
 ## [2.9.0] - 2026-04-24
 
 ### Added
