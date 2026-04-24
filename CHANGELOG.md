@@ -2,6 +2,19 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.15.0] - 2026-04-24
+
+### Added
+- Profile CRUD and association PUTs — rounds out the profile family (the earlier 2.10.0 shipped read + activate + modify; this adds the rest):
+  - `create_profile` — POST /api/profiles with post-create verify
+  - `delete_profile` — DELETE /api/profiles/{id}. Refuses if the target is the active profile; post-delete verify expecting 404
+  - `reset_profiles` — DESTRUCTIVE: resets every profile to HC3 defaults. Requires explicit `confirm: true`; otherwise refuses with a clear warning
+  - `set_profile_scene_action` — PUT /api/profiles/{pid}/scenes/{sid} with body `{actions: [...]}` and post-write verify against the profile's scenes array
+  - `set_profile_climate_zone_action` — PUT /api/profiles/{pid}/climateZones/{czid} with body `{mode, properties}` and post-write verify
+  - `set_profile_partition_action` — PUT /api/profiles/{pid}/partitions/{pid} with body `{action}` and post-write verify
+
+Body shapes inferred from the HC3 UI bundle (read-only reverse-engineering) and the stored shape of existing profiles on live HC3 — no raw-curl write probing.
+
 ## [2.14.0] - 2026-04-24
 
 ### Added

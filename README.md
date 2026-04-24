@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 106+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 112+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 106+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 112+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -214,6 +214,12 @@ The MCP server provides 106+ tools. Names below match the MCP tool names exactly
 - `get_profile` - Get one profile's detail (devices/scenes/climateZones/partitions)
 - `activate_profile` - Switch the active profile with post-activation verify
 - `modify_profile` - Update a profile (name/icon/devices/scenes/climateZones/partitions) with read-modify-write + verify
+- `create_profile` - Create a new profile (post-create verify)
+- `delete_profile` - Delete a profile (refuses the active one; post-delete verify)
+- `reset_profiles` - DESTRUCTIVE: resets every profile to HC3 defaults. Requires explicit confirm=true
+- `set_profile_scene_action` - Set how a profile handles a specific scene on activation
+- `set_profile_climate_zone_action` - Set how a profile handles a specific climate zone on activation
+- `set_profile_partition_action` - Set how a profile handles a specific alarm partition on activation
 - `get_location_info` - Home location settings
 - `update_location_settings` - Update location, timezone, and related settings
 
