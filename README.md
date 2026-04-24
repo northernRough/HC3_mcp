@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 112+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 121+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 112+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 121+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -183,6 +183,8 @@ The MCP server provides 112+ tools. Names below match the MCP tool names exactly
 - `filter_devices` - Server-side multi-criteria filter with attribute projection (POST /api/devices/filter). Much smaller payloads than get_devices when you know which fields you need
 - `find_devices_by_name` - Resolve a name to parent/top-level devices (substring / exact, optional roomId and visibleOnly filters). Trimmed record output — much smaller than get_devices for lookup workflows
 - `find_device_by_endpoint` - Resolve a multi-endpoint child device by (parentId, endpointId). Stable identity for children that survives Z-Wave re-inclusion. Returns an array — endpoint 0 is commonly ambiguous
+- `get_device_property` - Read a single device property (much smaller than get_device_info for scalar fields)
+- `cancel_delayed_action` - Cancel a queued delayed device action by (deviceId, timestamp)
 - `delete_device` - Delete a single device by id. Refuses ids <10, Z-Wave physical devices (without allow_physical), and devices with children (without cascade). Post-delete verified
 - `control_device` - Invoke device actions (turnOn, turnOff, setValue, setColor, etc.)
 - `modify_device` - Edit top-level fields (name, roomID, enabled, visible) and nested properties in a single verified PUT
@@ -199,6 +201,7 @@ The MCP server provides 112+ tools. Names below match the MCP tool names exactly
 - `run_scene_sync` - Run a scene synchronously, waiting for completion. Useful for sequenced automation steps
 - `stop_scene` - Stop a running scene
 - `modify_scene` - Update scene metadata (name, icon, room, etc.)
+- `create_scene` - Create a new scene (with HC3-required field defaults; post-create verify)
 - `update_scene_content` - Replace scene Lua (actions/conditions) content
 
 ### System
@@ -255,11 +258,17 @@ The MCP server provides 112+ tools. Names below match the MCP tool names exactly
 - `get_custom_events` - List custom event definitions
 - `create_custom_event` - Create a new custom event
 - `trigger_custom_event` - Emit a custom event
+- `get_custom_event` - Read a single custom event by name
+- `update_custom_event` - Update userDescription and/or rename (read-modify-write)
+- `delete_custom_event` - Delete by name (captures last userDescription)
 
 ### Notifications
 - `get_notifications` - List notifications
 - `mark_notification_read` - Mark a notification read
 - `clear_all_notifications` - Clear all notifications
+- `get_notification` - Read a single notification by id
+- `update_notification` - Update notification fields (wasRead, data, priority) with read-modify-write
+- `delete_notification` - Delete by id, capturing last data as recovery trail. Refuses canBeDeleted=false unless allow_system=true
 
 ### Backups
 - `can_create_backup` - Check whether backups can be created

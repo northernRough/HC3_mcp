@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.16.0] - 2026-04-24
+
+Bundled release for five FRs addressing per-item CRUD gaps across custom events, scenes, device properties, delayed actions, and notifications.
+
+### Added
+- `get_device_property` (FR3) — single-property read via GET /api/devices/{id}/properties/{propertyName}. Returns `{value, modified}` — dramatically smaller than hydrating the full device record for scalar reads like `batteryLevel` or `value`.
+- `cancel_delayed_action` (FR4) — DELETE /api/devices/action/{timestamp}/{deviceId}. Cancels a device action queued via the `delay` arg of a prior `control_device` call. Timestamp is truncated to integer seconds.
+- `get_custom_event` / `update_custom_event` / `delete_custom_event` (FR1) — per-item custom event CRUD. `update_custom_event` supports rename via `newName` with post-write refetch under the new name. `delete_custom_event` captures `userDescription` as a recovery trail.
+- `create_scene` (FR2) — POST /api/scenes. Pre-validates name length (1–50 chars) and type (lua/scenario). Sets HC3-required field defaults (mode="automatic", categories=[1], restart/protectedByPin/stopOnAlarm) that HC3's POST endpoint demands but are often omitted from docs; `roomId` required because HC3 rejects `roomId=0` on creation. Post-create verifies name + type.
+- `get_notification` / `update_notification` / `delete_notification` (FR5 partial) — per-item notification center operations. `delete_notification` refuses entries where `canBeDeleted=false` unless `allow_system=true`; captures `{type, data}` as recovery trail.
+
+### Deferred
+- `create_notification` (FR5 completion) — HC3 rejects the documented type strings (`GenericSystemNotification`, `GenericSystemNotificationRequest`) with 500 and 400 respectively across several body shapes. Accepted shape is not derivable from the UI bundle or the skill docs. Pulled from this release rather than ship something that doesn't work; will return with a targeted probe in a follow-up.
+
 ## [2.15.0] - 2026-04-24
 
 ### Added
