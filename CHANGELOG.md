@@ -2,6 +2,16 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.11.0] - 2026-04-24
+
+### Added
+- Room CRUD + batch assignment — five tools filling the rooms write gap:
+  - `get_room` — single room by id
+  - `create_room` — POST /api/rooms. Pre-validates name length ≤ 20 chars because HC3 silently truncates longer names (empirically caught on live test). Post-create verify.
+  - `modify_room` — PUT /api/rooms/{id} with read-modify-write + verifyWrite on submitted fields.
+  - `delete_room` — DELETE with two guards: refuses the default room (`isDefault: true`); refuses rooms with devices unless `reassign_to` (target roomId) is supplied to batch-move first.
+  - `assign_devices_to_room` — POST /api/rooms/{id}/groupAssignment for batch moves. Post-move verifies each device's `roomID` matches.
+
 ## [2.10.0] - 2026-04-24
 
 ### Added
