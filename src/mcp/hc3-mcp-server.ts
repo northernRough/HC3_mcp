@@ -219,6 +219,18 @@ class HC3MCPServer {
         }
       },
       {
+        name: 'get_device_property',
+        description: 'Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). Propagates 404 on unknown deviceId or propertyName. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: { type: 'number', description: 'HC3 device id' },
+            propertyName: { type: 'string', description: 'Property name (e.g. "value", "batteryLevel", "nodeId", "lastBreached")' }
+          },
+          required: ['deviceId', 'propertyName']
+        }
+      },
+      {
         name: 'find_device_by_endpoint',
         description: 'Resolve a multi-endpoint child device by its (parentId, endPointId) pair. Stable identity for children that survives Z-Wave re-inclusion: parentId resolves via the parent\'s (stable) name, endPointId is the Z-Wave endpoint number which never shifts. Pairs with find_devices_by_name (for parents). Returns an ARRAY of matching children — endPointId 0 is commonly ambiguous because multi-endpoint parents expose multiple child roles at endpoint 0 (e.g. a ZEN52 parent has both a binarySwitch and a remoteController at endpoint 0). Non-zero endpoints are usually unique. Examples: (4753, 1) → "Patio seating"; (4753, 2) → "Tub lights"; (4753, 0) → ["patio lights" binarySwitch, "patio lights remote" remoteController]. Returns minimal {id, name, type, roomID, visible, enabled, dead, endPointId} records. Fetches /api/devices?parentId={parentId} and filters by properties.endPointId in-process.',
         inputSchema: {
@@ -2081,6 +2093,9 @@ class HC3MCPServer {
         case 'find_device_by_endpoint':
           result = await this.findDeviceByEndpoint(args);
           break;
+        case 'get_device_property':
+          result = await this.getDeviceProperty(args);
+          break;
         case 'control_device':
           result = await this.controlDevice(args);
           break;
@@ -2574,6 +2589,14 @@ class HC3MCPServer {
 
   private async getDeviceInfo(args: { deviceId: number }): Promise<any> {
     return await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+  }
+
+  private async getDeviceProperty(args: { deviceId: number; propertyName: string }): Promise<any> {
+    if (typeof args?.deviceId !== 'number') throw new Error('get_device_property requires numeric deviceId.');
+    if (typeof args?.propertyName !== 'string' || args.propertyName.length === 0) {
+      throw new Error('get_device_property requires a non-empty propertyName.');
+    }
+    return await this.makeApiRequest(`/api/devices/${args.deviceId}/properties/${encodeURIComponent(args.propertyName)}`);
   }
 
   private async findDeviceByEndpoint(args: {
