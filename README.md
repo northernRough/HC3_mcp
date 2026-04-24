@@ -418,6 +418,20 @@ npm run test:coverage
 - **"HTTP 404"**: Check HC3 firmware version and API availability
 - **"Configuration incomplete"**: Ensure all required settings are provided
 
+## Security
+
+This server runs with your HC3 admin credentials and exposes write access to your home: devices, scenes, QuickApps, global variables, profiles, users, rooms, alarm partitions, and the notification centre. Any MCP client (Claude Code, Claude Desktop, Cursor, Cline, etc.) connected to it can read and mutate that state. Treat the credentials and the agent's prompts accordingly.
+
+- Credentials are taken from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optional `FIBARO_PORT`). They are never written to disk by this code.
+- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, and `CHANGELOG.md`. No `.env`, no local configuration files.
+- HC3 does not currently expose TLS on its REST surface; the credential transit is HTTP Basic auth. Run this on the same trusted network as the HC3, or front it with a reverse proxy.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Please email rather than file a public issue.
+
+## Maintenance
+
+This package is maintained for the author's personal HC3 setup and is published as-is for the wider Fibaro community. There is no SLA. Issues and PRs are welcome; response time is best-effort. Stable interfaces are SemVer-respected — patch releases are bug fixes, minors are additive, majors are breaking. Subscribe to GitHub releases on `northernRough/HC3_mcp` to track new versions.
+
 ## Known Issues
 
 - IPv6 addresses are not yet supported

@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.16.2] - 2026-04-24
+
+### Changed
+- Pre-publish housekeeping: added a Security section and Maintenance section to README, added SECURITY.md describing the trust model, supported versions, vulnerability reporting (email), and the in/out-of-scope split. Added a fork-modifications copyright line to LICENSE alongside the existing GsonSoft Development line. SECURITY.md added to the npm `files` whitelist so it ships with the tarball. No code change.
+
 ## [2.16.1] - 2026-04-24
 
 ### Fixed
