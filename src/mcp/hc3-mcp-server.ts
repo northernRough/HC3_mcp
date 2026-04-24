@@ -219,6 +219,18 @@ class HC3MCPServer {
         }
       },
       {
+        name: 'cancel_delayed_action',
+        description: 'Cancel a delayed device action that was queued via control_device with a delay value. Wraps DELETE /api/devices/action/{timestamp}/{deviceId}. Pass the Unix epoch timestamp (integer seconds — HC3 truncates) at which the action was scheduled to run, plus the target deviceId. Returns 200 on success or 404 if the pairing doesn\'t match a pending action. Useful for motion-triggered auto-off scenes that need to abort the pending off when new motion re-triggers the light.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: { type: 'number', description: 'Device id the action was queued against' },
+            timestamp: { type: 'number', description: 'Unix epoch seconds the action was scheduled for (integer only — HC3 truncates fractional)' }
+          },
+          required: ['deviceId', 'timestamp']
+        }
+      },
+      {
         name: 'get_device_property',
         description: 'Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). Propagates 404 on unknown deviceId or propertyName. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.',
         inputSchema: {
@@ -2096,6 +2108,9 @@ class HC3MCPServer {
         case 'get_device_property':
           result = await this.getDeviceProperty(args);
           break;
+        case 'cancel_delayed_action':
+          result = await this.cancelDelayedAction(args);
+          break;
         case 'control_device':
           result = await this.controlDevice(args);
           break;
@@ -2589,6 +2604,14 @@ class HC3MCPServer {
 
   private async getDeviceInfo(args: { deviceId: number }): Promise<any> {
     return await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+  }
+
+  private async cancelDelayedAction(args: { deviceId: number; timestamp: number }): Promise<any> {
+    if (typeof args?.deviceId !== 'number') throw new Error('cancel_delayed_action requires numeric deviceId.');
+    if (typeof args?.timestamp !== 'number') throw new Error('cancel_delayed_action requires numeric timestamp.');
+    const ts = Math.trunc(args.timestamp);
+    await this.makeApiRequest(`/api/devices/action/${ts}/${args.deviceId}`, 'DELETE');
+    return { cancelled: true, deviceId: args.deviceId, timestamp: ts };
   }
 
   private async getDeviceProperty(args: { deviceId: number; propertyName: string }): Promise<any> {
