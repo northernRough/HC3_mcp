@@ -11,7 +11,7 @@ Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). L
 - **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
 - **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
 - **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 104+ tools covering all aspects of HC3 management
+- **Comprehensive API Coverage**: 105+ tools covering all aspects of HC3 management
 - **QuickApp Development**: Full file manipulation capabilities for QuickApp development
 - **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
 - **Intelligent Context**: System analysis, automation suggestions, and device relationships
@@ -175,7 +175,7 @@ Once configured, the extension automatically provides an MCP server that AI assi
 
 ## Available Tools
 
-The MCP server provides 104+ tools. Names below match the MCP tool names exactly.
+The MCP server provides 105+ tools. Names below match the MCP tool names exactly.
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -271,6 +271,7 @@ The MCP server provides 104+ tools. Names below match the MCP tool names exactly
 
 ### System Events
 - `get_event_history` - HC3 system event feed (scene starts, device property changes, device actions) — the data behind /app/history. Supports event_type, object_id/object_type, since_timestamp (client-side) and limit (capped at 1000).
+- `get_refresh_states` - Live poll of HC3's native event/state-change stream (GET /api/refreshStates?last=cursor). Returns changes (state deltas) + events + new cursor. Complementary to get_event_history — refreshStates is live, event_history is retrospective
 
 ### Z-Wave Diagnostics
 - `get_zwave_mesh_health` - Aggregate mesh health from /api/devices?interface=zwave: dead/unconfigured counts, dead devices with node IDs and reasons, breakdowns by room and manufacturer

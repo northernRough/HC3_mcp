@@ -622,6 +622,19 @@ class HC3MCPServer {
         },
       },
       {
+        name: 'get_refresh_states',
+        description: 'Poll HC3\'s native event/state-change stream via GET /api/refreshStates?last={cursor}. Returns the `changes` delta (current device state snapshot for first call; only changed devices on subsequent calls) and the `events` list (discrete events since last cursor — scene starts, device actions, central scene button presses, etc.), plus a new `last` cursor to pass to the next call. This is the underlying mechanism HC3 QuickApps use for refreshStates-based event subscriptions. HC3 long-polls with up to ~30s block if no new events — expect a brief wait when everything is quiet. FIRST CALL (last=0 or omitted): returns a full snapshot, potentially hundreds of change entries. SUBSEQUENT CALLS (with prior last): incremental, usually small. Complementary to get_event_history: refreshStates is live poll; event_history is retrospective query.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            last: {
+              type: 'number',
+              description: 'Cursor from a previous call. Omit or 0 for a full snapshot. Use the `last` field from the previous response to continue polling incrementally.'
+            }
+          }
+        }
+      },
+      {
         name: 'get_event_history',
         description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first.',
         inputSchema: {
@@ -2060,6 +2073,9 @@ class HC3MCPServer {
           break;
         case 'get_device_parameters':
           result = await this.getDeviceParameters(args?.deviceId as number);
+          break;
+        case 'get_refresh_states':
+          result = await this.getRefreshStates(args);
           break;
         case 'get_event_history':
           result = await this.getEventHistory(
@@ -3522,6 +3538,11 @@ class HC3MCPServer {
       task_count: enriched.length,
       tasks: enriched
     };
+  }
+
+  private async getRefreshStates(args: { last?: number }): Promise<any> {
+    const last = typeof args?.last === 'number' ? args.last : 0;
+    return await this.makeApiRequest(`/api/refreshStates?last=${last}&lang=en`);
   }
 
   private async getEventHistory(

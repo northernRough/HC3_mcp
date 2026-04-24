@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.13.0] - 2026-04-24
+
+### Added
+- `get_refresh_states` — HC3's native event/state-change stream via `GET /api/refreshStates?last={cursor}`. Returns `changes` (device-state snapshot on first call, just deltas on subsequent calls) + `events` (discrete events: scene starts, device actions, central-scene button presses, etc.) + new `last` cursor to pass to the next call. This is what HC3 QuickApps use under the hood for refreshStates event subscriptions. Caller tracks the cursor — stateless on the tool side. First call returns a ~1 MB snapshot (980 change entries on a 1000-device install); subsequent incremental calls are small. Complementary to `get_event_history`: refreshStates is live poll, event_history is retrospective query.
+
 ## [2.12.0] - 2026-04-24
 
 ### Added
