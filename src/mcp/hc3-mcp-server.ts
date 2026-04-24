@@ -4615,7 +4615,11 @@ class HC3MCPServer {
   }
 
   private async restartQuickApp(args: { quickAppId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/quickApp/${args.quickAppId}/restart`, 'POST');
+    // /api/quickApp/{id}/restart does not exist on HC3 5.x — the UI uses
+    // /api/plugins/restart with {deviceId} for both QAs and plugin devices.
+    // restart_quickapp is now a thin alias over the same endpoint as
+    // restart_plugin (different parameter name preserved for callers).
+    await this.makeApiRequest('/api/plugins/restart', 'POST', { deviceId: args.quickAppId });
     return `QuickApp ${args.quickAppId} restarted successfully.`;
   }
 

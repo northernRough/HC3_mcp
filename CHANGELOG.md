@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" extension will be documented in this file.
 
+## [2.16.1] - 2026-04-24
+
+### Fixed
+- `restart_quickapp` was POSTing to `/api/quickApp/{id}/restart` (no body), which HC3 5.x rejects with `400 JSON_PARSE_ERROR: "invalid JSON"` on the empty body and then with `map::at` even when an empty `{}` is supplied — the path itself doesn't exist on this firmware. The HC3 UI restarts QAs via the same `/api/plugins/restart` endpoint that `restart_plugin` already uses. Routed `restart_quickapp` through that endpoint with `{deviceId}` body. Two tools, one endpoint, parameter naming preserved for callers.
+
 ## [2.16.0] - 2026-04-24
 
 Bundled release for five FRs addressing per-item CRUD gaps across custom events, scenes, device properties, delayed actions, and notifications.
