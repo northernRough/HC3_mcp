@@ -1,6 +1,6 @@
 {
   "name": "@northernrough/hc3-mcp-server",
-  "version": "2.16.2",
+  "version": "3.0.0",
   "description": "Standalone Model Context Protocol server for Fibaro Home Center 3. Actively maintained fork of jangabrielsson/HC3_mcp with verified write guardrails, bug fixes, and no local dependencies.",
   "license": "MIT",
   "author": {
@@ -30,21 +30,14 @@
     "mcp",
     "model-context-protocol",
     "home-automation",
-    "iot"
-  ],
-  "displayName": "HC3 MCP Server",
-  "publisher": "GsonSoft-development",
-  "icon": "icon.png",
-  "galleryBanner": {
-    "color": "#1e1e1e",
-    "theme": "dark"
-  },
-  "categories": [
-    "Other",
-    "Extension Packs"
-  ],
-  "activationEvents": [
-    "*"
+    "iot",
+    "claude",
+    "claude-desktop",
+    "cursor",
+    "cline",
+    "z-wave",
+    "quickapp",
+    "lua"
   ],
   "main": "./out/mcp/hc3-mcp-server.js",
   "bin": {
@@ -59,84 +52,19 @@
     "SECURITY.md"
   ],
   "engines": {
-    "node": ">=18",
-    "vscode": "^1.103.0"
-  },
-  "contributes": {
-    "commands": [
-      {
-        "command": "hc3-mcp-server.helloWorld",
-        "title": "Hello World",
-        "category": "HC3 MCP"
-      },
-      {
-        "command": "hc3-mcp-server.configure",
-        "title": "Configure Fibaro HC3 Connection",
-        "category": "HC3 MCP"
-      },
-      {
-        "command": "hc3-mcp-server.testConnection",
-        "title": "Test Fibaro HC3 Connection",
-        "category": "HC3 MCP"
-      },
-      {
-        "command": "hc3-mcp-server.configureCopilot",
-        "title": "Configure GitHub Copilot MCP",
-        "category": "HC3 MCP"
-      }
-    ],
-    "configuration": {
-      "title": "HC3 MCP Server",
-      "properties": {
-        "hc3McpServer.host": {
-          "type": "string",
-          "description": "Fibaro HC3 IP address or hostname",
-          "default": ""
-        },
-        "hc3McpServer.username": {
-          "type": "string",
-          "description": "Fibaro HC3 username",
-          "default": ""
-        },
-        "hc3McpServer.password": {
-          "type": "string",
-          "description": "Fibaro HC3 password (stored securely)",
-          "default": ""
-        },
-        "hc3McpServer.port": {
-          "type": "number",
-          "description": "Fibaro HC3 port number",
-          "default": 80,
-          "minimum": 1,
-          "maximum": 65535
-        }
-      }
-    },
-    "mcpServerDefinitionProviders": [
-      {
-        "id": "fibaro-hc3-mcp.servers",
-        "label": "Fibaro HC3 Smart Home"
-      }
-    ]
+    "node": ">=18"
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "prepublishOnly": "npm run compile",
-    "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "echo 'no tests yet' && exit 0"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.6",
     "@types/node": "18.x",
-    "@types/vscode": "^1.103.0",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@typescript-eslint/parser": "^6.19.1",
-    "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.9",
-    "canvas": "^3.2.0",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   },

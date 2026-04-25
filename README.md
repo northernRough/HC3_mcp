@@ -1,181 +1,97 @@
 # HC3 MCP Server
 
-Standalone Model Context Protocol (MCP) server for Fibaro Home Center 3 (HC3). Lets any MCP-speaking AI assistant (Claude Code, Claude Desktop, Cursor, Cline, Continue, the VS Code extension build, etc.) read and control your HC3 with just network access and credentials.
+Standalone Model Context Protocol server giving Claude, Cursor, or any MCP client live, guard-railed access to a Fibaro Home Center 3.
 
-> **Fork notice.** This is an actively maintained fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp). The original author ([jgab](https://github.com/jangabrielsson)) has moved to a [skills + plua](https://forum.fibaro.com/topic/80041-quickapp-agent-skills-support/) workflow for QuickApp development and is no longer maintaining the MCP server. He greenlit this fork to evolve independently. The fork focuses on keeping the MCP server complete and standalone (no plua dependency) for users who just want live HC3 access from an agent. Thanks to jgab for the original implementation and for the handover.
->
-> **What the fork has changed since 1.0.3**: verified write guardrails on all significant write tools (read-modify-write, post-write verification, explicit rejection of footgun actions), ~20 bug fixes (camelCase/snake_case parameter mismatches, fabricated tools removed, protocol notifications, empty-body crashes, 15-second HTTP timeout, accurate README), and four new tools (`modify_scene`, `update_scene_content`, `get_quickapp_variable`, `set_quickapp_variable`). See [CHANGELOG.md](CHANGELOG.md) for the full list.
+> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This fork adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 121+ tools total, with verified write guardrails on all destructive operations.
 
-## Features
+This is a community fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp). Upstream is no longer actively maintained; this fork is the canonical line. Credit to [jgab](https://github.com/jangabrielsson) for the original implementation.
 
-- **Complete Fibaro HC3 REST API Integration**: Access all major HC3 endpoints
-- **VS Code Extension Integration**: Seamlessly registers as an MCP server in VS Code
-- **Configuration Management**: Easy setup via VS Code settings or environment variables
-- **Comprehensive API Coverage**: 121+ tools covering all aspects of HC3 management
-- **QuickApp Development**: Full file manipulation capabilities for QuickApp development
-- **Plugin Management**: Complete plugin configuration, UI interaction, and lifecycle management
-- **Intelligent Context**: System analysis, automation suggestions, and device relationships
-- **Programming Documentation**: Built-in HC3 programming guides and examples
-- **Error Handling**: Robust error handling with detailed error messages
-- **Type Safety**: Full TypeScript implementation with proper types  
-
-## Requirements
-
-- **Fibaro Home Center 3**: A running HC3 system with network access
-- **VS Code**: Version 1.103.0 or higher
-- **Network Access**: Your VS Code environment must be able to reach your HC3 system
-- **HC3 User Account**: Valid username and password for your HC3 system
-
-## Installation & Setup
-
-1. **Install the Extension**:
-   - Install from VS Code Marketplace (coming soon)
-   - Or install from `.vsix` file using `Extensions: Install from VSIX...` command
-
-## Configuration
-
-### Method 1: VS Code Settings (Recommended)
-
-1. **Configure via Command Palette**:
-   - Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-   - Run `HC3 MCP: Configure Fibaro HC3 Connection`
-   - Follow the prompts to enter your HC3 details
-
-2. **Manual Settings**:
-   - Go to VS Code Settings
-   - Search for "HC3 MCP"
-   - Configure:
-     - **Host**: IP address of your HC3 (e.g., `192.168.1.57`)
-     - **Username**: Your HC3 username
-     - **Password**: Your HC3 password
-     - **Port**: HC3 port (default: 80)
-
-### Method 2: Environment Variables (Fallback)
-
-Create a `~/.env` file in your home directory with:
+## Install
 
 ```bash
-HC3_URL=http://192.168.1.57
-HC3_USER=your_username
-HC3_PASSWORD=your_password
+npm install -g @northernrough/hc3-mcp-server
 ```
 
-**Note**: The extension will automatically use environment variables as fallback if VS Code settings are not configured.
+Or run directly with `npx` (no install):
 
-### Testing Your Configuration
+```bash
+npx @northernrough/hc3-mcp-server
+```
 
-- Run `HC3 MCP: Test Fibaro HC3 Connection` command
-- Verify successful connection to your HC3 system
+## Configure
 
-## GitHub Copilot Configuration
+The server reads four environment variables:
 
-For GitHub Copilot to use the MCP server, you need to configure it manually:
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `FIBARO_HOST` | yes | — | HC3 IP address or hostname (e.g. `192.168.1.57`) |
+| `FIBARO_USERNAME` | yes | — | HC3 user (admin recommended for full surface) |
+| `FIBARO_PASSWORD` | yes | — | HC3 password |
+| `FIBARO_PORT` | no | `80` | HC3 port |
 
-1. **Open User Settings (JSON)** in VS Code:
-   - Press `Cmd+Shift+P` / `Ctrl+Shift+P`
-   - Type "Preferences: Open User Settings (JSON)"
+For development you can put these in a local `.env` file (the server uses `dotenv` automatically).
 
-2. **Add MCP Server Configuration**:
+## Wire into your MCP client
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
 ```json
 {
-  "github.copilot.chat.experimental.mcpServers": {
-    "hc3-smart-home": {
-      "command": "node",
-      "args": ["/path/to/your/extension/out/mcp/hc3-mcp-server.js"],
+  "mcpServers": {
+    "hc3": {
+      "command": "npx",
+      "args": ["-y", "@northernrough/hc3-mcp-server"],
       "env": {
         "FIBARO_HOST": "192.168.1.57",
         "FIBARO_USERNAME": "admin",
-        "FIBARO_PASSWORD": "your_password",
-        "FIBARO_PORT": "80"
+        "FIBARO_PASSWORD": "your_password"
       }
     }
   }
 }
 ```
 
-3. **Replace the configuration values**:
-   - Update the path to your compiled MCP server
-   - Set your HC3 IP address, username, and password
-   - Restart VS Code
+Restart Claude Desktop. The HC3 tools appear in the tools menu.
 
-4. **Test in Copilot Chat**:
-   - **Important**: Start a new chat session after configuring the extension
-   - "List my HC3 devices"
-   - "@hc3-smart-home get all devices"
+### Claude Code
 
-**Note**: If the MCP server tools are not immediately available, start a new GitHub Copilot chat session to allow it to discover the MCP server.
+```bash
+claude mcp add hc3 -- npx -y @northernrough/hc3-mcp-server \
+  --env FIBARO_HOST=192.168.1.57 \
+  --env FIBARO_USERNAME=admin \
+  --env FIBARO_PASSWORD=your_password
+```
 
-## Extension Settings
+### Cursor / Cline / Continue
 
-This extension contributes the following settings:
+Each client uses a similar JSON shape; consult its docs for the config file location. The shape is the same as Claude Desktop's:
 
-* `hc3McpServer.host`: Fibaro HC3 IP address or hostname
-* `hc3McpServer.username`: Fibaro HC3 username
-* `hc3McpServer.password`: Fibaro HC3 password (stored securely)
-* `hc3McpServer.port`: Fibaro HC3 port number (default: 80)
+```json
+{
+  "mcpServers": {
+    "hc3": {
+      "command": "npx",
+      "args": ["-y", "@northernrough/hc3-mcp-server"],
+      "env": {
+        "FIBARO_HOST": "192.168.1.57",
+        "FIBARO_USERNAME": "admin",
+        "FIBARO_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
 
-## Usage
+## What this does
 
-## Usage Examples
+This server exposes 121+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
 
-Once configured, the extension automatically provides an MCP server that AI assistants can use. You can interact with your HC3 system using natural language commands like:
+A condensed summary follows. See the live `tools/list` from the running server (or expand each section below) for the authoritative list.
 
-### Basic Device Control
-- "Show me all devices in the living room"
-- "Turn on the kitchen lights"
-- "Set the bedroom dimmer to 50%"
-- "Turn off all lights in the house"
-
-### Advanced Device Operations
-- "Show me all Z-Wave devices"
-- "Get detailed information about device 25"
-- "Set the RGB light to blue color"
-- "Turn on the garden sprinkler for 10 minutes with a 5-minute delay"
-
-### Scene Management
-- "List all scenes in the master bedroom"
-- "Run the movie night scene"
-- "Stop the current scene"
-- "Show me all Alexa-enabled scenes"
-
-### Energy Monitoring
-- "Show energy consumption for device 15"
-- "Get total energy usage for today"
-- "Which devices are consuming the most power?"
-
-### System Information
-- "What's the current weather?"
-- "Show HC3 system information"
-- "What's the current home status?"
-- "Set home mode to Away"
-
-### Smart Home Automation
-- "Create an automation to turn off all lights when I leave"
-- "Show me all motion sensors and their current state"
-- "What's the temperature in each room?"
-
-### QuickApp Development
-- "Show me the files for QuickApp 926"
-- "Get the content of the main.lua file for device 145"
-- "Create a new helper.lua file for QuickApp 82"
-- "Update the main file for QuickApp 67 with new code"
-- "Export QuickApp 45 as an encrypted file for specific gateways"
-- "Delete the old_function.lua file from QuickApp 29"
-
-### Plugin Management & Configuration
-- "Show me all installed plugins"
-- "Get the configuration interface for device 75"
-- "Update the label text for button_1 on device 45"
-- "Trigger the onReleased event for switch_main on device 33"
-- "Create a child device for multi-channel switch 88"
-- "Add energy interface to device 156"
-- "Restart the malfunctioning plugin on device 92"
-- "Update the temperature property for device 64"
-- "Show available IP camera types for installation"
-
-## Available Tools
-
-The MCP server provides 121+ tools. Names below match the MCP tool names exactly.
+<details>
+<summary><strong>Available Tools</strong> (121+)</summary>
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -342,88 +258,29 @@ The MCP server provides 121+ tools. Names below match the MCP tool names exactly
 - `install_plugin` - Install a plugin
 - `delete_plugin` - Uninstall a plugin
 
+</details>
+
 Each tool includes input validation, error handling, and detailed response data to help AI assistants understand and work with your Fibaro HC3 system effectively.
 
-## Development
+## Why this fork
 
-### Building from Source
+[Upstream](https://github.com/jangabrielsson/HC3_mcp) was a starting point, not a maintained product. The original author has moved on to a different QuickApp development workflow (his `plua` repo + skills) and has greenlit this fork for independent evolution. Significant work that lives only in this fork:
 
-```bash
-# Clone the repository
-git clone <repository-url>
-cd hc3-mcp-server
+- **Write guardrails on every mutating tool.** Read-modify-write, post-write verify, refetch-and-compare on every destructive endpoint. Catches HC3's known silent-drop classes (e.g. Z-Wave parameter writes that cache without transmitting; QA file writes that need byte-exact verification; user-rights writes that would 403 if the full record is echoed back). See `CHANGELOG.md` for the inventory of caught classes.
+- **Z-Wave diagnostics** that don't exist in upstream: `get_zwave_mesh_health`, `get_zwave_node_diagnostics` (per-node frame/CRC/security counters), `get_zwave_reconfiguration_tasks`, `get_device_parameters` (with honest provenance — values are HC3-stored, not live device readings on this firmware).
+- **Resilient name → id resolution** for manifest-driven sync that survives Z-Wave re-inclusion (`find_devices_by_name`, `find_device_by_endpoint`).
+- **Profile orchestration** end-to-end (read, activate, modify, full CRUD, association PUTs).
+- **Snapshot tool** for nightly backup regimes — single-call dump of every mutable surface with per-surface atomicity.
+- **Standalone**, no dependency on plua or any local development toolchain. Works out of the box with `npx`.
 
-# Install dependencies
-npm install
-
-# Compile TypeScript
-npm run compile
-
-# Package the extension
-npm run package
-```
-
-### Running in Development
-
-1. Open the project in VS Code
-2. Press `F5` to run the Extension Development Host
-3. Test the extension in the new VS Code window
-
-### Testing
-
-```bash
-# Run tests
-npm test
-
-# Run with coverage
-npm run test:coverage
-```
-
-## Security Considerations
-
-- **Local Network**: This extension communicates with your HC3 system over your local network
-- **Credentials**: Passwords are stored in VS Code's secure credential store
-- **API Access**: The extension uses HC3's REST API with standard HTTP Basic Authentication
-- **No Cloud**: All communication is direct between VS Code and your HC3 system
-
-## Troubleshooting
-
-### Connection Issues
-1. **Verify HC3 System**: Ensure your HC3 is powered on and accessible on the network
-2. **Check Network Settings**: Verify IP address, port, and network connectivity
-3. **Test Credentials**: Ensure username/password are correct and user has API access
-4. **Test Connection**: Use the "HC3 MCP: Test Fibaro HC3 Connection" command to verify settings
-
-### Configuration Issues
-1. **VS Code Settings**: Check that all required fields are filled in VS Code settings
-2. **Environment Variables**: If using ~/.env, ensure the file exists and has correct format:
-   ```bash
-   HC3_URL=http://192.168.1.57
-   HC3_USER=admin
-   HC3_PASSWORD=your_password
-   ```
-3. **File Permissions**: Ensure ~/.env file is readable
-4. **Restart Required**: Restart VS Code after changing ~/.env file
-
-### MCP Server Issues
-1. **Check Extension Activation**: Verify the extension is enabled and activated
-2. **Check Output Panel**: Look for error messages in VS Code Developer Console
-3. **Verify MCP Registration**: Ensure the MCP server appears in AI assistant settings
-4. **Restart VS Code**: Sometimes a restart resolves registration issues
-
-### Common Error Messages
-- **"Fibaro HC3 not configured"**: Configure settings or check ~/.env file
-- **"Connection refused"**: Check network connectivity and HC3 system status
-- **"Authentication failed"**: Verify username and password
-- **"HTTP 404"**: Check HC3 firmware version and API availability
-- **"Configuration incomplete"**: Ensure all required settings are provided
+If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may suit you better. If you maintain a household HC3 with QuickApps, scenes, and Z-Wave actors and want the agent to be able to do meaningful, safe work over the full system, this fork is what you want.
 
 ## Security
 
 This server runs with your HC3 admin credentials and exposes write access to your home: devices, scenes, QuickApps, global variables, profiles, users, rooms, alarm partitions, and the notification centre. Any MCP client (Claude Code, Claude Desktop, Cursor, Cline, etc.) connected to it can read and mutate that state. Treat the credentials and the agent's prompts accordingly.
 
 - Credentials are taken from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optional `FIBARO_PORT`). They are never written to disk by this code.
-- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, and `CHANGELOG.md`. No `.env`, no local configuration files.
+- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, and `SECURITY.md`. No `.env`, no local configuration files.
 - HC3 does not currently expose TLS on its REST surface; the credential transit is HTTP Basic auth. Run this on the same trusted network as the HC3, or front it with a reverse proxy.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md). Please email rather than file a public issue.
@@ -432,35 +289,20 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). Please email rather t
 
 This package is maintained for the author's personal HC3 setup and is published as-is for the wider Fibaro community. There is no SLA. Issues and PRs are welcome; response time is best-effort. Stable interfaces are SemVer-respected — patch releases are bug fixes, minors are additive, majors are breaking. Subscribe to GitHub releases on `northernRough/HC3_mcp` to track new versions.
 
-## Known Issues
+## Known issues
 
-- IPv6 addresses are not yet supported
-- HTTPS connections require additional configuration
-- Some advanced device types may need specific action commands
+- IPv6 addresses are not supported
+- TLS to the HC3 requires a fronting reverse proxy (HC3 firmware is HTTP-only on the REST surface)
+- Some advanced HC3 features (notification centre creation, certain Z-Wave write paths) are firmware-quirky on 5.x; tools that hit those quirks fail loudly rather than silently and document the boundary in their tool descriptions
 
 ## Contributing
 
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## Release Notes
-
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+Pull requests are welcome. The repo follows a strict branch-per-logical-change convention with read-modify-write + post-write verify on every mutating tool. See `~/code/hc3/HC3_mcp/CLAUDE.md` (in the local checkout) for the workflow expectations.
 
 ## License
 
-[MIT License](LICENSE)
+[MIT License](LICENSE). Original work copyright (c) 2024 GsonSoft Development; fork modifications and additions copyright (c) 2026 northernRough.
 
-## Support
+## Release notes
 
-For issues and questions:
-- [Fibaro Community](https://forum.fibaro.com/)
-
----
-
-**Enjoy controlling your smart home with AI assistance!** 🏠🤖
+See [CHANGELOG.md](CHANGELOG.md).

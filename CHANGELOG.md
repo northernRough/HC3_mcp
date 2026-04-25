@@ -1,6 +1,29 @@
 # Change Log
 
-All notable changes to the "hc3-mcp-server" extension will be documented in this file.
+All notable changes to the "hc3-mcp-server" package will be documented in this file.
+
+## [3.0.0] - 2026-04-25
+
+Major version bump to reflect a deliberate identity change: the package was originally a VS Code extension scaffold with the MCP server as a sub-component. Everything VS Code-specific has been removed; what's published is now a clean standalone Node MCP server.
+
+### Removed (breaking — for VS Code-extension users only)
+- All VS Code extension entry points: `src/extension.ts`, `src/mcp/mcpServerProvider.ts`, the `src/test/` extension test harness.
+- VS Code-specific files: `.vscode-test.mjs`, `.vscodeignore`, `vsc-extension-quickstart.md`, the `create-icon*.js` icon generators, `copilot-settings-example.json` (which hardcoded the upstream author's local dev path).
+- `package.json` VS Code marketplace metadata: `displayName`, `publisher`, `galleryBanner`, `categories`, `activationEvents`, `contributes` (commands + configuration + mcpServerDefinitionProviders), `engines.vscode`, the `vscode:prepublish` script, the `pretest` script.
+- VS Code-specific devDependencies: `@types/vscode`, `@vscode/test-cli`, `@vscode/test-electron`, `canvas`, `@types/mocha`. Lint dependencies preserved.
+
+The package was never published to the VS Code marketplace, so the practical user impact is zero. Anyone who installed it as a VS Code extension via local development will need to switch to the standalone-server pattern documented in the rewritten README.
+
+### Changed
+- README rewritten around the standalone-server model: leads with `npm install` / `npx`, then env-var config, then per-MCP-client wiring (Claude Desktop, Claude Code, Cursor / Cline / Continue), then a collapsed tools list. The "Why this fork" section makes the differences vs. upstream and vs. the unscoped `mcp-server-hc3` package explicit.
+- `keywords` expanded with terms users actually search (`claude`, `claude-desktop`, `cursor`, `cline`, `z-wave`, `quickapp`, `lua`).
+- `test` script replaced with a no-op placeholder (the previous `vscode-test` runner doesn't apply outside the extension harness).
+
+### Preserved
+- Tool surface and behaviour. All 121+ tools, all guardrails, all post-write verifies. No code change in `src/mcp/hc3-mcp-server.ts`.
+- Package name `@northernrough/hc3-mcp-server`.
+- Credentials model (env vars only).
+- Output path `./out/mcp/hc3-mcp-server.js` — kept rather than renaming to `./dist/index.js` (cosmetic-only churn).
 
 ## [2.16.2] - 2026-04-24
 
