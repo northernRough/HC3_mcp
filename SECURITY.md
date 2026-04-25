@@ -22,7 +22,7 @@ You are giving the agent the same operational power you have over the HC3. Treat
 
 ## Reporting a vulnerability
 
-Email **nick@mallorn.ltd** with:
+Email **dev@cheetham.org** with:
 
 - A description of the issue and where you found it (file path, tool name, or specific request shape).
 - A minimal reproduction.

@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.0.1] - 2026-04-25
+
+### Changed
+- Contact address unified: `package.json` `author.email` and `SECURITY.md` vulnerability-report address both moved to `dev@cheetham.org` — a per-project inbox separate from the maintainer's personal and consulting-business addresses. No code change.
+
 ## [3.0.0] - 2026-04-25
 
 Major version bump to reflect a deliberate identity change: the package was originally a VS Code extension scaffold with the MCP server as a sub-component. Everything VS Code-specific has been removed; what's published is now a clean standalone Node MCP server.
