@@ -2,7 +2,7 @@
 
 Standalone Model Context Protocol server giving Claude, Cursor, or any MCP client live, guard-railed access to a Fibaro Home Center 3.
 
-> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This fork adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 124+ tools total, with verified write guardrails on all destructive operations.
+> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This fork adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 125+ tools total, with verified write guardrails on all destructive operations.
 
 This is a community fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp). Upstream is no longer actively maintained; this fork is the canonical line. Credit to [jgab](https://github.com/jangabrielsson) for the original implementation.
 
@@ -86,7 +86,7 @@ Each client uses a similar JSON shape; consult its docs for the config file loca
 
 ## What this does
 
-This server exposes 124+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
+This server exposes 125+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
 
 A condensed summary follows. See the live `tools/list` from the running server (or expand each section below) for the authoritative list.
 
@@ -123,6 +123,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 ### Icons
 - `list_icons` - List all icons HC3 knows about, grouped by device/room/scene
 - `get_icon` - Fetch an icon's binary content base64-encoded; detects HC3's silent SVG-fallback for missing icons
+- `upload_icon` - Upload a new user icon. Pre-validates PNG bytes (signature, 128×128, palette mode) before posting; HC3's PNG validator silent-500s on non-palette PNGs. Auto-assigned name returned
 - `delete_icon` - Delete a user-uploaded icon. Built-in icons return 403
 
 ### System

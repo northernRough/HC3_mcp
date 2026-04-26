@@ -699,6 +699,19 @@ class HC3MCPServer {
         }
       },
       {
+        name: 'upload_icon',
+        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "User1010"}})). HC3 5.x has two undocumented PNG constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png` to produce a compatible palette PNG. Returns `{newName, newId, category, extension, hint}`.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            base64: { type: 'string', description: 'Base64-encoded image bytes (no data URL prefix). For PNG: must be 128×128 in palette mode (8-bit colormap, color type 3). For SVG: as-is.' },
+            mime: { type: 'string', description: '"image/png" or "image/svg+xml".' },
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Category — records under that bucket in list_icons.' }
+          },
+          required: ['base64', 'mime', 'category']
+        }
+      },
+      {
         name: 'delete_icon',
         description: 'Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon\'s category ("room", "scene", or "device") — passing "custom" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.',
         inputSchema: {
@@ -2323,6 +2336,9 @@ class HC3MCPServer {
         case 'get_icon':
           result = await this.getIcon(args);
           break;
+        case 'upload_icon':
+          result = await this.uploadIcon(args);
+          break;
         case 'delete_icon':
           result = await this.deleteIcon(args);
           break;
@@ -3788,6 +3804,107 @@ class HC3MCPServer {
       mime,
       sizeBytes: buf.length,
       base64: buf.toString('base64')
+    };
+  }
+
+  private async uploadIcon(args: {
+    base64: string;
+    mime: string;
+    category: 'room' | 'scene' | 'device';
+  }): Promise<any> {
+    if (!args?.base64) throw new Error('upload_icon requires base64.');
+    if (!args?.mime) throw new Error('upload_icon requires mime.');
+    if (!args?.category) throw new Error('upload_icon requires category.');
+    if (!this.config.host || !this.config.username || !this.config.password) {
+      throw new Error('Fibaro HC3 not configured.');
+    }
+    const ext = args.mime === 'image/svg+xml' ? 'svg'
+      : args.mime === 'image/png' ? 'png'
+      : args.mime === 'image/jpeg' ? 'jpg'
+      : 'png';
+    const bytes = Buffer.from(args.base64, 'base64');
+
+    // Validate PNG dimensions + palette mode at the tool boundary so callers
+    // get a clear error rather than HC3's misleading silent-500 on RGB or
+    // wrong-size PNGs.
+    if (ext === 'png') {
+      if (bytes.length < 24 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
+        throw new Error('upload_icon: provided bytes are not a valid PNG.');
+      }
+      const width = bytes.readUInt32BE(16);
+      const height = bytes.readUInt32BE(20);
+      const colorType = bytes.readUInt8(25);
+      if (width !== 128 || height !== 128) {
+        throw new Error(
+          `upload_icon: PNG must be 128x128. Got ${width}x${height}. HC3 silently 500s on other dimensions. Resize with e.g. \`magick input.png -resize 128x128 output.png\`.`
+        );
+      }
+      if (colorType !== 3) {
+        throw new Error(
+          `upload_icon: PNG must be palette mode (color type 3 / 8-bit colormap). Got color type ${colorType}. HC3 silently 500s on RGB/RGBA. Convert with e.g. \`magick in.png -dither None -colors 256 -define png:color-type=3 out.png\` or \`pngquant in.png\`.`
+        );
+      }
+    }
+
+    const before: any = await this.makeApiRequest('/api/icons');
+    const bucketBefore: any[] = (before?.[args.category] as any[]) || [];
+    const userIdsBefore = new Set(bucketBefore.map(i => i.id));
+
+    // Manual multipart so we control the bytes exactly. Node 18's FormData +
+    // Blob is fine in principle, but explicit construction matches what curl
+    // -F sends and avoids any boundary/header surprises.
+    const boundary = '----mcphc3' + Date.now().toString(16);
+    const CRLF = '\r\n';
+    const partHead = (name: string, filename?: string, type?: string) =>
+      `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"` +
+      (filename ? `; filename="${filename}"` : '') + CRLF +
+      (type ? `Content-Type: ${type}${CRLF}` : '') + CRLF;
+    const body = Buffer.concat([
+      Buffer.from(partHead('type') + args.category + CRLF + partHead('icon', `mcp.${ext}`, args.mime)),
+      bytes,
+      Buffer.from(CRLF + partHead('fileExtension') + ext + CRLF + `--${boundary}--${CRLF}`)
+    ]);
+
+    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
+    const response = await fetch(`http://${this.config.host}:${this.config.port}/api/icons`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      if (response.status === 500 && ext === 'png') {
+        throw new Error(
+          `upload_icon: HTTP 500 from HC3. The pre-checks (128x128, palette mode) passed at the tool boundary, so HC3 may be in a bad state — try again, or restart HC3 if persistent. Raw response: ${errText}`
+        );
+      }
+      throw new Error(`upload_icon: HTTP ${response.status} - ${errText}`);
+    }
+
+    // HC3 returns {id, iconSetName, fileExtension} on success. Capture from the response;
+    // also re-list as a sanity check.
+    let created: any;
+    try { created = JSON.parse(await response.text()); } catch { created = null; }
+    const after: any = await this.makeApiRequest('/api/icons');
+    const bucketAfter: any[] = (after?.[args.category] as any[]) || [];
+    const newOnes = bucketAfter.filter(i => !userIdsBefore.has(i.id));
+    if (newOnes.length === 0) {
+      throw new Error(
+        `upload_icon: post-upload verify failed — no new icon appeared in ${args.category} bucket. HC3 silently dropped the upload despite returning 2xx.`
+      );
+    }
+    const fresh = newOnes[0];
+    const newName = fresh.iconName || fresh.iconSetName;
+    return {
+      newName,
+      newId: fresh.id,
+      category: args.category,
+      extension: ext,
+      hint: `Attach with modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "${newName}"}})). Re-fetch later via get_icon({category: "${args.category}", name: "${newName}", extension: "${ext}", userIcon: true}).`
     };
   }
 

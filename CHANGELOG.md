@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.1.1] - 2026-04-26
+
+### Added
+- `upload_icon` — completes the icon CRUD set (deferred from 3.1.0). Wraps `POST /api/icons` with manual multipart/form-data construction (`type`, `icon`, `fileExtension`). HC3 ignores caller filenames and auto-assigns `User<N>` names; the tool surfaces those in the response.
+
+### Why this is a 3.1.1 not a feature in 3.1.0
+The 3.1.0 deferral attributed the upload failure to "Node 18's fetch + FormData + Blob produces a multipart body HC3 rejects with 500". That diagnosis was wrong. The actual blocker was an undocumented HC3 colorspace constraint:
+
+- HC3 5.x's PNG icon validator silent-500s on non-palette PNGs. **Color type must be 3 (8-bit colormap with PLTE chunk).** RGB (color type 2) and RGBA (color type 6) are both rejected with HTTP 500 and an empty body — no useful error text.
+- This was masked because curl-F was used to upload PNGs that happened to be palette-mode in earlier successful tests, and RGB-mode in the tests that failed. The Node multipart construction was fine all along.
+
+### Validation added at the tool boundary
+`upload_icon` now pre-checks PNG bytes: PNG signature, exact 128×128 dimensions, color type 3. Mismatches throw before the HC3 call with conversion hints (`magick -dither None -colors 256 -define png:color-type=3` or `pngquant`). Saves a confusing 500 from HC3.
+
+### Skill catalogue corrections (additive to the 3.1.0 list)
+- PNG color type: HC3 requires palette (type 3). RGB and RGBA produce silent 500s. The skill is silent on this; worth contributing.
+
 ## [3.1.0] - 2026-04-26
 
 ### Added
