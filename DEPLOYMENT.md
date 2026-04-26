@@ -6,7 +6,7 @@ This guide assumes:
 - A Raspberry Pi 5 with Pi OS 64-bit (Bookworm or later) freshly installed and updated.
 - Network access from the Pi to your HC3 (e.g. both on the same LAN).
 - A Cloudflare account with a domain whose DNS is hosted on Cloudflare. The free tier is sufficient throughout.
-- An npm account on the Pi that can install global packages, OR you'll clone this repo locally and run from `out/mcp/...`.
+- Git installed on the Pi (it usually is); a local clone of this repo at `/opt/hc3-mcp/src`. Optional alternative: install the published npm package globally instead.
 
 If you only want local desktop use (Claude Desktop / Claude Code on your Mac), **you don't need any of this**. The default stdio transport is sufficient there. This guide is specifically for the always-on HTTP path.
 
@@ -87,18 +87,7 @@ The directory is owned by root, group is the service user, mode `0750` — so ro
 
 ## 2 — Install the server (5 minutes)
 
-You have two options. Pick one.
-
-### Option A — install from npm (simpler, recommended)
-
-```bash
-sudo npm install -g @northernrough/hc3-mcp-server
-which hc3-mcp-server   # /usr/bin/hc3-mcp-server (symlink into /usr/lib/node_modules/...)
-```
-
-The systemd unit below assumes Option A (path `/usr/bin/hc3-mcp-server`). If `which` prints a different path, substitute it in the unit file.
-
-### Option B — clone and build from source (if you want master)
+Clone the repo into `/opt/hc3-mcp/src` and build from source. This is the recommended path: upgrades become a `git pull` instead of waiting on an npm publish, and you can roll back to any commit if a release misbehaves.
 
 ```bash
 sudo mkdir -p /opt/hc3-mcp
@@ -106,12 +95,25 @@ sudo chown $USER:hc3mcp /opt/hc3-mcp
 cd /opt/hc3-mcp
 git clone https://github.com/northernRough/HC3_mcp.git src
 cd src
-npm install
+npm ci
 npm run compile
 sudo chown -R hc3mcp:hc3mcp /opt/hc3-mcp
 ```
 
-The systemd unit's `ExecStart` would then be `/usr/bin/node /opt/hc3-mcp/src/out/mcp/hc3-mcp-server.js`.
+`npm ci` is preferred over `npm install` here: it installs exactly what's pinned in `package-lock.json`, is reproducible across machines, and is faster on a clean tree.
+
+The systemd unit in section 4 assumes this path (`/opt/hc3-mcp/src/out/mcp/hc3-mcp-server.js`).
+
+### Alternative: install the published npm package
+
+If you'd rather not keep a working tree on the Pi, you can install the published package globally:
+
+```bash
+sudo npm install -g @northernrough/hc3-mcp-server
+which hc3-mcp-server   # /usr/bin/hc3-mcp-server (symlink into /usr/lib/node_modules/...)
+```
+
+Trade-off: there's no `git pull` upgrade flow — you wait for the next npm publish, and you can't run an unreleased commit. If you pick this path, change the systemd unit's `ExecStart` to `/usr/bin/hc3-mcp-server` (see section 4).
 
 ---
 
@@ -224,7 +226,7 @@ Type=simple
 User=hc3mcp
 Group=hc3mcp
 EnvironmentFile=/etc/hc3-mcp/.env
-ExecStart=/usr/bin/hc3-mcp-server
+ExecStart=/usr/bin/node /opt/hc3-mcp/src/out/mcp/hc3-mcp-server.js
 Restart=on-failure
 RestartSec=5
 
@@ -253,7 +255,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now hc3-mcp
 ```
 
-If you used Option B (build from source), change the `ExecStart` line to `/usr/bin/node /opt/hc3-mcp/src/out/mcp/hc3-mcp-server.js`.
+If you used the npm-install alternative in section 2, substitute `ExecStart=/usr/bin/hc3-mcp-server` in the unit above.
 
 ### Why this unit does **not** include `MemoryDenyWriteExecute=true`
 
@@ -534,20 +536,27 @@ Cloudflare Access → Service Auth → rotate or recreate the token. Update wher
 
 ### Upgrades
 
-```bash
-# Option A users (npm install -g):
-sudo npm install -g @northernrough/hc3-mcp-server@latest
-sudo systemctl restart hc3-mcp
+For a git-clone install (the default in section 2):
 
-# Option B users (built from source):
+```bash
 cd /opt/hc3-mcp/src
 sudo -u hc3mcp git pull
-sudo -u hc3mcp npm install
+sudo -u hc3mcp npm ci
 sudo -u hc3mcp npm run compile
+sudo systemctl restart hc3-mcp
+sudo journalctl -u hc3-mcp -n 5 --no-pager
+```
+
+The repo ships a wrapper that does exactly this: `sudo /opt/hc3-mcp/src/scripts/pi-update.sh`. One command, same effect, plus a brief journal tail at the end so you can confirm the "running on HTTP" / "HC3 reachable" banner.
+
+For an npm-install upgrade (alternative path):
+
+```bash
+sudo npm install -g @northernrough/hc3-mcp-server@latest
 sudo systemctl restart hc3-mcp
 ```
 
-After upgrading, watch journalctl for the smoke-test line so you know HC3 is still reachable.
+After upgrading either way, watch journalctl for the smoke-test line so you know HC3 is still reachable.
 
 ### Disable mobile access temporarily
 
