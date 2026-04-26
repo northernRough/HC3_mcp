@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.2.1] - 2026-04-21
+
+### Added
+- **`DEPLOYMENT.md`** — step-by-step guide for running the server as a long-lived service on a Raspberry Pi 5 (or any Linux host) and exposing it to Claude on the web/mobile via a Cloudflare Tunnel + Cloudflare Access. Covers: dedicated unprivileged user, `/etc/hc3-mcp/.env` with `0640` perms, hardened systemd unit, named tunnel + DNS route, service-token-protected Access policy, and adding the endpoint as a custom connector at claude.ai. Plus ops procedures (logs, restart, token rotation, upgrades) and a troubleshooting matrix.
+- **Startup smoke test for HTTP transport** — once `server.listen` reports ready, the server makes a one-shot `GET /api/settings/info` call and logs either `HC3 reachable at <host>:<port> — softVersion <v>, serial <sn>` or `HC3 reachability check FAILED: <reason>`. A misconfigured `.env` now shows up in `journalctl` immediately at boot rather than only on first user request. Stdio transport is unchanged.
+
+### Changed
+- `package.json` `files` whitelist now includes `DEPLOYMENT.md` so the guide ships with the npm tarball.
+
 ## [3.2.0] - 2026-04-26
 
 ### Added

@@ -196,6 +196,17 @@ class HC3MCPServer {
 
     server.listen(port, host, () => {
       console.error(`Fibaro HC3 MCP server running on HTTP at http://${host}:${port}/mcp (bearer auth required)`);
+      // Startup smoke test: confirm HC3 reachability so that a misconfigured
+      // .env shows up in the logs immediately, not only on first user request.
+      void this.makeApiRequest('/api/settings/info')
+        .then((info: any) => {
+          const v = info?.softVersion ?? '?';
+          const sn = info?.serialNumber ?? '?';
+          console.error(`HC3 reachable at ${this.config.host}:${this.config.port} — softVersion ${v}, serial ${sn}`);
+        })
+        .catch((e: any) => {
+          console.error(`HC3 reachability check FAILED: ${e?.message ?? e}. Server is running but tool calls will fail until HC3 credentials/network are correct.`);
+        });
     });
   }
 

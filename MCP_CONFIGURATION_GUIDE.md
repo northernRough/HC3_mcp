@@ -1,51 +1,25 @@
-# VS Code MCP Configuration Guide
+# MCP client configuration
 
-## Configure GitHub Copilot to Use HC3 MCP Server
+The canonical configuration docs live alongside the source:
 
-1. **In the Extension Development Host window**, open User Settings (JSON):
-   - Press `Cmd+Shift+P`
-   - Type "Preferences: Open User Settings (JSON)"
-   - Select it
+- **stdio transport (Claude Desktop, Claude Code, Cursor, Cline, Continue, etc.)**
+  See the **Configure your MCP client** section of [`README.md`](./README.md).
+  This is the default transport and works for any client that can spawn a local
+  MCP server process. Configuration is a small JSON snippet pointing at
+  `hc3-mcp-server` (or `node /path/to/out/mcp/hc3-mcp-server.js`) with
+  `FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD` (and optional
+  `FIBARO_PORT`) in the `env` block.
 
-2. **Add this configuration** (replace `your_actual_password` with your HC3 password):
+- **HTTP transport + custom connector at claude.ai (web / mobile)**
+  See [`DEPLOYMENT.md`](./DEPLOYMENT.md). It walks through running the
+  server as a hardened systemd service, fronting it with a Cloudflare
+  Tunnel, locking it down with Cloudflare Access service tokens, and
+  adding the resulting `https://...` endpoint as a custom connector in
+  the claude.ai settings UI so the server is reachable from Claude on
+  the web and mobile apps.
 
-```json
-{
-  "github.copilot.chat.experimental.mcpServers": {
-    "hc3-smart-home": {
-      "command": "node",
-      "args": ["/Users/jangabrielsson/Documents/dev/HC3_mcp/out/mcp/hc3-mcp-server.js"],
-      "env": {
-        "FIBARO_HOST": "192.168.1.57",
-        "FIBARO_USERNAME": "admin",
-        "FIBARO_PASSWORD": "your_actual_password",
-        "FIBARO_PORT": "80"
-      }
-    }
-  }
-}
-```
-
-3. **Save the settings file** and **restart the Extension Development Host window**
-
-4. **Test in Copilot Chat** with:
-   - **Important**: Start a new chat session after extension setup
-   - "List my HC3 devices"
-   - "What smart home devices do I have?"
-   - "@hc3-smart-home get all devices"
-
-**Troubleshooting**: If tools aren't available, start a new GitHub Copilot chat session.
-
-## Alternative: Test with Claude Desktop
-
-If you have Claude Desktop installed, you can test there too:
-
-1. **Edit** `~/Library/Application Support/Claude/claude_desktop_config.json`
-2. **Add** the same configuration but under `"mcpServers"` instead
-3. **Restart Claude Desktop**
-
-## Troubleshooting
-
-- Make sure the path to `hc3-mcp-server.js` is correct
-- Replace the password with your actual HC3 password
-- Ensure your HC3 system is accessible at 192.168.1.57
+Old VS Code Copilot extension instructions that lived here have been
+removed: the extension scaffolding was dropped in 3.0.0 when this fork
+became a standalone npm package. Any MCP-aware client works out of the
+box — there is no Fibaro-specific extension to install on the client
+side.
