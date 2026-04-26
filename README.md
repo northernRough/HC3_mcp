@@ -31,6 +31,30 @@ The server reads four environment variables:
 
 For development you can put these in a local `.env` file (the server uses `dotenv` automatically).
 
+### HTTP transport (for Claude mobile / always-on hosts)
+
+By default the server speaks MCP over stdio, which is what Claude Desktop and Claude Code launch. To run as a long-lived HTTP server (e.g. on a Pi or container, fronted by Cloudflare Tunnel for mobile-app reachability), set:
+
+```bash
+MCP_TRANSPORT=http
+MCP_HTTP_HOST=127.0.0.1   # bind address, default 127.0.0.1
+MCP_HTTP_PORT=3000        # listen port, default 3000
+MCP_HTTP_TOKEN=<>=16-char secret>   # required; server refuses to start without it
+```
+
+Endpoints:
+- `POST /mcp` — JSON-RPC. Requires `Authorization: Bearer <MCP_HTTP_TOKEN>`.
+- `GET /mcp` — SSE stream for server-pushed messages.
+- `GET /healthz` — unauthenticated readiness check.
+
+Quick test:
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H "Authorization: Bearer $MCP_HTTP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
 ## Wire into your MCP client
 
 ### Claude Desktop

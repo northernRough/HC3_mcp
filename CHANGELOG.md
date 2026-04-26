@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.2.0] - 2026-04-26
+
+### Added
+- **HTTP transport** — opt-in via `MCP_TRANSPORT=http`. Default behaviour unchanged: stdio remains the transport for local Claude Desktop / Claude Code use, byte-for-byte identical to 3.1.1. The HTTP path enables running the server on an always-on host (Pi 5, server, container) reachable from Anthropic's cloud via a Cloudflare Tunnel for use from Claude mobile.
+
+  - `POST /mcp` — JSON-RPC envelope in, JSON-RPC envelope out. Notifications (no `id`) return `202 Accepted` with empty body.
+  - `GET /mcp` — SSE stream stub for server-initiated messages and notifications. Currently emits keep-alive comments only.
+  - `GET /healthz` — unauthenticated readiness probe (200 "ok").
+  - Bearer-token auth via `Authorization: Bearer <token>`. Constant-time comparison. Token comes from `MCP_HTTP_TOKEN`. Server refuses to start if the token is missing or shorter than 16 characters.
+  - 1 MB request body cap. Request logging to stderr includes the JSON-RPC method name but never the arguments (which can contain credentials).
+  - Pure `node:http`, no new runtime dependencies.
+
+  New env vars: `MCP_TRANSPORT` (`stdio` default | `http`), `MCP_HTTP_HOST` (default `127.0.0.1`), `MCP_HTTP_PORT` (default `3000`), `MCP_HTTP_TOKEN` (required for HTTP).
+
+### Changed
+- Internal refactor: `handleMessage` now returns `MCPResponse | null` instead of side-effecting on stdout. Both transports call into the same dispatcher. Behaviour-preserving — verified by capturing stdio responses before the refactor and byte-diffing after; zero difference.
+
 ## [3.1.1] - 2026-04-26
 
 ### Added

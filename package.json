@@ -1,6 +1,6 @@
 {
   "name": "@northernrough/hc3-mcp-server",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "description": "Standalone Model Context Protocol server for Fibaro Home Center 3. Actively maintained fork of jangabrielsson/HC3_mcp with verified write guardrails, bug fixes, and no local dependencies.",
   "license": "MIT",
   "author": {
