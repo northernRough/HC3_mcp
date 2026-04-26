@@ -99,7 +99,7 @@ The package was never published to the VS Code marketplace, so the practical use
 - `test` script replaced with a no-op placeholder (the previous `vscode-test` runner doesn't apply outside the extension harness).
 
 ### Preserved
-- Tool surface and behaviour. All 121+ tools, all guardrails, all post-write verifies. No code change in `src/mcp/hc3-mcp-server.ts`.
+- Tool surface and behaviour. All 125+ tools, all guardrails, all post-write verifies. No code change in `src/mcp/hc3-mcp-server.ts`.
 - Package name `@northernrough/hc3-mcp-server`.
 - Credentials model (env vars only).
 - Output path `./out/mcp/hc3-mcp-server.js` — kept rather than renaming to `./dist/index.js` (cosmetic-only churn).
