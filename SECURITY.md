@@ -17,8 +17,19 @@ You are giving the agent the same operational power you have over the HC3. Treat
 ## Credential handling
 
 - Credentials are read from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optionally `FIBARO_PORT`). They are never written to disk by this code.
-- The published npm tarball does **not** contain `.env`, `CLAUDE.md`, `.claude/`, or any other local configuration. Contents are limited to compiled JS, `LICENSE`, `README.md`, and `CHANGELOG.md`.
+- The published npm tarball does **not** contain `.env`, `CLAUDE.md`, `.claude/`, or any other local configuration. Contents are limited to compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, and `DEPLOYMENT.md`.
 - Credentials are sent to the HC3 over Basic auth. HC3 does not support TLS on its REST surface in current firmware; assume the host-to-HC3 link is local and trusted, or front it with a reverse proxy.
+
+## HTTP transport (3.2.0+)
+
+The optional HTTP transport (`MCP_TRANSPORT=http`) exposes the MCP server over a network socket. It supports two security postures, both of which are valid; they make different assumptions about where the security boundary lives.
+
+- **Bearer-protected (default).** Set `MCP_HTTP_TOKEN` to a 16+-character secret. Every request to `/mcp` must carry `Authorization: Bearer <token>`; mismatches return 401. Comparison is constant-time (`crypto.timingSafeEqual`). The token is the only secret that needs to be issued to clients; it does not authenticate users, just callers. Token rotation procedure is in `DEPLOYMENT.md`.
+- **Unauthenticated origin (3.3.0+).** Set `MCP_HTTP_ALLOW_UNAUTH=true` and leave `MCP_HTTP_TOKEN` unset. The server logs a loud warning at startup and accepts requests on `/mcp` with no header check. **This is only safe when an external authentication layer enforces identity** — Cloudflare Access service tokens, a reverse proxy with auth, or strict firewall rules. Picking this mode shifts the entire security boundary off the MCP server and onto that external layer. Anyone who reaches `MCP_HTTP_HOST:MCP_HTTP_PORT` directly has full read+write control of the HC3 (device control, scene execution, QuickApp edits, global variable writes). This mode exists because some MCP clients — notably claude.ai's "Add custom connector" UI — only support OAuth 2.1 with Dynamic Client Registration and cannot send a static `Authorization: Bearer` header. Without this option, those clients are blocked by the bearer wall.
+
+The server refuses to start in HTTP mode when neither flag is set, to make the choice deliberate.
+
+Either posture leaves the network shape unchanged: bind to `127.0.0.1` so the only way in is via a same-host process (cloudflared, a reverse proxy, etc.); the 1 MB request-body cap and SSE keep-alive behaviour are identical. Request logs include the JSON-RPC method name but never request arguments (which can carry credentials).
 
 ## Reporting a vulnerability
 

@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.3.0] - 2026-04-26
+
+### Added
+- **`MCP_HTTP_ALLOW_UNAUTH=true`** — opt-in flag that lets the HTTP transport start without `MCP_HTTP_TOKEN`, accepting requests on `/mcp` without any bearer check. Intended only for deployments where identity is enforced by an external layer (Cloudflare Access, reverse proxy auth, firewall rules). When the flag is set, the server emits a loud `WARNING: HTTP transport running WITHOUT bearer authentication …` line on startup and the readiness banner reads `NO AUTH — external auth layer required` instead of `bearer auth required`.
+
+  Motivation: claude.ai's "Add custom connector" flow only supports OAuth 2.1 with Dynamic Client Registration; it cannot send a static `Authorization: Bearer …` header. Without this flag, the bearer wall blocked the most widely used remote MCP client. The fix preserves defence-in-depth for other clients (the bearer path is unchanged when `MCP_HTTP_TOKEN` is set) while letting Cloudflare Access become the sole identity layer for claude.ai.
+
+### Changed
+- HTTP startup validation: when `MCP_TRANSPORT=http` and `MCP_HTTP_TOKEN` is missing, the error message now points users at `MCP_HTTP_ALLOW_UNAUTH=true` rather than just refusing. Both flags must be deliberate — with neither set, behaviour matches 3.2.x (refuse to start).
+- `DEPLOYMENT.md` rewritten end-to-end against a real Pi 5 deployment that exercised the full path. Adds: nano auto-indent trap (causes silent systemd parse failures), `127.0.0.1` vs `localhost` in cloudflared `config.yml` (cloudflared resolves `localhost` to `::1` on some hosts which IPv4-only Node servers refuse), `MemoryDenyWriteExecute=true` aarch64 V8 caveat (kills Node with SIGTRAP on Pi 5), `MCP_HTTP_ALLOW_UNAUTH=true` + Cloudflare Access section as the recommended path for claude.ai connectors.
+- `README.md`: new "External auth boundary" subsection documenting the new flag, with security caveats and a pointer to `DEPLOYMENT.md`.
+
+### Security
+- Token-protected behaviour unchanged for existing users. No breaking change.
+- The new flag is opt-in and noisy. The startup warning makes the security boundary explicit. Not setting it preserves the 3.2.x posture of refusing to start without a token.
+
 ## [3.2.1] - 2026-04-21
 
 ### Added

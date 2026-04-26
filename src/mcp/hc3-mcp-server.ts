@@ -93,11 +93,16 @@ class HC3MCPServer {
     const host = process.env.MCP_HTTP_HOST ?? '127.0.0.1';
     const port = process.env.MCP_HTTP_PORT ? parseInt(process.env.MCP_HTTP_PORT) : 3000;
     const expected = process.env.MCP_HTTP_TOKEN;
-    if (!expected || expected.length < 16) {
-      console.error('MCP_HTTP_TOKEN must be set (>= 16 chars) when MCP_TRANSPORT=http. Refusing to start.');
+    const allowUnauth = (process.env.MCP_HTTP_ALLOW_UNAUTH ?? '').toLowerCase() === 'true';
+    const haveToken = !!expected && expected.length >= 16;
+    if (!haveToken && !allowUnauth) {
+      console.error('MCP_HTTP_TOKEN must be set (>= 16 chars) when MCP_TRANSPORT=http, or set MCP_HTTP_ALLOW_UNAUTH=true to disable bearer auth (only safe behind an external auth layer such as Cloudflare Access). Refusing to start.');
       process.exit(1);
     }
-    const expectedBuf = Buffer.from(expected, 'utf8');
+    if (!haveToken && allowUnauth) {
+      console.error('WARNING: HTTP transport running WITHOUT bearer authentication (MCP_HTTP_ALLOW_UNAUTH=true). The MCP server has full read+write control of HC3. Anyone able to reach this endpoint can fully control your HC3, including device control, scene execution, QuickApp edits, and global variable writes. Ensure an external authentication layer (Cloudflare Access, reverse proxy auth, firewall rules) is enforcing identity.');
+    }
+    const expectedBuf = haveToken ? Buffer.from(expected!, 'utf8') : Buffer.alloc(0);
 
     const constantTimeEq = (a: string): boolean => {
       const ab = Buffer.from(a, 'utf8');
@@ -125,14 +130,18 @@ class HC3MCPServer {
         return;
       }
 
-      // Bearer auth on every other path.
-      const authHeader = req.headers['authorization'];
-      const supplied = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : '';
-      if (!supplied || !constantTimeEq(supplied)) {
-        writeJson(res, 401, { error: 'unauthorized' });
-        return;
+      // Bearer auth on every other path, unless explicitly disabled via
+      // MCP_HTTP_ALLOW_UNAUTH=true. When disabled, identity is expected to be
+      // enforced by an external layer (Cloudflare Access, reverse proxy, firewall).
+      if (haveToken) {
+        const authHeader = req.headers['authorization'];
+        const supplied = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+          ? authHeader.slice(7).trim()
+          : '';
+        if (!supplied || !constantTimeEq(supplied)) {
+          writeJson(res, 401, { error: 'unauthorized' });
+          return;
+        }
       }
 
       if (method === 'GET' && url === '/mcp') {
@@ -195,7 +204,8 @@ class HC3MCPServer {
     });
 
     server.listen(port, host, () => {
-      console.error(`Fibaro HC3 MCP server running on HTTP at http://${host}:${port}/mcp (bearer auth required)`);
+      const authMode = haveToken ? 'bearer auth required' : 'NO AUTH — external auth layer required';
+      console.error(`Fibaro HC3 MCP server running on HTTP at http://${host}:${port}/mcp (${authMode})`);
       // Startup smoke test: confirm HC3 reachability so that a misconfigured
       // .env shows up in the logs immediately, not only on first user request.
       void this.makeApiRequest('/api/settings/info')

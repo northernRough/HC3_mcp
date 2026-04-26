@@ -39,11 +39,11 @@ By default the server speaks MCP over stdio, which is what Claude Desktop and Cl
 MCP_TRANSPORT=http
 MCP_HTTP_HOST=127.0.0.1   # bind address, default 127.0.0.1
 MCP_HTTP_PORT=3000        # listen port, default 3000
-MCP_HTTP_TOKEN=<>=16-char secret>   # required; server refuses to start without it
+MCP_HTTP_TOKEN=<>=16-char secret>   # required by default; see "external auth" below
 ```
 
 Endpoints:
-- `POST /mcp` — JSON-RPC. Requires `Authorization: Bearer <MCP_HTTP_TOKEN>`.
+- `POST /mcp` — JSON-RPC. Requires `Authorization: Bearer <MCP_HTTP_TOKEN>` (unless external auth mode is enabled, see below).
 - `GET /mcp` — SSE stream for server-pushed messages.
 - `GET /healthz` — unauthenticated readiness check.
 
@@ -54,6 +54,22 @@ curl -X POST http://127.0.0.1:3000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
+
+#### External auth boundary (Cloudflare Access / reverse proxy)
+
+Some MCP clients — notably the **claude.ai custom connector** at the time of writing — only support OAuth 2.1 with Dynamic Client Registration and cannot send a static `Authorization: Bearer …` header. To use the server with such a client, you can disable bearer auth on the MCP layer and rely on an external authentication layer (Cloudflare Access, a reverse proxy with auth, IP allowlists, etc.) to enforce identity:
+
+```bash
+MCP_TRANSPORT=http
+MCP_HTTP_HOST=127.0.0.1
+MCP_HTTP_PORT=3000
+MCP_HTTP_ALLOW_UNAUTH=true   # opt-in; disables bearer check on /mcp
+# MCP_HTTP_TOKEN unset
+```
+
+When `MCP_HTTP_ALLOW_UNAUTH=true` is set and `MCP_HTTP_TOKEN` is not, the server logs a loud warning at startup and accepts requests on `/mcp` without checking any header. **Anyone able to reach `MCP_HTTP_HOST:MCP_HTTP_PORT` then has full read+write control of HC3** — device control, scene execution, QuickApp edits, global variable writes. Binding to `127.0.0.1` and exposing the endpoint via Cloudflare Tunnel + Cloudflare Access (with a service token or SSO policy) is the recommended deployment for this mode. See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for a step-by-step walkthrough.
+
+Both flags must be deliberate: with neither `MCP_HTTP_TOKEN` nor `MCP_HTTP_ALLOW_UNAUTH=true` set, the server refuses to start in HTTP mode.
 
 ## Wire into your MCP client
 
