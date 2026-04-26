@@ -39,7 +39,7 @@ By default the server speaks MCP over stdio, which is what Claude Desktop and Cl
 MCP_TRANSPORT=http
 MCP_HTTP_HOST=127.0.0.1   # bind address, default 127.0.0.1
 MCP_HTTP_PORT=3000        # listen port, default 3000
-MCP_HTTP_TOKEN=<>=16-char secret>   # required by default; see "external auth" below
+MCP_HTTP_TOKEN=<at least 16 chars>   # required by default; see "external auth" below
 ```
 
 Endpoints:
@@ -57,7 +57,13 @@ curl -X POST http://127.0.0.1:3000/mcp \
 
 #### External auth boundary (Cloudflare Access / reverse proxy)
 
-Some MCP clients — notably the **claude.ai custom connector** at the time of writing — only support OAuth 2.1 with Dynamic Client Registration and cannot send a static `Authorization: Bearer …` header. To use the server with such a client, you can disable bearer auth on the MCP layer and rely on an external authentication layer (Cloudflare Access, a reverse proxy with auth, IP allowlists, etc.) to enforce identity:
+Which Claude surface is talking to the server matters here:
+
+- **Claude Desktop** and **Claude Code with stdio** — no HTTP, no token. Skip this section.
+- **Claude Code with HTTP transport** (`claude mcp add --transport http --header "Authorization: Bearer ..."`) — can pass a static bearer token. Use `MCP_HTTP_TOKEN` and you're done.
+- **claude.ai custom connectors** (web app and the iOS / Android mobile apps) — at time of writing these only support OAuth 2.1 with Dynamic Client Registration and **cannot send a static `Authorization: Bearer …` header**. This is the case that needs the workaround below.
+
+To use the server from a claude.ai custom connector (web or mobile), disable bearer auth on the MCP layer and rely on an external authentication layer (Cloudflare Access, a reverse proxy with auth, IP allowlists, etc.) to enforce identity:
 
 ```bash
 MCP_TRANSPORT=http
@@ -131,7 +137,7 @@ This server exposes 125+ tools spanning the full HC3 read and write surface, wit
 A condensed summary follows. See the live `tools/list` from the running server (or expand each section below) for the authoritative list.
 
 <details>
-<summary><strong>Available Tools</strong> (121+)</summary>
+<summary><strong>Available Tools</strong> (125+)</summary>
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -326,7 +332,7 @@ If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may su
 This server runs with your HC3 admin credentials and exposes write access to your home: devices, scenes, QuickApps, global variables, profiles, users, rooms, alarm partitions, and the notification centre. Any MCP client (Claude Code, Claude Desktop, Cursor, Cline, etc.) connected to it can read and mutate that state. Treat the credentials and the agent's prompts accordingly.
 
 - Credentials are taken from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optional `FIBARO_PORT`). They are never written to disk by this code.
-- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, and `SECURITY.md`. No `.env`, no local configuration files.
+- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, and `DEPLOYMENT.md`. No `.env`, no local configuration files.
 - HC3 does not currently expose TLS on its REST surface; the credential transit is HTTP Basic auth. Run this on the same trusted network as the HC3, or front it with a reverse proxy.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md). Please email rather than file a public issue.
