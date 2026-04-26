@@ -2,6 +2,21 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.1.0] - 2026-04-26
+
+### Added
+- `list_icons` — wraps `GET /api/icons`. Returns the three-bucket metadata `{device, room, scene}` (1012 entries on a populated install).
+- `get_icon` — fetches an icon's binary content, base64-encoded. Resolves to `/assets/icon/fibaro/{rooms|scena|...}/<name>.<ext>` for built-ins or `/assets/userIcons/...` when `userIcon: true`. Detects HC3's silent fallback behaviour: if a `.png` is requested but HC3 returns `image/svg+xml`, that's the firmware's 1.9 KB "unknown icon" SVG substituted for a missing asset, and the tool throws rather than handing the caller HTML/SVG bytes labelled as a PNG. Returns `{name, extension, mime, sizeBytes, base64}`.
+- `delete_icon` — wraps `DELETE /api/icons` with the correct shape: query params `type`, `id`, `name`, `fileExtension` (NOT a JSON body, NOT `type=custom` — both wrong in the skill docs and the official Fibaro reference). Resolves `id` automatically from `list_icons` if not supplied. Built-in icons cannot be deleted (HC3 returns 403); the tool surfaces that.
+
+### Deferred
+- `upload_icon` — wraps `POST /api/icons` with multipart/form-data. End-to-end research done (HC3 expects fields `type`/`icon`/`fileExtension`, requires PNGs to be exactly 128×128, ignores caller-supplied name and auto-assigns `User<N>`), but Node 18's built-in `fetch` + `FormData` + `Blob` produces a multipart body HC3 rejects with HTTP 500 — even when the same byte-level shape via `curl -F` works. Manual buffer construction with explicit boundary also rejected. Rather than ship a tool that doesn't work, deferred pending either a tcpdump comparison of the curl vs. fetch request bytes or adding a `form-data` npm dependency. For now, image upload is a manual `curl -F` step until this is resolved.
+
+### Skill catalogue corrections (worth contributing back)
+- `POST /api/icons` body shape: skill documents `{name, content: "data:..."}` JSON; correct shape is multipart/form-data with `type`, `icon` (file), `fileExtension`. HC3 ignores any caller-supplied name and auto-assigns `User<N>`.
+- `DELETE /api/icons` body shape: skill documents `{type: "custom", name, fileExtension}` JSON; correct shape is query parameters `type` (room|scene|device, NOT "custom"), `id` (required, omitted from skill), `name`, `fileExtension`.
+- PNG icon dimensions: skill silent on this; HC3 5.x rejects all sizes other than 128×128 with `400 INVALID_ICON_SIZE` for room/scene/device PNG icons.
+
 ## [3.0.1] - 2026-04-25
 
 ### Changed

@@ -680,6 +680,39 @@ class HC3MCPServer {
 
       // Diagnostic Information
       {
+        name: 'list_icons',
+        description: 'List all icons HC3 knows about, grouped by `device` / `room` / `scene`. Each entry has the icon name, fileExtension (typically "png" or "svg"), and an internal id. Built-in icons live under /assets/icon/fibaro/{rooms,scena,...}/; user-uploaded icons live under /assets/userIcons/...',
+        inputSchema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'get_icon',
+        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Built-in icons resolve to /assets/icon/fibaro/{category}/{name}.{ext}; user-uploaded icons resolve to /assets/userIcons/{category}/{name}.{ext} when userIcon=true. Returns {name, mime, base64, sizeBytes}. The MCP itself does not manipulate images — decode, edit (e.g. with ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Maps to URL segment: "room"→rooms, "scene"→scena, "device"→{deviceType}/{iconSetName}.' },
+            name: { type: 'string', description: 'Icon name (e.g. "room_bedroom"). For device icons see list_icons → device[].iconSetName.' },
+            extension: { type: 'string', description: 'File extension. Defaults to "png" for room/scene, must be supplied accurately for device icons (often "svg").' },
+            userIcon: { type: 'boolean', description: 'If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false.' }
+          },
+          required: ['category', 'name']
+        }
+      },
+      {
+        name: 'delete_icon',
+        description: 'Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon\'s category ("room", "scene", or "device") — passing "custom" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Icon name (typically User<N>).' },
+            fileExtension: { type: 'string', description: 'File extension matching the stored icon ("png" or "svg").' },
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Used both for the existence pre-check and as the type query param.' },
+            id: { type: 'number', description: 'Optional. If omitted, looked up via list_icons.' }
+          },
+          required: ['name', 'fileExtension', 'category']
+        }
+      },
+      {
         name: 'get_diagnostics',
         description: 'Get system diagnostic information',
         inputSchema: {
@@ -2284,6 +2317,15 @@ class HC3MCPServer {
         case 'snapshot':
           result = await this.snapshot(args);
           break;
+        case 'list_icons':
+          result = await this.listIcons();
+          break;
+        case 'get_icon':
+          result = await this.getIcon(args);
+          break;
+        case 'delete_icon':
+          result = await this.deleteIcon(args);
+          break;
         case 'get_diagnostics':
           result = await this.getDiagnostics();
           break;
@@ -3700,6 +3742,103 @@ class HC3MCPServer {
       surfaceErrors,
       includeResolved: selected
     };
+  }
+
+  // Icon methods
+  private async listIcons(): Promise<any> {
+    return await this.makeApiRequest('/api/icons');
+  }
+
+  private async getIcon(args: {
+    category: 'room' | 'scene' | 'device';
+    name: string;
+    extension?: string;
+    userIcon?: boolean;
+  }): Promise<any> {
+    if (!args?.category) throw new Error('get_icon requires category.');
+    if (!args?.name) throw new Error('get_icon requires name.');
+    const ext = args.extension ?? 'png';
+    const segment = args.category === 'room' ? 'rooms'
+      : args.category === 'scene' ? 'scena'
+      : args.category;
+    const base = args.userIcon ? '/assets/userIcons' : '/assets/icon/fibaro';
+    const path = `${base}/${segment}/${encodeURIComponent(args.name)}.${ext}`;
+    const url = `http://${this.config.host}:${this.config.port}${path}`;
+    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Basic ${auth}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      throw new Error(`get_icon: HTTP ${response.status} fetching ${path}`);
+    }
+    const mime = response.headers.get('content-type') ?? 'application/octet-stream';
+    const buf = Buffer.from(await response.arrayBuffer());
+    // Detect HC3's silent-fallback for missing icons: when a .png path is
+    // requested but the server returns image/svg+xml, HC3 has substituted its
+    // 1888-byte "unknown icon" SVG fallback rather than 404'ing.
+    if (ext === 'png' && mime.startsWith('image/svg')) {
+      throw new Error(
+        `get_icon: ${path} not found — HC3 silently returned its SVG "unknown icon" fallback (1.9 KB) instead of 404. Check name/extension via list_icons.`
+      );
+    }
+    return {
+      name: args.name,
+      extension: ext,
+      mime,
+      sizeBytes: buf.length,
+      base64: buf.toString('base64')
+    };
+  }
+
+  private async deleteIcon(args: {
+    name: string;
+    fileExtension: string;
+    category: 'room' | 'scene' | 'device';
+    id?: number;
+  }): Promise<any> {
+    if (!args?.name) throw new Error('delete_icon requires name.');
+    if (!args?.fileExtension) throw new Error('delete_icon requires fileExtension.');
+    if (!args?.category) throw new Error('delete_icon requires category.');
+
+    const before: any = await this.makeApiRequest('/api/icons');
+    const bucket: any[] = (before?.[args.category] as any[]) || [];
+    const found = bucket.find(i =>
+      i.iconName === args.name || i.iconSetName === args.name
+    );
+    if (!found) {
+      throw new Error(
+        `delete_icon: '${args.name}' not found in ${args.category} bucket. ` +
+        `Use list_icons to inspect.`
+      );
+    }
+    const id = args.id ?? found.id;
+    if (typeof id !== 'number') {
+      throw new Error(`delete_icon: could not resolve id for '${args.name}'. Pass id explicitly.`);
+    }
+
+    // HC3's DELETE /api/icons uses query params (NOT a JSON body) and requires
+    // type ∈ {device, room, scene} (NOT "custom" as some docs say) plus id,
+    // name, and fileExtension. All four are required.
+    const params = new URLSearchParams({
+      type: args.category,
+      id: String(id),
+      name: args.name,
+      fileExtension: args.fileExtension,
+    });
+    await this.makeApiRequest(`/api/icons?${params.toString()}`, 'DELETE');
+
+    const after: any = await this.makeApiRequest('/api/icons');
+    const stillThere = (after?.[args.category] as any[] ?? []).find(i =>
+      i.iconName === args.name || i.iconSetName === args.name
+    );
+    if (stillThere) {
+      throw new Error(
+        `delete_icon: post-delete verify failed — '${args.name}' still in the ${args.category} bucket. ` +
+        `Built-in icons cannot be deleted via the API; only user-uploaded icons (User<N>) can.`
+      );
+    }
+    return { deleted: args.name, id, category: args.category };
   }
 
   private async getDiagnostics(): Promise<any> {
