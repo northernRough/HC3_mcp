@@ -60,15 +60,17 @@ class HC3MCPServer {
     let buffer = '';
     process.stdin.on('data', (chunk: string) => {
       buffer += chunk;
-      
+
       // Process complete JSON-RPC messages
       let newlineIndex;
       while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, newlineIndex).trim();
         buffer = buffer.slice(newlineIndex + 1);
-        
+
         if (line) {
-          this.handleMessage(line);
+          this.handleMessage(line).then(resp => {
+            if (resp) this.sendResponse(resp);
+          });
         }
       }
     });
@@ -81,50 +83,49 @@ class HC3MCPServer {
     console.error('Fibaro HC3 MCP server running on stdio');
   }
 
-  private async handleMessage(message: string): Promise<void> {
+  /**
+   * Transport-agnostic dispatcher. Parses a raw JSON-RPC line and returns the
+   * response envelope (or null for notifications). The stdio transport writes
+   * the returned response to stdout; the HTTP transport writes it to the HTTP
+   * response body.
+   */
+  public async handleMessage(message: string): Promise<MCPResponse | null> {
     let request: MCPRequest;
     try {
       request = JSON.parse(message);
     } catch (error) {
-      this.sendError(undefined, -32700, 'Parse error');
-      return;
+      return this.errorResponse(undefined, -32700, 'Parse error');
     }
 
     // Notifications (no id, or method starts with "notifications/") must not receive a response.
     if (request.id === undefined || request.method?.startsWith('notifications/')) {
-      return;
+      return null;
     }
 
     try {
       switch (request.method) {
         case 'initialize':
-          this.handleInitialize(request);
-          break;
+          return this.handleInitialize(request);
         case 'tools/list':
-          this.handleListTools(request);
-          break;
+          return this.handleListTools(request);
         case 'tools/call':
-          await this.handleCallTool(request);
-          break;
+          return await this.handleCallTool(request);
         case 'ping':
-          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: {} });
-          break;
+          return { jsonrpc: '2.0', id: request.id, result: {} };
         case 'resources/list':
-          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: { resources: [] } });
-          break;
+          return { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
         case 'prompts/list':
-          this.sendResponse({ jsonrpc: '2.0', id: request.id, result: { prompts: [] } });
-          break;
+          return { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         default:
-          this.sendError(request.id, -32601, `Method not found: ${request.method}`);
+          return this.errorResponse(request.id, -32601, `Method not found: ${request.method}`);
       }
     } catch (error) {
-      this.sendError(request.id, -32603, 'Internal error');
+      return this.errorResponse(request.id, -32603, 'Internal error');
     }
   }
 
-  private handleInitialize(request: MCPRequest): void {
-    this.sendResponse({
+  private handleInitialize(request: MCPRequest): MCPResponse {
+    return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
@@ -137,10 +138,10 @@ class HC3MCPServer {
           version: '0.1.0',
         },
       },
-    });
+    };
   }
 
-  private handleListTools(request: MCPRequest): void {
+  private handleListTools(request: MCPRequest): MCPResponse {
     const tools: MCPTool[] = [
       // Device Management
       {
@@ -2206,16 +2207,16 @@ class HC3MCPServer {
       },
     ];
 
-    this.sendResponse({
+    return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
         tools,
       },
-    });
+    };
   }
 
-  private async handleCallTool(request: MCPRequest): Promise<void> {
+  private async handleCallTool(request: MCPRequest): Promise<MCPResponse> {
     const { name, arguments: args } = request.params;
 
     try {
@@ -2670,7 +2671,7 @@ class HC3MCPServer {
           throw new Error(`Unknown tool: ${name}`);
       }
 
-      this.sendResponse({
+      return {
         jsonrpc: '2.0',
         id: request.id,
         result: {
@@ -2681,10 +2682,10 @@ class HC3MCPServer {
             },
           ],
         },
-      });
+      };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.sendError(request.id, -32000, errorMessage);
+      return this.errorResponse(request.id, -32000, errorMessage);
     }
   }
 
@@ -7170,8 +7171,8 @@ end
     process.stdout.write(JSON.stringify(response) + '\n');
   }
 
-  private sendError(id: string | number | undefined, code: number, message: string, data?: any): void {
-    this.sendResponse({
+  private errorResponse(id: string | number | undefined, code: number, message: string, data?: any): MCPResponse {
+    return {
       jsonrpc: '2.0',
       id,
       error: {
@@ -7179,7 +7180,7 @@ end
         message,
         data,
       },
-    });
+    };
   }
 }
 
