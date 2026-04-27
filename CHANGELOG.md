@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.3.1] - 2026-04-27
+
+### Fixed
+- `serverInfo.version` in the MCP `initialize` response now reflects the package version. It was hard-coded to `'0.1.0'` when the standalone fork landed in 3.0.0 and never updated, so every connecting MCP client was being told the wrong version of the server it was talking to.
+- `.env.example` keys corrected from the unused `HC3_URL` / `HC3_USER` / `HC3_PASSWORD` / `HC3_PORT` to the `FIBARO_*` names the code actually reads. Anyone copying the example file to `.env` got a server that couldn't reach HC3 — variables were silently undefined.
+- `claude-config-example.json` replaced the original upstream maintainer's hard-coded local development path with the canonical `npx @northernrough/hc3-mcp-server` invocation already documented in README.
+- `package-lock.json` version field synced with `package.json` (had drifted to `3.0.0` since the standalone fork; bumped via `npm version patch`).
+- README accuracy sweep: `Available Tools (121+)` header corrected to `(125+)` to match the actual tool count and the neighbouring `125+` claims; mangled `<>=16-char secret>` token-length hint fixed; `DEPLOYMENT.md` added to the published-tarball file list (it was already in `package.json` `files[]`).
+
+### Changed
+- README's "External auth boundary" section expanded to spell out which Claude surfaces actually need `MCP_HTTP_ALLOW_UNAUTH=true` (claude.ai web/mobile custom connectors only) versus which can use bearer auth via header (Claude Code with HTTP transport via `claude mcp add --transport http --header ...`). Earlier wording named only "claude.ai custom connector" and risked confusing readers wiring up Claude Code's HTTP transport.
+- `DEPLOYMENT.md` reorganised: git-clone install is now the recommended Pi deployment path, with `npm install -g` demoted to a brief alternative. Decouples Pi upgrades from npm publish cadence — upgrade flow becomes `git pull && npm ci && npm run compile && systemctl restart hc3-mcp`. The published npm package itself is unchanged and remains the right path for users who prefer a binary install.
+
+### Added
+- `scripts/pi-update.sh` — one-command wrapper for the git-clone Pi upgrade flow with a brief `journalctl` tail to confirm the startup banner. Mode `100755` in git, no `chmod` needed after clone. Not shipped in the npm tarball (it's only useful from a working tree).
+
 ## [3.3.0] - 2026-04-26
 
 ### Added
