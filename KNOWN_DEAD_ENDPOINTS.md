@@ -18,12 +18,27 @@ arrays, generic 500s) rather than hard failures, sometimes for many
 firmware revisions before someone noticed. Cataloguing them here saves
 the next maintainer from re-probing the same dead paths.
 
+**Two categories** of dead endpoint, distinguished here because the
+remediation is different:
+
+- **Permanent dead** — the endpoint family has been removed from the
+  firmware. Every revision tested returns the same error. The only fix
+  is to route around them via a working alternative; the endpoint will
+  not come back.
+- **STARTING_SERVICES-conditional** — the endpoint depends on internal
+  HC3 services (panel-services cluster) that may be in a starting,
+  failed, or recovered state. They return 501 when the service isn't
+  running. Across firmware upgrades or controller reboots, individual
+  endpoints in this set can come back to life or break again.
+  Tools that call them should fail clean rather than silently return
+  empty data.
+
 ---
 
-## Hard-error dead endpoints
+## Hard-error dead endpoints — permanent
 
-These return a non-2xx status (or in one case, 200 with empty body) and are
-unusable as-is.
+These have been confirmed non-functional on every firmware tested. The
+endpoint family is gone; the remediation is to route around it.
 
 ### `GET /api/energy` — HTTP 500
 
@@ -58,6 +73,34 @@ that aren't accessible via REST. `get_energy_data({deviceId: N})` since 3.4.1
 returns the device's energy-meter registration row from
 `/api/energy/devices` instead, with a precise error if the device isn't a
 registered meter.
+
+### `GET /api/alarms/v1/partitions/{id}` — HTTP 404
+
+```
+$ curl -s -u "$U:$P" -o /dev/null -w "%{http_code}\n" http://$HC3/api/alarms/v1/partitions/1
+404
+$ curl -s -u "$U:$P" http://$HC3/api/alarms/v1/partitions
+[]   # works (empty on this controller, but the route exists and routes correctly)
+```
+
+The bare-id partition endpoint is not exposed; only the list form
+returns. Same shape as the `/api/energy/{id}` and `/api/quickApp/{id}`
+patterns: parent-list endpoint works, child-by-id form doesn't.
+
+**Working alternative:** `GET /api/alarms/v1/partitions` returns the
+full list; filter by id in the caller. Used by `get_alarm_partition`
+since 3.6.2 — the wrapper fetches the list and filters in-process,
+throwing a precise error if the id isn't present.
+
+---
+
+## Hard-error dead endpoints — STARTING_SERVICES-conditional
+
+These return 501 (or 502) when HC3's panel-services cluster isn't fully
+running. They have come back to life across firmware upgrades and gone
+dead again on subsequent ones; treat the dead state as "the firmware's
+current condition" rather than "permanent". Tools that call them should
+fail clean, not silently return empty arrays.
 
 ### `GET /api/quickApp/` — HTTP 501
 

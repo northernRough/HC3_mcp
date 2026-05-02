@@ -14,7 +14,13 @@ export const alarm: ToolModule = {
     },
     {
       name: 'get_alarm_partition',
-      description: 'Get specific alarm partition by ID',
+      description:
+        'Get specific alarm partition by ID. The bare-id endpoint ' +
+        '/api/alarms/v1/partitions/{id} returns 404 on current HC3 firmware ' +
+        '(5.20x); the wrapper fetches the full partition list via ' +
+        '/api/alarms/v1/partitions and filters in-process. See ' +
+        'KNOWN_DEAD_ENDPOINTS.md for the catalogue of dead endpoints this ' +
+        'server routes around.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -101,7 +107,20 @@ export const alarm: ToolModule = {
     },
 
     async get_alarm_partition(hc3, args: { partitionId: number }): Promise<any> {
-      return await hc3.request(`/api/alarms/v1/partitions/${args.partitionId}`);
+      // /api/alarms/v1/partitions/{id} returns 404 on current firmware (5.20x).
+      // Same dead-endpoint pattern as /api/energy/{id} and /api/quickApp/{id}
+      // (fixed in 3.4.1 and 3.5.1). Fetch the full partition list and filter.
+      const partitions = await hc3.request('/api/alarms/v1/partitions') as any[];
+      const found = (partitions || []).find((p: any) => p?.id === args.partitionId);
+      if (!found) {
+        throw new Error(
+          `Alarm partition ${args.partitionId} not found in /api/alarms/v1/partitions. ` +
+          `The bare-id endpoint /api/alarms/v1/partitions/{id} is also dead on current ` +
+          `HC3 firmware; this wrapper routes around it via the list. ` +
+          `Use get_alarm_partitions to enumerate available partitions.`,
+        );
+      }
+      return found;
     },
 
     async arm_alarm_partition(hc3, args: { partitionId: number; armingType: string }): Promise<any> {

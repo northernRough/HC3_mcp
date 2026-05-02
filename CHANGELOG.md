@@ -2,6 +2,16 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.6.2] - 2026-05-02
+
+### Fixed
+- **`get_alarm_partition` calls a 404 endpoint.** The bare-id endpoint `GET /api/alarms/v1/partitions/{id}` returns HTTP 404 on current firmware (5.20x), even when the id exists in the list returned by `/api/alarms/v1/partitions`. Same dead-endpoint pattern as `/api/energy/{id}` (fixed 3.4.1) and `/api/quickApp/{id}` (fixed 3.5.1). Surfaced by Phase 6 of the read-only test sweep.
+
+  The wrapper now fetches the full partition list via `/api/alarms/v1/partitions` and filters in-process. Throws a precise error if the requested id isn't present, pointing the caller at `get_alarm_partitions` to enumerate available partitions.
+
+### Changed
+- **`KNOWN_DEAD_ENDPOINTS.md` restructured into two categories** — *permanent* and *STARTING_SERVICES-conditional* — to distinguish endpoint families that have been removed from firmware (no realistic prospect of return; route around) from endpoints that depend on HC3's panel-services cluster (can come back to life across firmware upgrades or controller reboots; tools should fail clean rather than silently empty). Added the new `/api/alarms/v1/partitions/{id}` entry under the permanent category.
+
 ## [3.6.1] - 2026-05-02
 
 ### Fixed
