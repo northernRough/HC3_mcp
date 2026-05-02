@@ -2,9 +2,9 @@
 
 Standalone Model Context Protocol server giving Claude, Cursor, or any MCP client live, guard-railed access to a Fibaro Home Center 3.
 
-> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This fork adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 125+ tools total, with verified write guardrails on all destructive operations.
+> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This server adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 125+ tools total, with verified write guardrails on all destructive operations.
 
-This is a community fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp). Upstream is no longer actively maintained; this fork is the canonical line. Credit to [jgab](https://github.com/jangabrielsson) for the original implementation.
+This project began as a fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp) but has since been substantially rewritten — the tool surface grew roughly 3×, every write tool gained read-modify-write + post-write-verify guards, an HTTP transport was added for remote use, and (in 3.4.0) the codebase was rearchitected from a single 7,300-line class into 23 per-domain modules. Credit to [jgab](https://github.com/jangabrielsson) for the original concept and starting point.
 
 ## Install
 
@@ -314,18 +314,20 @@ A condensed summary follows. See the live `tools/list` from the running server (
 
 Each tool includes input validation, error handling, and detailed response data to help AI assistants understand and work with your Fibaro HC3 system effectively.
 
-## Why this fork
+## How this differs from upstream and `mcp-server-hc3`
 
-[Upstream](https://github.com/jangabrielsson/HC3_mcp) was a starting point, not a maintained product. The original author has moved on to a different QuickApp development workflow (his `plua` repo + skills) and has greenlit this fork for independent evolution. Significant work that lives only in this fork:
+[Upstream](https://github.com/jangabrielsson/HC3_mcp) was a starting point, not a maintained product. The original author has moved on to a different QuickApp development workflow (his `plua` repo + skills) and has greenlit independent evolution of this line. Almost no upstream code remains on the runtime path — what's been added since then:
 
 - **Write guardrails on every mutating tool.** Read-modify-write, post-write verify, refetch-and-compare on every destructive endpoint. Catches HC3's known silent-drop classes (e.g. Z-Wave parameter writes that cache without transmitting; QA file writes that need byte-exact verification; user-rights writes that would 403 if the full record is echoed back). See `CHANGELOG.md` for the inventory of caught classes.
-- **Z-Wave diagnostics** that don't exist in upstream: `get_zwave_mesh_health`, `get_zwave_node_diagnostics` (per-node frame/CRC/security counters), `get_zwave_reconfiguration_tasks`, `get_device_parameters` (with honest provenance — values are HC3-stored, not live device readings on this firmware).
+- **Z-Wave diagnostics**: `get_zwave_mesh_health`, `get_zwave_node_diagnostics` (per-node frame/CRC/security counters), `get_zwave_reconfiguration_tasks`, `get_device_parameters` (with honest provenance — values are HC3-stored, not live device readings on this firmware).
 - **Resilient name → id resolution** for manifest-driven sync that survives Z-Wave re-inclusion (`find_devices_by_name`, `find_device_by_endpoint`).
 - **Profile orchestration** end-to-end (read, activate, modify, full CRUD, association PUTs).
 - **Snapshot tool** for nightly backup regimes — single-call dump of every mutable surface with per-surface atomicity.
+- **HTTP transport** with bearer auth and a Cloudflare-Access-friendly unauthenticated mode for claude.ai custom connectors. See `DEPLOYMENT.md`.
+- **Modular architecture** (3.4.0): 23 per-domain tool modules under `src/mcp/tools/`, with shared write-verify helpers in `src/mcp/util.ts` and a tool-registry dispatcher in `src/mcp/tools/registry.ts`. The orchestrator is 244 lines.
 - **Standalone**, no dependency on plua or any local development toolchain. Works out of the box with `npx`.
 
-If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may suit you better. If you maintain a household HC3 with QuickApps, scenes, and Z-Wave actors and want the agent to be able to do meaningful, safe work over the full system, this fork is what you want.
+If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may suit you better. If you maintain a household HC3 with QuickApps, scenes, and Z-Wave actors and want the agent to be able to do meaningful, safe work over the full system, this is what you want.
 
 ## Security
 
