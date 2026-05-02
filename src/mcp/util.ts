@@ -1,6 +1,17 @@
 // Shared utilities used by multiple tool modules and server-class methods.
 // Pure functions, no `this` binding, no HC3 coupling.
 
+export async function tolerantFetch<T>(
+  _label: string,
+  promise: Promise<T>
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+  try {
+    return { ok: true, value: await promise };
+  } catch (err) {
+    return { ok: false, error: (err as Error)?.message ?? String(err) };
+  }
+}
+
 export function deepEqual(a: any, b: any): boolean {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
