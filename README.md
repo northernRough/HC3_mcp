@@ -2,7 +2,7 @@
 
 Standalone Model Context Protocol server giving Claude, Cursor, or any MCP client live, guard-railed access to a Fibaro Home Center 3.
 
-> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This server adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 125+ tools total, with verified write guardrails on all destructive operations.
+> **Not to be confused with the unscoped `mcp-server-hc3` package on npm.** That package covers a smaller core surface (rooms, devices, scenes). This server adds QuickApp file management, Z-Wave diagnostics, profile orchestration, custom events, alarm partitions, and 130+ tools total, with verified write guardrails on all destructive operations.
 
 This project began as a fork of [jangabrielsson/HC3_mcp](https://github.com/jangabrielsson/HC3_mcp) but has since been substantially rewritten — the tool surface grew roughly 3×, every write tool gained read-modify-write + post-write-verify guards, an HTTP transport was added for remote use, and (in 3.4.0) the codebase was rearchitected from a single 7,300-line class into 23 per-domain modules. Credit to [jgab](https://github.com/jangabrielsson) for the original concept and starting point.
 
@@ -132,12 +132,12 @@ Each client uses a similar JSON shape; consult its docs for the config file loca
 
 ## What this does
 
-This server exposes 125+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
+This server exposes 130+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
 
 A condensed summary follows. See the live `tools/list` from the running server (or expand each section below) for the authoritative list.
 
 <details>
-<summary><strong>Available Tools</strong> (125+)</summary>
+<summary><strong>Available Tools</strong> (130+)</summary>
 
 ### Devices and Rooms
 - `get_devices` - List devices, with filters for type, room, interface, visibility, and more
@@ -275,7 +275,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 ### QuickApp File Management
 - `list_quickapp_files` - List source files for a QuickApp
 - `get_quickapp_file` - Get a single file's content
-- `create_quickapp_file` - Create a new source file
+- `create_quickapp_file` - Create a new source file (arg: `fileName`; renamed from `name` in 4.0.0)
 - `update_quickapp_file` - Update an existing source file
 - `update_multiple_quickapp_files` - Batch update multiple files
 - `delete_quickapp_file` - Delete a source file (main files cannot be deleted)
@@ -310,6 +310,12 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `install_plugin` - Install a plugin
 - `delete_plugin` - Uninstall a plugin
 
+### Audit (cross-cutting, dev-time)
+Read-only batch tools that walk multiple HC3 surfaces (QAs + scenes + globals + devices) to answer questions a single-domain tool can't. Stateless; do not modify HC3. Cost: 30-90s per call on a typical HC3 — they fetch every QA file and every scene to grep through.
+- `audit_id_references` - Find every place a device id is referenced across all QuickApp source files, every Lua/scenario scene's actions and conditions, every JSON (block-editor) scene's nested action tree, and every global variable's value. Universal HC3 question: *"if I delete or replace this device, what breaks?"*
+- `audit_qa_devices` - For a given QuickApp, parse every numeric device id its source files reference and classify each as ALIVE / DEAD / DELETED via `/api/devices/{id}` (`properties.dead` / `properties.deleted`). Optional `bindAware: true` mode also parses `bind("RoleStem", { ... })` descriptors and runs the L0-L4 resolver waterfall (cached / endpoint / nameInParent / newParentEndpoint / globalName) on each role entry — useful for spotting descriptors whose cached id has drifted after a Z-Wave Reconfigure
+- `introspect_device_group` - Take a `Devices.X.Y = { foo = 1234, bar = 5678 }` numeric group inside a QA file and return a structured snapshot of the live state behind each id. Auto-detects flat vs endpoint mode. Output formats: `json` (canonical), `markdown-table` (pasteable into a doc), `bind-lua` (ready-to-paste descriptor block matching the SceneManager bind() pattern), `yaml`
+
 </details>
 
 Each tool includes input validation, error handling, and detailed response data to help AI assistants understand and work with your Fibaro HC3 system effectively.
@@ -324,8 +330,20 @@ Each tool includes input validation, error handling, and detailed response data 
 - **Profile orchestration** end-to-end (read, activate, modify, full CRUD, association PUTs).
 - **Snapshot tool** for nightly backup regimes — single-call dump of every mutable surface with per-surface atomicity.
 - **HTTP transport** with bearer auth and a Cloudflare-Access-friendly unauthenticated mode for claude.ai custom connectors. See `DEPLOYMENT.md`.
-- **Modular architecture** (3.4.0): 23 per-domain tool modules under `src/mcp/tools/`, with shared write-verify helpers in `src/mcp/util.ts` and a tool-registry dispatcher in `src/mcp/tools/registry.ts`. The orchestrator is 244 lines.
+- **Modular architecture** (3.4.0): 24 per-domain tool modules under `src/mcp/tools/`, with shared write-verify helpers in `src/mcp/util.ts` and a tool-registry dispatcher in `src/mcp/tools/registry.ts`. The orchestrator is 244 lines.
 - **Standalone**, no dependency on plua or any local development toolchain. Works out of the box with `npx`.
+- **Audit family** (3.5.0+): `audit_id_references`, `audit_qa_devices` (with optional bind-aware L0-L4 resolver waterfall), `introspect_device_group` (json / markdown-table / bind-lua / yaml outputs). Read-only batch tools that walk QAs + scenes + globals + devices to surface drift across surfaces.
+
+## Migrating from 3.x to 4.x
+
+Single breaking change. The QuickApp file-arg was inconsistently named across the QA-file tools — three used `fileName`, two used `name`. 4.0.0 settles on **`fileName` everywhere**, immediately, with no deprecation shim.
+
+If you're upgrading from any 3.x release:
+
+- `create_quickapp_file` — rename argument `name` → `fileName`.
+- `update_multiple_quickapp_files` — within each item in the `files` array, rename `name` → `fileName`.
+
+The other QA-file tools (`get_quickapp_file`, `update_quickapp_file`, `delete_quickapp_file`, `list_quickapp_files`) already used `fileName` and need no change. HC3's wire shape still uses `name` for the file's own name in the request body; the wrapper now remaps automatically — callers don't see HC3's wire form.
 
 If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may suit you better. If you maintain a household HC3 with QuickApps, scenes, and Z-Wave actors and want the agent to be able to do meaningful, safe work over the full system, this is what you want.
 

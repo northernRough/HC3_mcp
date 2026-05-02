@@ -17,7 +17,7 @@ You are giving the agent the same operational power you have over the HC3. Treat
 ## Credential handling
 
 - Credentials are read from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optionally `FIBARO_PORT`). They are never written to disk by this code.
-- The published npm tarball does **not** contain `.env`, `CLAUDE.md`, `.claude/`, or any other local configuration. Contents are limited to compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, and `DEPLOYMENT.md`.
+- The published npm tarball does **not** contain `.env`, `CLAUDE.md`, `.claude/`, or any other local configuration. Contents are limited to compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, `DEPLOYMENT.md`, and `KNOWN_DEAD_ENDPOINTS.md`.
 - Credentials are sent to the HC3 over Basic auth. HC3 does not support TLS on its REST surface in current firmware; assume the host-to-HC3 link is local and trusted, or front it with a reverse proxy.
 
 ## HTTP transport (3.2.0+)

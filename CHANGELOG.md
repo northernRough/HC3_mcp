@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.2.2] - 2026-05-03
+
+### Changed
+- **Documentation sweep** to reflect the 11-release run from 3.4.1 through 4.2.1.
+  - `README.md`: tool count bumped from "125+" to "130+" everywhere; new **Audit (cross-cutting, dev-time)** section in the tool list documenting `audit_id_references`, `audit_qa_devices`, `introspect_device_group`; new **Migrating from 3.x to 4.x** section calling out the QA file-arg rename (`name` → `fileName` for `create_quickapp_file` and `update_multiple_quickapp_files`); audit family added to the "How this differs from upstream" bullet list; `create_quickapp_file` description annotated with the rename; module count bumped from 23 to 24.
+  - `package.json` `description`: bumped tool count, added "audit family for cross-surface drift detection", bumped module count from 23 to 24.
+  - `SECURITY.md`: npm-tarball contents list now includes `KNOWN_DEAD_ENDPOINTS.md`.
+  - `CHANGELOG.md`: this entry.
+
+No code changes; live tool count remains 132 (the "130+" figure rounds down for headline simplicity).
+
 ## [4.2.1] - 2026-05-03
 
 ### Added
