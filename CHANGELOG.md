@@ -2,6 +2,26 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.2.0] - 2026-05-03
+
+### Added
+- **`audit_qa_devices` bind-aware mode.** Opt-in via `bindAware: true`. Parses every `bind("RoleStem", { ... })` descriptor in the QA's source files and runs the L0-L4 resolver waterfall over each role entry:
+  - **L0** — cached: descriptor's `id` is still valid AND lives under the descriptor's `parent.id`, has the descriptor's `ep` and `type`. (`ok_l0`)
+  - **L1** — endpoint: a sibling under the cached parent has the matching `ep + type`. The descriptor's cached id is stale; the role moved (typically a Z-Wave Reconfigure renumbered children). (`healed_l1_l3`)
+  - **L2** — nameInParent: a sibling under the cached parent has the matching `name + type`. (`healed_l1_l3`)
+  - **L3** — newParentEndpoint: re-resolve the parent by `name + type`, then look for the entry by `ep + type` under the new parent. Covers physical replacement when names are preserved. (`healed_l1_l3`)
+  - **L4** — globalName: only when the descriptor opts in via `allowGlobal = true`. Matches `name + type` globally; if multiple candidates, AMBIGUOUS rather than picked. (`healed_l4` or `ambiguous`)
+  - **L5** — missing: nothing matched.
+
+  Type equality required at every level; ambiguity (>1 candidate) at any level returns no match rather than picking the first. Output adds a `bindAware` block: `{ enabled, summary: {descriptorTotal, ok_l0, healed_l1_l3, healed_l4, missing, ambiguous, warnings}, descriptorIssues, warnings }`. Issues are reported per role+field for every non-L0 outcome with the previous cached id and the resolved id (where one exists).
+
+- **Sanity warning — "would be unsafe to enable allowGlobal"**: even with `allowGlobal = false`, the audit checks whether a global name+type match would have been ambiguous. If yes, surfaces as a warning so the operator knows that enabling allowGlobal on this descriptor is unsafe today. (Same shape as the spec called out.)
+
+- **`strict: true`** option: treat `healed_l4` and any warnings as failures, surfaced in `summary.strictFailures`. Default false (informational).
+
+### Changed
+- Single all-devices fetch (`/api/devices`) per call, indexed in-memory by id and parentId for O(1) sibling lookups. Avoids hammering HC3 with one fetch per role entry on a large QA.
+
 ## [4.1.0] - 2026-05-02
 
 ### Added

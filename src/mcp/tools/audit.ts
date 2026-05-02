@@ -174,6 +174,14 @@ export const audit: ToolModule = {
             items: { type: 'string' },
             description: 'Optional: specific files to scan. Default: all files in the QA.',
           },
+          bindAware: {
+            type: 'boolean',
+            description: 'If true, also parse bind("RoleStem", { ... }) descriptor calls from any file and run the L0-L4 resolver waterfall (cached / endpoint / nameInParent / newParentEndpoint / globalName) on each role entry. Reports which descriptors are still resolving via L0 (cached id valid), which have healed via L1-L3 (parent/endpoint/name re-resolution — descriptor cached id is stale and should be updated), which healed via L4 (allowGlobal-only, global name+type match), and which are missing or ambiguous. Adds a bindAware block to the response. Default false.',
+          },
+          strict: {
+            type: 'boolean',
+            description: 'If true (and bindAware is true), treat L4-eligible name-drift conflicts and L4 ambiguities as failures (counted in summary.warnings). Default false — those are informational.',
+          },
         },
         required: ['deviceId'],
       },
@@ -446,7 +454,7 @@ export const audit: ToolModule = {
 
     async audit_qa_devices(
       hc3,
-      args: { deviceId: number; fileNames?: string[] },
+      args: { deviceId: number; fileNames?: string[]; bindAware?: boolean; strict?: boolean },
     ): Promise<any> {
       if (typeof args?.deviceId !== 'number') {
         throw new Error('deviceId is required.');
@@ -647,6 +655,14 @@ export const audit: ToolModule = {
         else if (cls === 'DELETED') deleted++;
       }
 
+      // Optional: bind-aware mode parses bind("RoleStem", { ... }) descriptors
+      // and runs the L0-L4 resolver waterfall over each role entry. Adds a
+      // bindAware block to the response.
+      let bindAwareBlock: any = undefined;
+      if (args.bindAware === true) {
+        bindAwareBlock = await runBindAwareWaterfall(hc3, files, args.strict === true);
+      }
+
       return {
         qa: { id: args.deviceId, name: qa?.name, type: qa?.type },
         scanned: { fileCount: files.length, totalLines },
@@ -657,6 +673,7 @@ export const audit: ToolModule = {
           deleted,
         },
         issues,
+        bindAware: bindAwareBlock,
         parseErrors: [],
       };
     },
@@ -876,3 +893,293 @@ export const audit: ToolModule = {
     },
   },
 };
+
+// ---------------------------------------------------------------
+// Bind-aware audit helpers — used by audit_qa_devices when bindAware=true.
+// ---------------------------------------------------------------
+
+interface BindEntry {
+  field: string;     // e.g. "controller", "wallGraze"
+  id?: number;
+  ep?: number;
+  name?: string;
+  type?: string;
+}
+interface BindDescriptor {
+  fileName: string;
+  role: string;                // the first arg to bind("...", ...)
+  parent?: BindEntry;          // the special "parent" entry
+  entries: BindEntry[];        // all non-parent entries
+  allowGlobal: boolean;        // whether the descriptor opted into L4 fallback
+}
+
+// Parse one fields-block body like `id = 2370, ep = 1, name = "12V colours", type = "com.fibaro.FGRGBW442CC"`.
+function parseBindEntryFields(body: string): Partial<BindEntry & { allowGlobal: boolean }> {
+  const out: any = {};
+  const re = /(\w+)\s*=\s*("([^"]*)"|'([^']*)'|true|false|-?\d+|[A-Za-z_][\w.]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    const k = m[1];
+    const raw = m[2];
+    let v: any = raw;
+    if (m[3] !== undefined) v = m[3];
+    else if (m[4] !== undefined) v = m[4];
+    else if (raw === 'true') v = true;
+    else if (raw === 'false') v = false;
+    else if (/^-?\d+$/.test(raw)) v = parseInt(raw, 10);
+    out[k] = v;
+  }
+  return out;
+}
+
+// Parse all bind("RoleStem", { ... }) blocks from a piece of source content.
+// Tolerant regex parser; brace-balanced inner-block extraction so nested
+// commas don't confuse the boundary.
+function parseBindBlocks(fileName: string, content: string): BindDescriptor[] {
+  const out: BindDescriptor[] = [];
+  const headRe = /\bbind\s*\(\s*["']([^"']+)["']\s*,\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = headRe.exec(content)) !== null) {
+    const role = m[1];
+    const openBrace = headRe.lastIndex - 1; // index of `{`
+    let depth = 1;
+    let close = -1;
+    for (let i = openBrace + 1; i < content.length; i++) {
+      const c = content[i];
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    if (close < 0) continue;
+    const body = content.slice(openBrace + 1, close);
+
+    // Inside the body: find every `<field> = { ... }` entry.
+    const entryRe = /(\w+)\s*=\s*\{([^}]*)\}/g;
+    let em: RegExpExecArray | null;
+    let parent: BindEntry | undefined;
+    const entries: BindEntry[] = [];
+    let allowGlobal = false;
+    while ((em = entryRe.exec(body)) !== null) {
+      const field = em[1];
+      const fields = parseBindEntryFields(em[2]);
+      if (field === 'parent') {
+        parent = { field, ...fields } as BindEntry;
+      } else {
+        entries.push({ field, ...fields } as BindEntry);
+      }
+    }
+    // Detect descriptor-level allowGlobal flag (e.g. allowGlobal = true at top level).
+    const allowGlobalRe = /\ballowGlobal\s*=\s*true\b/;
+    if (allowGlobalRe.test(body)) allowGlobal = true;
+
+    out.push({ fileName, role, parent, entries, allowGlobal });
+  }
+  return out;
+}
+
+type Waterfall = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5_missing' | 'L4_ambiguous';
+interface DescriptorResult {
+  role: string;
+  field: string;
+  level: Waterfall;
+  cachedId?: number;
+  resolvedId?: number;
+  note?: string;
+}
+
+async function runBindAwareWaterfall(
+  hc3: any,
+  files: Array<{ name: string; content: string }>,
+  strict: boolean,
+): Promise<any> {
+  // 1. Parse every bind() block from every file.
+  const descriptors: BindDescriptor[] = [];
+  for (const f of files) {
+    descriptors.push(...parseBindBlocks(f.name, f.content));
+  }
+
+  if (descriptors.length === 0) {
+    return {
+      enabled: true,
+      summary: { descriptorTotal: 0, ok_l0: 0, healed_l1_l3: 0, healed_l4: 0, missing: 0, ambiguous: 0, warnings: 0 },
+      descriptors: [],
+      descriptorIssues: [],
+      warnings: [],
+    };
+  }
+
+  // 2. Fetch all alive devices once for resolver lookups. Filter out deleted.
+  const allDevices: any[] = await hc3.request('/api/devices') as any[];
+  const aliveDevices = (allDevices || []).filter(d => !d?.deleted);
+  // Index by id for O(1) lookup.
+  const byId = new Map<number, any>();
+  for (const d of aliveDevices) {
+    if (typeof d?.id === 'number') byId.set(d.id, d);
+  }
+  // Index by parentId for sibling lookups.
+  const byParent = new Map<number, any[]>();
+  for (const d of aliveDevices) {
+    const pid = typeof d?.parentId === 'number' ? d.parentId : -1;
+    if (!byParent.has(pid)) byParent.set(pid, []);
+    byParent.get(pid)!.push(d);
+  }
+
+  const epOf = (d: any): number | undefined => {
+    const ep = d?.properties?.endPointId ?? d?.endPointId;
+    return typeof ep === 'number' ? ep : undefined;
+  };
+
+  // 3. For each descriptor, walk L0-L4 on each non-parent entry.
+  const results: DescriptorResult[] = [];
+  const warnings: string[] = [];
+  for (const desc of descriptors) {
+    const parentId = desc.parent?.id;
+    const parentChildren = parentId !== undefined ? (byParent.get(parentId) ?? []) : [];
+
+    for (const entry of desc.entries) {
+      const wantType = entry.type;
+      const wantEp = entry.ep;
+      const wantName = entry.name;
+
+      // L0 — cached id valid AND parent/ep/type match.
+      if (entry.id !== undefined) {
+        const live = byId.get(entry.id);
+        if (live
+            && (parentId === undefined || live?.parentId === parentId)
+            && (wantEp === undefined || epOf(live) === wantEp)
+            && (wantType === undefined || live?.type === wantType)) {
+          results.push({ role: desc.role, field: entry.field, level: 'L0', cachedId: entry.id, resolvedId: entry.id });
+          continue;
+        }
+      }
+
+      // L1 — sibling under cached parent with matching ep + type.
+      if (parentId !== undefined && wantEp !== undefined && wantType !== undefined) {
+        const candidates = parentChildren.filter(d =>
+          epOf(d) === wantEp && d?.type === wantType);
+        if (candidates.length === 1) {
+          const c = candidates[0];
+          results.push({
+            role: desc.role, field: entry.field, level: 'L1',
+            cachedId: entry.id, resolvedId: c.id,
+            note: 'Resolved by endpoint match — descriptor cached id is stale; recommend updating descriptor.',
+          });
+          continue;
+        }
+      }
+
+      // L2 — sibling under cached parent with matching name + type.
+      if (parentId !== undefined && wantName !== undefined && wantType !== undefined) {
+        const candidates = parentChildren.filter(d =>
+          d?.name === wantName && d?.type === wantType);
+        if (candidates.length === 1) {
+          const c = candidates[0];
+          results.push({
+            role: desc.role, field: entry.field, level: 'L2',
+            cachedId: entry.id, resolvedId: c.id,
+            note: 'Resolved by name match under same parent — descriptor cached id (and possibly endpoint) is stale.',
+          });
+          continue;
+        }
+      }
+
+      // L3 — re-resolve parent by name+type, then look for child by ep+type.
+      if (desc.parent?.name && desc.parent?.type && wantEp !== undefined && wantType !== undefined) {
+        const newParentCandidates = aliveDevices.filter(d =>
+          d?.name === desc.parent!.name && d?.type === desc.parent!.type);
+        if (newParentCandidates.length === 1) {
+          const newParent = newParentCandidates[0];
+          const siblings = byParent.get(newParent.id) ?? [];
+          const candidates = siblings.filter(d =>
+            epOf(d) === wantEp && d?.type === wantType);
+          if (candidates.length === 1) {
+            results.push({
+              role: desc.role, field: entry.field, level: 'L3',
+              cachedId: entry.id, resolvedId: candidates[0].id,
+              note: `Parent re-resolved (cached id ${parentId} -> ${newParent.id}); endpoint matched under new parent.`,
+            });
+            continue;
+          }
+        }
+      }
+
+      // L4 — global name+type match. Only if descriptor opted into allowGlobal.
+      if (desc.allowGlobal && wantName !== undefined && wantType !== undefined) {
+        const candidates = aliveDevices.filter(d =>
+          d?.name === wantName && d?.type === wantType);
+        if (candidates.length === 1) {
+          results.push({
+            role: desc.role, field: entry.field, level: 'L4',
+            cachedId: entry.id, resolvedId: candidates[0].id,
+            note: 'Resolved by global name+type — last-resort fallback under allowGlobal=true.',
+          });
+          continue;
+        }
+        if (candidates.length > 1) {
+          results.push({
+            role: desc.role, field: entry.field, level: 'L4_ambiguous',
+            cachedId: entry.id,
+            note: `Global name+type match returned ${candidates.length} candidates; cannot disambiguate.`,
+          });
+          continue;
+        }
+      } else if (!desc.allowGlobal && wantName !== undefined && wantType !== undefined) {
+        // Even with allowGlobal=false, surface a warning if a global match
+        // would have been ambiguous — that means enabling allowGlobal would
+        // be unsafe for this descriptor. Spec calls this out.
+        const globalMatches = aliveDevices.filter(d =>
+          d?.name === wantName && d?.type === wantType);
+        if (globalMatches.length > 1) {
+          warnings.push(
+            `${desc.role}.${entry.field} has allowGlobal=false but name '${wantName}' matches ${globalMatches.length} devices of type ${wantType} globally — fine for now, but enabling allowGlobal would be unsafe.`,
+          );
+        }
+      }
+
+      // L5 — nothing matched.
+      results.push({
+        role: desc.role, field: entry.field, level: 'L5_missing',
+        cachedId: entry.id,
+        note: 'No level (L0-L4) resolved this entry.',
+      });
+    }
+  }
+
+  // 4. Summarise.
+  const counts = { ok_l0: 0, healed_l1_l3: 0, healed_l4: 0, missing: 0, ambiguous: 0 };
+  for (const r of results) {
+    if (r.level === 'L0') counts.ok_l0++;
+    else if (r.level === 'L1' || r.level === 'L2' || r.level === 'L3') counts.healed_l1_l3++;
+    else if (r.level === 'L4') counts.healed_l4++;
+    else if (r.level === 'L5_missing') counts.missing++;
+    else if (r.level === 'L4_ambiguous') counts.ambiguous++;
+  }
+
+  // strict mode: count L4 hits and warnings as failures.
+  const strictFailures = strict ? (counts.healed_l4 + warnings.length) : 0;
+
+  // Issues = anything not L0.
+  const descriptorIssues = results
+    .filter(r => r.level !== 'L0')
+    .map(r => ({
+      role: `${r.role}.${r.field}`,
+      level: r.level,
+      currentId: r.resolvedId,
+      previousCachedId: r.cachedId,
+      note: r.note,
+    }));
+
+  return {
+    enabled: true,
+    summary: {
+      descriptorTotal: results.length,
+      ...counts,
+      warnings: warnings.length,
+      ...(strict ? { strictFailures } : {}),
+    },
+    descriptorIssues,
+    warnings,
+  };
+}
