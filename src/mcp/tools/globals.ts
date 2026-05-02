@@ -1,13 +1,35 @@
 // Global-variable tools.
 //
-// Note: this module owns all four global-variable handlers (get/set/create/
-// delete). Three schemas (get/set/create) are exported here; the
-// delete_global_variable schema currently sits inline in the legacy
-// handleListTools array because tools/list places it in the "delete
-// operations" cluster (delete_device, delete_plugin, delete_global_variable
-// — all at the array tail). Order is preserved byte-for-byte in tools/list.
+// `globals.schemas` is the contiguous 3-tool cluster (get / set /
+// create) spread by handleListTools. The 4th tool's schema
+// (`delete_global_variable`) lives at the legacy tools/list tail
+// with delete_device and delete_plugin and is exported separately as
+// `deleteGlobalVariableSchema` so the server can reference it at
+// that slot. The handler is part of `globals.handlers` and dispatches
+// via the registry.
 
 import { ToolModule } from './registry';
+import { MCPTool } from '../types';
+
+export const deleteGlobalVariableSchema: MCPTool =
+      {
+        name: "delete_global_variable",
+        description: "Delete a global variable by name via DELETE /api/globalVariables/{name}. Reads the variable first to capture the last value (returned in the response as a recovery trail) and to check readOnly. Refuses readOnly globals unless allow_system=true. Post-delete verifies by refetch (expects HTTP 404).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            varName: {
+              type: "string",
+              description: "Name of the global variable to delete."
+            },
+            allow_system: {
+              type: "boolean",
+              description: "Required to delete readOnly (system) globals. Defaults false."
+            }
+          },
+          required: ["varName"]
+        }
+      };
 
 export const globals: ToolModule = {
   schemas: [

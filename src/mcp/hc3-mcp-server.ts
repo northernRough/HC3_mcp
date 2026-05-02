@@ -24,12 +24,12 @@ import { ios } from './tools/ios';
 import { climate } from './tools/climate';
 import { customEvents } from './tools/customEvents';
 import { notifications } from './tools/notifications';
-import { globals } from './tools/globals';
-import { users } from './tools/users';
+import { globals, deleteGlobalVariableSchema } from './tools/globals';
+import { users, usersSchemas } from './tools/users';
 import { rooms } from './tools/rooms';
 import { scenes } from './tools/scenes';
 import { profiles } from './tools/profiles';
-import { devices } from './tools/devices';
+import { devices, deleteDeviceSchema } from './tools/devices';
 import { quickapps, quickappsCoreSchemas, quickappsExtSchemas } from './tools/quickapps';
 import { icons } from './tools/icons';
 import { intelligence } from './tools/intelligence';
@@ -130,44 +130,12 @@ class HC3MCPServer {
       // Energy Management
       systemSchemas.get_energy_data,
 
-      {
-        name: 'update_user_rights',
-        description: 'Update a user\'s access rights (devices / scenes / climateZones / profiles / alarmPartitions) via PUT /api/users/{id}. Follows the standard read-modify-write + post-write-verify pattern: reads the full user record, deep-merges the submitted rights.* subkeys onto the current, and full-array-replaces the leaf arrays (devices, rooms, sections, scenes, zones, etc.) — same HC3 PUT semantics as other array-valued properties. Verifies every submitted array member is present after the write. SAFETY: rejects writes to rights.advanced.* unless allow_advanced_rights=true (17 sensitive subkeys including zWave, backup, access, update — unauthorised access here is a privilege-escalation footgun). Rejects any rights.*.all=true (mass-grant "oops I gave everyone access") unless allow_grant_all=true. Rejects writes targeting superuser-type users (their rights are already all-true by design; any state change there breaks admin access).',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            userId: {
-              type: 'number',
-              description: 'HC3 user id (from get_users). Must be a non-superuser.'
-            },
-            rights: {
-              type: 'object',
-              description: 'Partial rights object. Only submitted subkeys are modified; unsubmitted subkeys (scenes, climateZones, etc.) are preserved untouched. Array-valued leaves (rights.devices.devices, rights.devices.rooms, rights.scenes.scenes, etc.) fully replace the current array.'
-            },
-            allow_advanced_rights: {
-              type: 'boolean',
-              description: 'Required to write rights.advanced.* (admin / zwave / backup / update / access / alarm / climate etc.). Defaults false.'
-            },
-            allow_grant_all: {
-              type: 'boolean',
-              description: 'Required to set rights.<category>.all = true (mass grant). Defaults false.'
-            }
-          },
-          required: ['userId', 'rights']
-        }
-      },
+      usersSchemas.update_user_rights,
 
       ...globals.schemas,
 
       // User Management
-      {
-        name: 'get_users',
-        description: 'Get all users configured in the HC3 system',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
+      usersSchemas.get_users,
 
       ...snapshot.schemas,
 
@@ -217,46 +185,8 @@ class HC3MCPServer {
       ...quickappsExtSchemas,
 
       ...plugins.schemas,
-      {
-        name: "delete_device",
-        description: "Delete a single device by id via DELETE /api/devices/{id}. Intended for QuickApps and explicitly-installed plugins. Guards: (1) refuses ids < 10 (reserved HC3 system devices); (2) reads the device first to inspect interfaces + children; (3) refuses Z-Wave devices (interfaces includes 'zwave' with no quickApp) unless allow_physical=true — the REST delete does not perform a proper Z-Wave exclusion, leaving the mesh with a ghost node entry; exclude via the HC3 Web UI for Z-Wave hardware; (4) refuses devices with children unless cascade=true, listing them in the rejection so the caller knows the blast radius. Post-delete verifies by refetch (expects HTTP 404).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            deviceId: {
-              type: "number",
-              description: "HC3 device id to delete. Must be >= 10."
-            },
-            cascade: {
-              type: "boolean",
-              description: "Allow deletion even when the device has children (children are deleted with it). Defaults false."
-            },
-            allow_physical: {
-              type: "boolean",
-              description: "Allow deletion of Z-Wave physical devices via REST. Defaults false — REST delete skips mesh exclusion."
-            }
-          },
-          required: ["deviceId"]
-        }
-      },
-      {
-        name: "delete_global_variable",
-        description: "Delete a global variable by name via DELETE /api/globalVariables/{name}. Reads the variable first to capture the last value (returned in the response as a recovery trail) and to check readOnly. Refuses readOnly globals unless allow_system=true. Post-delete verifies by refetch (expects HTTP 404).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            varName: {
-              type: "string",
-              description: "Name of the global variable to delete."
-            },
-            allow_system: {
-              type: "boolean",
-              description: "Required to delete readOnly (system) globals. Defaults false."
-            }
-          },
-          required: ["varName"]
-        }
-      },
+      deleteDeviceSchema,
+      deleteGlobalVariableSchema,
     ];
 
     return {
