@@ -112,12 +112,27 @@ export const globals: ToolModule = {
           `create_global_variable: varName ${JSON.stringify(args.varName)} does not match HC3's required format [A-Za-z][A-Za-z0-9_]* (must start with a letter; letters, digits, and underscores only).`
         );
       }
+      // Coerce numeric / boolean values to string before submission. HC3 stores
+      // all global-variable values as strings; submitting JSON 0 or true causes
+      // /api/globalVariables to reject with "deserializeJson error: types
+      // mismatch", which previously bubbled up as a confusing HTTP 400. The
+      // schema already advertises ["string", "number", "boolean"] as valid
+      // input types, so the coercion is the wrapper's responsibility.
+      const v = args.value;
+      const valueStr =
+        typeof v === 'string'  ? v
+        : typeof v === 'number' || typeof v === 'boolean' ? String(v)
+        : (() => {
+            throw new Error(
+              `create_global_variable: value must be string|number|boolean, got ${typeof v}.`,
+            );
+          })();
+
       if (args.isEnum) {
         if (!Array.isArray(args.enumValues) || args.enumValues.length === 0) {
           throw new Error('create_global_variable: isEnum=true requires a non-empty enumValues array.');
         }
-        const candidate = String(args.value);
-        if (!args.enumValues.includes(candidate)) {
+        if (!args.enumValues.includes(valueStr)) {
           throw new Error(
             `create_global_variable: initial value ${JSON.stringify(args.value)} is not in enumValues ${JSON.stringify(args.enumValues)} (case-sensitive).`
           );
@@ -138,7 +153,7 @@ export const globals: ToolModule = {
         if (msg.startsWith('create_global_variable refuses')) throw e;
       }
 
-      const body: Record<string, any> = { name: args.varName, value: args.value };
+      const body: Record<string, any> = { name: args.varName, value: valueStr };
       if (args.readOnly !== undefined) body.readOnly = args.readOnly;
       if (args.isEnum) {
         body.isEnum = true;
@@ -148,9 +163,9 @@ export const globals: ToolModule = {
       const created: any = await hc3.request('/api/globalVariables', 'POST', body);
 
       const after: any = await hc3.request(`/api/globalVariables/${encoded}`);
-      if (String(after?.value) !== String(args.value)) {
+      if (String(after?.value) !== valueStr) {
         throw new Error(
-          `create_global_variable: post-create value mismatch for '${args.varName}'. Submitted ${JSON.stringify(args.value)}, stored ${JSON.stringify(after?.value)}.`
+          `create_global_variable: post-create value mismatch for '${args.varName}'. Submitted ${JSON.stringify(valueStr)}, stored ${JSON.stringify(after?.value)}.`
         );
       }
       return {
@@ -208,13 +223,19 @@ export const globals: ToolModule = {
         }
       }
 
-      await hc3.request(`/api/globalVariables/${encoded}`, 'PUT', { value: coerced });
+      // HC3 stores all global-variable values as strings; submitting a JSON
+      // number or boolean is rejected with "deserializeJson error: types
+      // mismatch". After the type-aware checks above (which validate the
+      // shape against the existing stored type), serialise to string for
+      // the wire.
+      const wireValue = typeof coerced === 'string' ? coerced : String(coerced);
+      await hc3.request(`/api/globalVariables/${encoded}`, 'PUT', { value: wireValue });
 
       const after: any = await hc3.request(`/api/globalVariables/${encoded}`);
-      if (String(after?.value) !== String(coerced)) {
+      if (String(after?.value) !== wireValue) {
         throw new Error(
           `Post-write verification failed for global variable '${args.varName}': ` +
-          `submitted ${JSON.stringify(coerced)}, HC3 stored ${JSON.stringify(after?.value)}.`
+          `submitted ${JSON.stringify(wireValue)}, HC3 stored ${JSON.stringify(after?.value)}.`
         );
       }
 

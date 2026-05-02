@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.6.1] - 2026-05-02
+
+### Fixed
+- **`create_global_variable` no longer propagates HC3's raw "deserializeJson error: types mismatch" for numeric / boolean values.** HC3 stores all global-variable values as strings; submitting JSON `0`, `true`, etc. caused HC3 to reject the POST with a confusing 400. The wrapper now coerces numeric and boolean values to their string forms before submission, matching the schema's own `["string", "number", "boolean"]` advertisement. Throws a precise error if the value isn't string/number/boolean (instead of letting HC3's opaque error bubble up).
+
+  Surfaced by the Phase 3 edge-case test: `create_global_variable({varName: "TEST_x", value: 0})` previously failed with HC3's raw deserialise error; now succeeds and stores `"0"`.
+
+- **`set_global_variable` is now defensive against the same "types mismatch" rejection** for any code path where the type-aware coerce branch produced a non-string `coerced` value (e.g. boolean true on a stored-as-boolean variable). The PUT body now always carries a string `value`. No behaviour change for the common case where the stored type is string; the fix is insurance against future stored-type drift.
+
 ## [3.6.0] - 2026-05-02
 
 ### Added
