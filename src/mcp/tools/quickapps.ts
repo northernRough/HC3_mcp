@@ -109,7 +109,7 @@ export const quickappsExtSchemas: MCPTool[] = [
               type: "number",
               description: "QuickApp device ID"
             },
-            name: {
+            fileName: {
               type: "string",
               description: "Name of the new file"
             },
@@ -129,7 +129,7 @@ export const quickappsExtSchemas: MCPTool[] = [
               default: false
             }
           },
-          required: ["deviceId", "name"]
+          required: ["deviceId", "fileName"]
         }
       },
       {
@@ -174,7 +174,7 @@ export const quickappsExtSchemas: MCPTool[] = [
               items: {
                 type: "object",
                 properties: {
-                  name: {
+                  fileName: {
                     type: "string",
                     description: "File name"
                   },
@@ -191,7 +191,7 @@ export const quickappsExtSchemas: MCPTool[] = [
                     description: "Whether file should be open"
                   }
                 },
-                required: ["name", "content"]
+                required: ["fileName", "content"]
               }
             }
           },
@@ -395,14 +395,16 @@ export const quickapps: ToolModule = {
 
     async create_quickapp_file(hc3, args: {
       deviceId: number;
-      name: string;
+      fileName: string;
       type?: string;
       content?: string;
       isOpen?: boolean
     }): Promise<any> {
-      const { deviceId, name, type = 'lua', content = '', isOpen = false } = args;
+      const { deviceId, fileName, type = 'lua', content = '', isOpen = false } = args;
+      // HC3's POST body still uses `name` for the file's own name in its
+      // canonical wire shape. The MCP arg is fileName; the wire body remaps.
       const fileData = {
-        name,
+        name: fileName,
         type,
         content,
         isOpen,
@@ -411,14 +413,14 @@ export const quickapps: ToolModule = {
       const postResult = await hc3.request(`/api/quickApp/${deviceId}/files`, 'POST', fileData);
 
       const after = await hc3.request(
-        `/api/quickApp/${deviceId}/files/${encodeURIComponent(name)}`
+        `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`
       );
       if (!after) {
-        throw new Error(`create_quickapp_file: file '${name}' not present after POST on device ${deviceId}.`);
+        throw new Error(`create_quickapp_file: file '${fileName}' not present after POST on device ${deviceId}.`);
       }
       if (after.content !== content) {
         throw new Error(
-          `create_quickapp_file: content mismatch after POST on device ${deviceId}, file '${name}'. ` +
+          `create_quickapp_file: content mismatch after POST on device ${deviceId}, file '${fileName}'. ` +
           `Submitted ${content.length} chars, HC3 stored ${(after.content ?? '').length} chars.`
         );
       }
@@ -465,38 +467,40 @@ export const quickapps: ToolModule = {
 
     async update_multiple_quickapp_files(hc3, args: {
       deviceId: number;
-      files: Array<{ name: string; content: string; type?: string; isOpen?: boolean }>
+      files: Array<{ fileName: string; content: string; type?: string; isOpen?: boolean }>
     }): Promise<any> {
       const { deviceId, files } = args;
       const existing = await hc3.request(`/api/quickApp/${deviceId}/files`);
       const isMainByName = new Map<string, boolean>(
         (existing ?? []).map((f: any) => [f.name, !!f.isMain])
       );
+      // The MCP arg uses fileName; HC3's wire shape uses `name` for the file's
+      // own name. Remap on the way out.
       const filesData = files.map(file => ({
-        name: file.name,
+        name: file.fileName,
         content: file.content,
         type: file.type || 'lua',
         isOpen: file.isOpen || false,
-        isMain: isMainByName.get(file.name) ?? false
+        isMain: isMainByName.get(file.fileName) ?? false
       }));
       const putResult = await hc3.request(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
 
       const stored = await Promise.all(
         files.map(f =>
-          hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.name)}`)
-            .then((v: any) => ({ name: f.name, content: v?.content ?? null }))
-            .catch(() => ({ name: f.name, content: null }))
+          hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.fileName)}`)
+            .then((v: any) => ({ fileName: f.fileName, content: v?.content ?? null }))
+            .catch(() => ({ fileName: f.fileName, content: null }))
         )
       );
-      const storedByName = new Map(stored.map(s => [s.name, s.content]));
+      const storedByName = new Map(stored.map(s => [s.fileName, s.content]));
       const mismatches: string[] = [];
       for (const submitted of files) {
-        const c = storedByName.get(submitted.name);
+        const c = storedByName.get(submitted.fileName);
         if (c === null || c === undefined) {
-          mismatches.push(`  - '${submitted.name}': missing after PUT (not created or fetch failed)`);
+          mismatches.push(`  - '${submitted.fileName}': missing after PUT (not created or fetch failed)`);
         } else if (c !== submitted.content) {
           mismatches.push(
-            `  - '${submitted.name}': content mismatch (submitted ${submitted.content.length} chars, stored ${c.length} chars)`
+            `  - '${submitted.fileName}': content mismatch (submitted ${submitted.content.length} chars, stored ${c.length} chars)`
           );
         }
       }

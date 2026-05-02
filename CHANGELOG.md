@@ -2,6 +2,27 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.0.0] - 2026-05-02
+
+### BREAKING
+- **QuickApp file-arg renamed to `fileName` everywhere.** Two tools previously used `name` for the QA-source-file argument while three others used `fileName`. The half-and-half was a confusing footgun for callers — every MCP client (and every test harness) had to special-case which tool wanted which key. The Phase 2 test sweep failed 3 of 5 round-trip steps on its first run for exactly this reason.
+
+  Renamed (was `name` → now `fileName`):
+  - `create_quickapp_file` — top-level `name` arg → `fileName`
+  - `update_multiple_quickapp_files` — per-item `name` field → `fileName`
+
+  Unchanged (already used `fileName`):
+  - `update_quickapp_file`, `delete_quickapp_file`, `get_quickapp_file`
+
+  HC3's own wire shape still uses `name` for the file's own name in the request body to `/api/quickApp/{id}/files`; the wrapper now remaps `fileName` → `name` on the way out (callers don't see HC3's wire form).
+
+  No backward-compat shim — `name` is dropped immediately rather than carried through a deprecation cycle, hence the major-version bump. Migration: rename `name` → `fileName` in any call to `create_quickapp_file` or in any file element passed to `update_multiple_quickapp_files`. The other QA-file tools were already using `fileName` and need no change.
+
+  Why the breaking-change-now choice: the duplicate-arg-name pain was concrete (test fixtures, this MCP's own callers, every LLM) and the consumer base small enough that a clean cut is cheaper than a deprecation cycle. Future schema-name additions across the MCP follow this rule: pick the form that names the *thing* (`fileName`, `varName`, `deviceId`) rather than the bare overloaded `name`, and apply consistently.
+
+### Changed
+- Tool descriptions and schema `required` arrays for the two affected tools were updated to match the new arg name.
+
 ## [3.6.2] - 2026-05-02
 
 ### Fixed
