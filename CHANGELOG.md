@@ -2,6 +2,26 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.6.0] - 2026-05-02
+
+### Added
+- **`audit_qa_devices`** — bind-agnostic core. For a given QuickApp, parses every numeric device id its source files reference and classifies each against live HC3 state. Universal HC3 question: *"after that recent Z-Wave re-inclusion (or device deletion), is this QA still pointing at real, alive devices?"*
+
+  Walks every file in the QA, extracts every `\b\d{2,5}\b` numeric token (skipping master device 1, never user-referenced this way), and classifies each unique id via `/api/devices/{id}`:
+  - **ALIVE** — exists, not deleted, not dead.
+  - **DEAD** — exists with `dead == true`.
+  - **DELETED** — `/api/devices/{id}` returns 404, or `deleted == true`.
+
+  Issues are grouped by id with all source occurrences (file, line, snippet) attached, sorted DEAD-first then DELETED, then by id ascending. ALIVE refs are summarised in the stats but not enumerated. False positives — coincidental numeric matches that resolve to unrelated alive devices — are limited because the resolver only flags DEAD/DELETED ids; ALIVE matches mostly stay invisible.
+
+  Inputs: `deviceId` (required, must be a QuickApp — interfaces must include `'quickApp'`); `fileNames` (optional array — scan a subset of files instead of all). Stateless audit; does not modify HC3 or local files. Cost: one `/api/devices/{id}` per unique candidate id, plus one fetch per file. Expect 10-30s on a typical QA.
+
+  Verified live against HC3 5.203.68 with the SceneManager QA (id 4742, 19 files, 9,065 lines): 252 candidate ids extracted, 227 ALIVE, 4 DEAD (hob lights / blind / window SW / Ben bed walli — all flagged via `properties.dead === true`), plus 21 DELETED including the legitimate replaced-device residue (RGBW devices 3076-3080, brick relays 4702-4703) alongside ~14 well-known false-positives that mostly trace back to SceneManager-style noise patterns (table-of-trigger-id rows like `triggers = {901, 902}`, reserved-trigger constants in `manualTrigger(..., 999, ...)`, and reserved-trigger range markers in READ-ME).
+
+  Important implementation note: HC3 records `dead` and `deleted` flags at `properties.dead` / `properties.deleted` rather than at the top level (top-level `dev.dead` is usually null even when the device is dead). The classifier checks both locations to be defensive across firmware revisions.
+
+  Future bind-aware mode will additionally parse `bind("RoleStem", { ... })` descriptors and run the L0–L4 resolver waterfall — kept out of the v1 core to land the universally-useful piece first.
+
 ## [3.5.2] - 2026-05-02
 
 ### Added

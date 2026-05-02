@@ -138,6 +138,46 @@ export const audit: ToolModule = {
         },
       },
     },
+    {
+      name: 'audit_qa_devices',
+      description:
+        'For a given QuickApp, parse every numeric device id its source files reference and ' +
+        'classify each against live HC3 state. Universal HC3 question: "after that recent ' +
+        'Z-Wave re-inclusion (or device deletion), is this QA still pointing at real, alive ' +
+        'devices?" Walks every file in the QA, extracts every \\b\\d{2,5}\\b numeric token ' +
+        '(skipping master device 1 and the SceneManager-style noise patterns; see below), ' +
+        'and classifies each unique id as ALIVE, DEAD, or DELETED via /api/devices/{id} ' +
+        '(checking properties.dead and properties.deleted, not just the top-level fields ' +
+        'which are usually null even on confirmed-dead devices). Issues are grouped by id ' +
+        'with all source occurrences (file, line, snippet) attached. ' +
+        'Stateless audit; does not modify HC3 or local files. ' +
+        'Cost: fetches every QA file plus one /api/devices/{id} per unique candidate id; ' +
+        'expect 10-30s on a typical QA. ' +
+        'False-positive caveats: the heuristic skips ids < 100, lines containing ' +
+        '"triggerId =", whole-line Lua comments, lines with magic-number field names ' +
+        '(pollInterval, maxSeconds, etc.), and lines with arithmetic-on-time patterns ' +
+        '(* 1000, + 86400). Residual false-positives in the DELETED bucket are common ' +
+        'for SceneManager-style codebases — table-of-trigger-id rows like ' +
+        '"triggers = {901, 902}" and reserved-trigger constants in function args ' +
+        '(manualTrigger(..., 999, ...)) will appear as DELETED issues. Treat the issues ' +
+        'list as a starting point for review rather than a definitive list; the DEAD ' +
+        'classification is high-confidence (HC3 confirms the device is real and dead).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          deviceId: {
+            type: 'number',
+            description: 'QA device id to audit. Must be a QuickApp (interfaces includes \'quickApp\'); the tool throws otherwise.',
+          },
+          fileNames: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional: specific files to scan. Default: all files in the QA.',
+          },
+        },
+        required: ['deviceId'],
+      },
+    },
   ],
 
   handlers: {
@@ -357,6 +397,223 @@ export const audit: ToolModule = {
           bytesScanned,
         },
         truncated,
+      };
+    },
+
+    async audit_qa_devices(
+      hc3,
+      args: { deviceId: number; fileNames?: string[] },
+    ): Promise<any> {
+      if (typeof args?.deviceId !== 'number') {
+        throw new Error('deviceId is required.');
+      }
+
+      // 1. Verify the target is a QuickApp.
+      const qa = await hc3.request(`/api/devices/${args.deviceId}`) as any;
+      const isQA = Array.isArray(qa?.interfaces) && qa.interfaces.includes('quickApp');
+      if (!isQA) {
+        throw new Error(
+          `Device ${args.deviceId} exists but is not a QuickApp (its interfaces do not include 'quickApp'). audit_qa_devices is for QA source-file audit; use audit_id_references for non-QA references.`,
+        );
+      }
+
+      // 2. List files; the /files response carries metadata only — fetch
+      // each file's content via /files/{name} (the /files response carries
+      // metadata only; content has to be pulled per file).
+      const fileMetas = await hc3.request(`/api/quickApp/${args.deviceId}/files`) as any[];
+      const wanted = new Set(args.fileNames ?? fileMetas.map(m => m?.name).filter(n => typeof n === 'string'));
+      const files: Array<{ name: string; content: string }> = [];
+      for (const meta of (fileMetas || [])) {
+        if (typeof meta?.name !== 'string') continue;
+        if (!wanted.has(meta.name)) continue;
+        try {
+          const f = await hc3.request(`/api/quickApp/${args.deviceId}/files/${encodeURIComponent(meta.name)}`) as any;
+          if (typeof f?.content === 'string') {
+            files.push({ name: meta.name, content: f.content });
+          }
+        } catch {
+          // skip a file that fails to fetch
+        }
+      }
+
+      // 3. Extract candidate ids from every line.
+      //
+      // Heuristic: \b(\d{2,5})\b, with four cheap noise filters tuned to
+      // SceneManager-style codebases (heaviest user of these tools):
+      //
+      //  - **Skip ids < 100.** HC3 user-device ids start in the high hundreds
+      //    or low thousands; the 1-99 range is dominated by SceneManager's
+      //    own internal trigger-id namespace and by digits-in-strings like
+      //    "06:00" timestamps. Real user devices < 100 do exist on some
+      //    installations — those will be missed; future versions may add a
+      //    `minDeviceId` option to lower the floor.
+      //
+      //  - **Skip Lua comment lines** (lines whose first non-whitespace is
+      //    `--`). Comments commonly reference reserved trigger ids in
+      //    documentation tables (`-- 901 isDark = "true" — sunset`), magic
+      //    numbers in explanatory prose, dates (`2026-04-22`), and
+      //    cross-references to old/replaced device ids. None are live device
+      //    references; classifying them as DELETED would drown the real
+      //    signal. Inline `--` comments at the end of a code line are still
+      //    scanned — only whole-line comments are skipped.
+      //
+      //  - **Skip lines that contain `triggerId\s*=`.** SceneManager has
+      //    trigger ids in the 100+ range (e.g. trigger 100 = Lounge alternate
+      //    sunset) that overlap with real device ids. Rejecting any line
+      //    that assigns to triggerId removes that whole class of noise.
+      //
+      //  - **Skip lines whose match sits inside a magic-number / time /
+      //    config field** (denylist below). Catches `pollInterval = 100`,
+      //    `autoDelayDefault = 300`, `maxSeconds = 600`, `seconds = 180`,
+      //    arithmetic on time constants like `* 1000` or `+ 86400`, etc.
+      //
+      // All four filters are heuristic. The intent is "high signal, low
+      // noise" for the typical SceneManager-style codebase rather than
+      // perfect recall. Tolerate the residue; mention false-positive risk
+      // in the tool description so callers know to glance at issues
+      // critically.
+      const idRegex = /\b(\d{2,5})\b/g;
+      const commentLineMarker = /^\s*--/;
+      const triggerIdLineMarker = /\btriggerId\s*=/;
+      // Field names that are NOT device-id references in any HC3 codebase
+      // we've seen (time / count / size / generic-magic-number contexts).
+      // If a line assigns to one of these names, skip it entirely.
+      const magicFieldDenylistMarker = new RegExp(
+        '\\b(?:pollInterval|pollMs|interval|autoDelayDefault|autoDelay|delaySeconds|delayMs|delay|timeoutMs|timeout|maxSeconds|maxMs|seconds|ms|hours|minutes|days|count|priority|weight|level|version|year|month|day|hour|minute|kwh|wattage|battery)\\s*=',
+      );
+      // Common arithmetic-on-time patterns — `* 1000`, `+ 86400`, etc.
+      const timeArithMarker = /[*+\-]\s*\d+|\d+\s*[*+]/;
+
+      const occurrencesByFile: Array<{ name: string; lines: number; perLine: Array<{ line: number; ids: number[]; snippet: string }> }> = [];
+      const candidateIds = new Set<number>();
+      let totalLines = 0;
+      for (const f of files) {
+        const lines = f.content.split(/\r?\n/);
+        totalLines += lines.length;
+        const perLine: Array<{ line: number; ids: number[]; snippet: string }> = [];
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (commentLineMarker.test(line)) continue;
+          if (triggerIdLineMarker.test(line)) continue;
+          if (magicFieldDenylistMarker.test(line)) continue;
+          // Strip end-of-line comments so a real code line with a trailing
+          // `-- comment with 100` doesn't pick up the 100. Use the first
+          // standalone `--` outside of a string literal as the cut point;
+          // a regex approximation is good enough.
+          const codeOnly = line.replace(/(["']).*?\1|--.*$/g, (m, q) => q ? m : '');
+          // After stripping comments, also bail if line is dominated by
+          // arithmetic-on-time constants (e.g. `setTimeout(fn, 1000 * 60)`).
+          if (timeArithMarker.test(codeOnly)) continue;
+          const idsOnLine: number[] = [];
+          let m;
+          idRegex.lastIndex = 0;
+          while ((m = idRegex.exec(codeOnly)) !== null) {
+            const id = parseInt(m[1], 10);
+            if (id < 100) continue;
+            idsOnLine.push(id);
+            candidateIds.add(id);
+          }
+          if (idsOnLine.length > 0) {
+            perLine.push({
+              line: i + 1,
+              ids: idsOnLine,
+              snippet: makeSnippet(line, 0),
+            });
+          }
+        }
+        occurrencesByFile.push({ name: f.name, lines: lines.length, perLine });
+      }
+
+      // 4. Classify each unique candidate id against live HC3 state.
+      //
+      // /api/devices/{id} response shape: HC3 records `dead` and `deleted`
+      // flags at `properties.dead` / `properties.deleted` rather than at
+      // the top level (the top-level `dead`/`deleted` keys do exist on
+      // some firmware revisions but are usually null even when the device
+      // is in fact dead). Check both locations to be defensive.
+      //
+      // Classification:
+      //   404 → DELETED (device gone from HC3 entirely)
+      //   properties.deleted == true OR top-level deleted == true → DELETED
+      //   properties.dead == true OR top-level dead == true → DEAD
+      //   else → ALIVE
+      //
+      // Per-id cache so a busy QA file referencing the same id 50 times
+      // only triggers one HTTP lookup.
+      const classification = new Map<number, 'ALIVE' | 'DEAD' | 'DELETED'>();
+      const deviceMeta = new Map<number, { name?: string; type?: string }>();
+      for (const id of candidateIds) {
+        try {
+          const dev = await hc3.request(`/api/devices/${id}`) as any;
+          const props = dev?.properties ?? {};
+          const isDeleted = props?.deleted === true || dev?.deleted === true;
+          const isDead = props?.dead === true || dev?.dead === true;
+          if (isDeleted) {
+            classification.set(id, 'DELETED');
+            deviceMeta.set(id, { name: dev?.name, type: dev?.type });
+          } else if (isDead) {
+            classification.set(id, 'DEAD');
+            deviceMeta.set(id, { name: dev?.name, type: dev?.type });
+          } else {
+            classification.set(id, 'ALIVE');
+            deviceMeta.set(id, { name: dev?.name, type: dev?.type });
+          }
+        } catch (e: any) {
+          const msg = (e?.message ?? '').toString();
+          if (msg.includes('HTTP 404')) {
+            classification.set(id, 'DELETED');
+          } else {
+            // Treat any other failure as unknown — record but don't block.
+            classification.set(id, 'DELETED');
+          }
+        }
+      }
+
+      // 5. Group hits by id; report only DEAD / DELETED issues (alive ids
+      // are summarised in stats but not enumerated — the caller doesn't
+      // need a list of every healthy reference).
+      type Issue = { kind: 'DEAD' | 'DELETED'; id: number; name?: string; type?: string; files: Array<{ fileName: string; line: number; snippet: string }> };
+      const issuesById = new Map<number, Issue>();
+      for (const fileGroup of occurrencesByFile) {
+        for (const occ of fileGroup.perLine) {
+          for (const id of occ.ids) {
+            const cls = classification.get(id);
+            if (cls !== 'DEAD' && cls !== 'DELETED') continue;
+            const meta = deviceMeta.get(id);
+            let issue = issuesById.get(id);
+            if (!issue) {
+              issue = { kind: cls, id, name: meta?.name, type: meta?.type, files: [] };
+              issuesById.set(id, issue);
+            }
+            issue.files.push({ fileName: fileGroup.name, line: occ.line, snippet: occ.snippet });
+          }
+        }
+      }
+      const issues = Array.from(issuesById.values()).sort((a, b) => {
+        // DEAD first (recoverable), then DELETED (gone), then by id ascending.
+        if (a.kind !== b.kind) return a.kind === 'DEAD' ? -1 : 1;
+        return a.id - b.id;
+      });
+
+      // 6. Tally summary counts from the classification map.
+      let alive = 0, dead = 0, deleted = 0;
+      for (const cls of classification.values()) {
+        if (cls === 'ALIVE') alive++;
+        else if (cls === 'DEAD') dead++;
+        else if (cls === 'DELETED') deleted++;
+      }
+
+      return {
+        qa: { id: args.deviceId, name: qa?.name, type: qa?.type },
+        scanned: { fileCount: files.length, totalLines },
+        summary: {
+          idsReferenced: candidateIds.size,
+          alive,
+          dead,
+          deleted,
+        },
+        issues,
+        parseErrors: [],
       };
     },
   },
