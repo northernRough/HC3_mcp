@@ -1,6 +1,6 @@
 {
   "name": "@northernrough/hc3-mcp-server",
-  "version": "3.5.1",
+  "version": "3.5.2",
   "description": "Standalone Model Context Protocol server for Fibaro Home Center 3. 125+ tools with read-modify-write + post-write-verify guards on every mutating endpoint, HTTP transport, Z-Wave diagnostics, and a 23-module per-domain architecture. Originally based on jangabrielsson/HC3_mcp.",
   "license": "MIT",
   "author": {
@@ -50,7 +50,8 @@
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",
-    "DEPLOYMENT.md"
+    "DEPLOYMENT.md",
+    "KNOWN_DEAD_ENDPOINTS.md"
   ],
   "engines": {
     "node": ">=18"

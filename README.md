@@ -334,7 +334,7 @@ If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may su
 This server runs with your HC3 admin credentials and exposes write access to your home: devices, scenes, QuickApps, global variables, profiles, users, rooms, alarm partitions, and the notification centre. Any MCP client (Claude Code, Claude Desktop, Cursor, Cline, etc.) connected to it can read and mutate that state. Treat the credentials and the agent's prompts accordingly.
 
 - Credentials are taken from environment variables (`FIBARO_HOST`, `FIBARO_USERNAME`, `FIBARO_PASSWORD`, optional `FIBARO_PORT`). They are never written to disk by this code.
-- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, and `DEPLOYMENT.md`. No `.env`, no local configuration files.
+- The published npm tarball contains only compiled JS, `LICENSE`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, `DEPLOYMENT.md`, and `KNOWN_DEAD_ENDPOINTS.md`. No `.env`, no local configuration files.
 - HC3 does not currently expose TLS on its REST surface; the credential transit is HTTP Basic auth. Run this on the same trusted network as the HC3, or front it with a reverse proxy.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md). Please email rather than file a public issue.
@@ -348,6 +348,7 @@ This package is maintained for the author's personal HC3 setup and is published 
 - IPv6 addresses are not supported
 - TLS to the HC3 requires a fronting reverse proxy (HC3 firmware is HTTP-only on the REST surface)
 - Some advanced HC3 features (notification centre creation, certain Z-Wave write paths) are firmware-quirky on 5.x; tools that hit those quirks fail loudly rather than silently and document the boundary in their tool descriptions
+- A handful of historical HC3 REST endpoints are no longer routed on current firmware (5.20x). Tools that previously called them have been migrated to working alternatives. The full catalogue, with curl reproductions and replacement endpoints for each, lives in [KNOWN_DEAD_ENDPOINTS.md](KNOWN_DEAD_ENDPOINTS.md). Consult it before authoring a new tool against an HC3 endpoint that hasn't been exercised recently.
 
 ## Contributing
 

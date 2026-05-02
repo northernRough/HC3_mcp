@@ -50,7 +50,7 @@ If a fix involves a coordinated disclosure, I'll publish a GitHub Security Advis
 
 ## What is out of scope
 
-- HC3 firmware bugs (report those to Fibaro).
+- HC3 firmware bugs (report those to Fibaro). The catalogue of HC3 REST endpoints we have observed to be non-functional on current firmware lives in [KNOWN_DEAD_ENDPOINTS.md](KNOWN_DEAD_ENDPOINTS.md) — those are firmware issues, not server issues.
 - Issues in the underlying MCP protocol (report to the protocol maintainers).
 - Issues in MCP clients that consume this server (report to the client author).
 - Use of the server with credentials the user does not own (this is a deployment concern, not a server bug).

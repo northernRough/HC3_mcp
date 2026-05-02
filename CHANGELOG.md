@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.5.2] - 2026-05-02
+
+### Added
+- **`KNOWN_DEAD_ENDPOINTS.md`** — top-level catalogue of HC3 REST endpoints that don't behave as their name (or the legacy Swagger documentation) suggests on current firmware (5.20x). Captures the eleven dead/misleading endpoints surfaced by recent fixes (`/api/energy`, `/api/energy/{id}`, `/api/quickApp/`, `/api/quickApp/{id}`, `/api/info`, `/api/firmware`, `/api/firmware/v1/status`, `/api/eventsHistory`, `/api/panels/event`, `/api/diagnostics/*`, `/api/zwave/*`) plus the two misleading-200 endpoints (`/api/energy/devices/{id}/summary` and `.../history`, both silently return the bare device list ignoring the trailing path and query parameters). Each entry has a curl reproduction, observed behaviour, and the working alternative.
+
+  Cross-linked from `README.md` (Known issues section), `SECURITY.md` (out-of-scope clause), and shipped in the npm tarball via the `files` whitelist so users running `npm install -g` get the document alongside the binary.
+
+  Maintainers should append new entries as they are discovered. Any future tool author can read this once and avoid an hour of probing the same dead paths.
+
 ## [3.5.1] - 2026-05-02
 
 ### Fixed
