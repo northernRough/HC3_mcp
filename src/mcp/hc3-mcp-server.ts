@@ -14,6 +14,15 @@ import { HC3Client } from './hc3-client';
 import { MCPRequest, MCPResponse, MCPTool } from './types';
 import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
+import { mergeHandlers } from './tools/registry';
+import { alarm } from './tools/alarm';
+import { sprinklers } from './tools/sprinklers';
+import { backups } from './tools/backups';
+import { debug } from './tools/debug';
+import { ios } from './tools/ios';
+
+const toolModules = [alarm, sprinklers, backups, debug, ios];
+const toolHandlers = mergeHandlers(toolModules);
 
 class HC3MCPServer {
   private hc3: HC3Client;
@@ -970,147 +979,9 @@ class HC3MCPServer {
         },
       },
 
-      // Alarm System Management
-      {
-        name: 'get_alarm_partitions',
-        description: 'Get all alarm partitions',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_alarm_partition',
-        description: 'Get specific alarm partition by ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            partitionId: {
-              type: 'number',
-              description: 'Alarm partition ID',
-            },
-          },
-          required: ['partitionId'],
-        },
-      },
-      {
-        name: 'arm_alarm_partition',
-        description: 'Arm alarm partition',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            partitionId: {
-              type: 'number',
-              description: 'Alarm partition ID',
-            },
-            armingType: {
-              type: 'string',
-              description: 'Arming type (full, partial, night)',
-              enum: ['full', 'partial', 'night'],
-            },
-          },
-          required: ['partitionId', 'armingType'],
-        },
-      },
-      {
-        name: 'disarm_alarm_partition',
-        description: 'Disarm alarm partition',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            partitionId: {
-              type: 'number',
-              description: 'Alarm partition ID',
-            },
-          },
-          required: ['partitionId'],
-        },
-      },
-      {
-        name: 'get_alarm_history',
-        description: 'Get alarm system history',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            partitionId: {
-              type: 'number',
-              description: 'Optional: Filter by partition ID',
-            },
-            limit: {
-              type: 'number',
-              description: 'Limit number of results (default: 100)',
-            },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination (default: 0)',
-            },
-          },
-        },
-      },
-      {
-        name: 'get_alarm_devices',
-        description: 'Get alarm system devices',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            partitionId: {
-              type: 'number',
-              description: 'Optional: Filter by partition ID',
-            },
-          },
-        },
-      },
+      ...alarm.schemas,
 
-      // Sprinkler System Management
-      {
-        name: 'get_sprinkler_systems',
-        description: 'Get all sprinkler systems',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_sprinkler_system',
-        description: 'Get specific sprinkler system by ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            systemId: {
-              type: 'number',
-              description: 'Sprinkler system ID',
-            },
-          },
-          required: ['systemId'],
-        },
-      },
-      {
-        name: 'control_sprinkler_system',
-        description: 'Control sprinkler system (start, stop, pause)',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            systemId: {
-              type: 'number',
-              description: 'Sprinkler system ID',
-            },
-            action: {
-              type: 'string',
-              description: 'Action to perform',
-              enum: ['start', 'stop', 'pause', 'resume'],
-            },
-            zoneId: {
-              type: 'number',
-              description: 'Optional: Specific zone ID for zone-specific actions',
-            },
-            duration: {
-              type: 'number',
-              description: 'Optional: Duration in minutes for start action',
-            },
-          },
-          required: ['systemId', 'action'],
-        },
-      },
+      ...sprinklers.schemas,
 
       // Custom Events Management
       {
@@ -1291,129 +1162,11 @@ class HC3MCPServer {
         }
       },
 
-      // Backup Management
-      {
-        name: 'can_create_backup',
-        description: 'Check if backups can be created',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_local_backup_status',
-        description: 'Get local backup status',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_remote_backup_status',
-        description: 'Get remote backup status',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_backups',
-        description: 'Get list of available backups',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            type: {
-              type: 'string',
-              description: 'Backup type (local, remote, all)',
-              enum: ['local', 'remote', 'all'],
-            },
-          },
-        },
-      },
-      {
-        name: 'create_backup',
-        description: 'Create a new backup',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'Backup name',
-            },
-            type: {
-              type: 'string',
-              description: 'Backup type (local, remote)',
-              enum: ['local', 'remote'],
-            },
-          },
-          required: ['name', 'type'],
-        },
-      },
+      ...backups.schemas,
 
-      // Debug Messages
-      {
-        name: 'clear_debug_messages',
-        description: 'Clear all debug messages on HC3 via DELETE /api/debugMessages. Useful for test loops — clear before running a scene or QA action, then read get_debug_messages to see only the fresh logs. Read-then-delete: counts messages before deletion so the response reports how many were cleared.',
-        inputSchema: { type: 'object', properties: {} }
-      },
-      {
-        name: 'get_debug_messages',
-        description: 'Read HC3 debug messages with client-side filtering. HC3 returns a fixed page of 30 messages newest-first and ignores query-param filters, so this tool paginates via the "last" cursor and applies filters locally. Returns a summary object plus the matching messages.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tagContains: {
-              type: 'string',
-              description: 'Case-insensitive substring match against the message tag (e.g. "DAIKIN" matches "DAIKIN-4710").',
-            },
-            since: {
-              type: 'number',
-              description: 'Epoch seconds. Only messages with timestamp >= this value are returned. Also stops pagination once the oldest fetched page is older than this.',
-            },
-            type: {
-              type: 'string',
-              description: 'Filter by message type.',
-              enum: ['error', 'warning', 'info', 'debug', 'trace'],
-            },
-            limit: {
-              type: 'number',
-              description: 'Maximum number of matching messages to return (default: 100). Applied AFTER filtering.',
-            },
-            maxPages: {
-              type: 'number',
-              description: 'Safety cap on HC3 pages fetched (default: 10, ~300 raw messages). Raise if a filter needs deeper history.',
-            },
-          },
-        },
-      },
+      ...debug.schemas,
 
-      // iOS Devices Management
-      {
-        name: 'get_ios_devices',
-        description: 'Get registered iOS devices',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'register_ios_device',
-        description: 'Register a new iOS device',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            deviceToken: {
-              type: 'string',
-              description: 'iOS device token',
-            },
-            name: {
-              type: 'string',
-              description: 'Device name',
-            },
-          },
-          required: ['deviceToken', 'name'],
-        },
-      },
+      ...ios.schemas,
 
       // QuickApp Management
       {
@@ -2169,7 +1922,9 @@ class HC3MCPServer {
     try {
       let result: any;
 
-      switch (name) {
+      if (name in toolHandlers) {
+        result = await toolHandlers[name](this.hc3, args);
+      } else { switch (name) {
         // Device Management
         case 'get_devices':
           result = await this.getDevices(args);
@@ -2375,37 +2130,6 @@ class HC3MCPServer {
           result = await this.updateClimateZone(args);
           break;
 
-        // Alarm System Management
-        case 'get_alarm_partitions':
-          result = await this.getAlarmPartitions();
-          break;
-        case 'get_alarm_partition':
-          result = await this.getAlarmPartition(args);
-          break;
-        case 'arm_alarm_partition':
-          result = await this.armAlarmPartition(args);
-          break;
-        case 'disarm_alarm_partition':
-          result = await this.disarmAlarmPartition(args);
-          break;
-        case 'get_alarm_history':
-          result = await this.getAlarmHistory(args);
-          break;
-        case 'get_alarm_devices':
-          result = await this.getAlarmDevices(args);
-          break;
-
-        // Sprinkler System Management
-        case 'get_sprinkler_systems':
-          result = await this.getSprinklerSystems();
-          break;
-        case 'get_sprinkler_system':
-          result = await this.getSprinklerSystem(args);
-          break;
-        case 'control_sprinkler_system':
-          result = await this.controlSprinklerSystem(args);
-          break;
-
         // Custom Events Management
         case 'get_custom_events':
           result = await this.getCustomEvents();
@@ -2452,39 +2176,6 @@ class HC3MCPServer {
           break;
         case 'clear_all_notifications':
           result = await this.clearAllNotifications();
-          break;
-
-        // Backup Management
-        case 'can_create_backup':
-          result = await this.canCreateBackup();
-          break;
-        case 'get_local_backup_status':
-          result = await this.getLocalBackupStatus();
-          break;
-        case 'get_remote_backup_status':
-          result = await this.getRemoteBackupStatus();
-          break;
-        case 'get_backups':
-          result = await this.getBackups(args);
-          break;
-        case 'create_backup':
-          result = await this.createBackup(args);
-          break;
-
-        // Debug Messages
-        case 'clear_debug_messages':
-          result = await this.clearDebugMessages();
-          break;
-        case 'get_debug_messages':
-          result = await this.getDebugMessages(args);
-          break;
-
-        // iOS Devices Management
-        case 'get_ios_devices':
-          result = await this.getIosDevices();
-          break;
-        case 'register_ios_device':
-          result = await this.registerIosDevice(args);
           break;
 
         // QuickApp Management
@@ -2616,7 +2307,7 @@ class HC3MCPServer {
 
         default:
           throw new Error(`Unknown tool: ${name}`);
-      }
+      } }
 
       return {
         jsonrpc: '2.0',
@@ -4370,80 +4061,6 @@ class HC3MCPServer {
     };
   }
 
-  // Alarm System Management Methods
-  private async getAlarmPartitions(): Promise<any> {
-    return await this.hc3.request('/api/alarms/v1/partitions');
-  }
-
-  private async getAlarmPartition(args: { partitionId: number }): Promise<any> {
-    return await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}`);
-  }
-
-  private async armAlarmPartition(args: { partitionId: number; armingType: string }): Promise<any> {
-    await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}/actions/arm`, 'POST', {
-      armingType: args.armingType
-    });
-    return `Alarm partition ${args.partitionId} armed with ${args.armingType} mode.`;
-  }
-
-  private async disarmAlarmPartition(args: { partitionId: number }): Promise<any> {
-    await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}/actions/disarm`, 'POST');
-    return `Alarm partition ${args.partitionId} disarmed successfully.`;
-  }
-
-  private async getAlarmHistory(args: { partitionId?: number; limit?: number; offset?: number }): Promise<any> {
-    let url = '/api/alarms/v1/history';
-    const params = new URLSearchParams();
-    
-    if (args.partitionId) {
-      params.append('partitionId', args.partitionId.toString());
-    }
-    if (args.limit) {
-      params.append('limit', args.limit.toString());
-    }
-    if (args.offset) {
-      params.append('offset', args.offset.toString());
-    }
-    
-    if (params.toString()) {
-      url += '?' + params.toString();
-    }
-    
-    return await this.hc3.request(url);
-  }
-
-  private async getAlarmDevices(args: { partitionId?: number }): Promise<any> {
-    let url = '/api/alarms/v1/devices';
-    if (args.partitionId) {
-      url += `?partitionId=${args.partitionId}`;
-    }
-    return await this.hc3.request(url);
-  }
-
-  // Sprinkler System Management Methods
-  private async getSprinklerSystems(): Promise<any> {
-    return await this.hc3.request('/api/panels/sprinklers');
-  }
-
-  private async getSprinklerSystem(args: { systemId: number }): Promise<any> {
-    return await this.hc3.request(`/api/panels/sprinklers/${args.systemId}`);
-  }
-
-  private async controlSprinklerSystem(args: { systemId: number; action: string; zoneId?: number; duration?: number }): Promise<any> {
-    const endpoint = `/api/panels/sprinklers/${args.systemId}/actions/${args.action}`;
-    const requestData: any = {};
-    
-    if (args.zoneId) {
-      requestData.zoneId = args.zoneId;
-    }
-    if (args.duration) {
-      requestData.duration = args.duration;
-    }
-    
-    await this.hc3.request(endpoint, 'POST', Object.keys(requestData).length > 0 ? requestData : undefined);
-    return `Sprinkler system ${args.systemId} action '${args.action}' executed successfully.`;
-  }
-
   // Custom Events Management Methods
   private async getCustomEvents(): Promise<any> {
     return await this.hc3.request('/api/customEvents');
@@ -4618,137 +4235,6 @@ class HC3MCPServer {
       lastType: existing?.type,
       lastData: existing?.data
     };
-  }
-
-  // Backup Management Methods
-  private async canCreateBackup(): Promise<any> {
-    return await this.hc3.request('/api/service/canCreateBackups');
-  }
-
-  private async getLocalBackupStatus(): Promise<any> {
-    return await this.hc3.request('/api/service/getLocalBackupsStatus');
-  }
-
-  private async getRemoteBackupStatus(): Promise<any> {
-    return await this.hc3.request('/api/service/getRemoteBackupsStatus');
-  }
-
-  private async getBackups(args: { type?: string }): Promise<any> {
-    let url = '/api/service/backups';
-    if (args.type && args.type !== 'all') {
-      url += `?type=${args.type}`;
-    }
-    return await this.hc3.request(url);
-  }
-
-  private async createBackup(args: { name: string; type: string }): Promise<any> {
-    const result = await this.hc3.request('/api/service/backups', 'POST', {
-      name: args.name,
-      type: args.type
-    });
-    return `Backup '${args.name}' of type '${args.type}' creation initiated successfully.`;
-  }
-
-  // Debug Messages Methods
-  private async clearDebugMessages(): Promise<any> {
-    let cleared: number | null = null;
-    try {
-      const before: any = await this.hc3.request('/api/debugMessages');
-      cleared = Array.isArray(before) ? before.length
-        : (Array.isArray(before?.messages) ? before.messages.length : null);
-    } catch {
-      // non-fatal; DELETE still proceeds, just no count
-    }
-    await this.hc3.request('/api/debugMessages', 'DELETE');
-    return { cleared };
-  }
-
-  private async getDebugMessages(args: {
-    tagContains?: string;
-    since?: number;
-    type?: string;
-    limit?: number;
-    maxPages?: number;
-  }): Promise<any> {
-    const limit = args.limit ?? 100;
-    const maxPages = args.maxPages ?? 10;
-    const since = args.since;
-    const typeFilter = args.type;
-    const tagNeedle = args.tagContains?.toLowerCase();
-
-    const matches = (m: any) => {
-      if (typeFilter && m.type !== typeFilter) return false;
-      if (since !== undefined && m.timestamp < since) return false;
-      if (tagNeedle && !(typeof m.tag === 'string' && m.tag.toLowerCase().includes(tagNeedle))) return false;
-      return true;
-    };
-
-    const collected: any[] = [];
-    let fetched = 0;
-    let pages = 0;
-    let cursor: number | undefined = undefined;
-    let truncatedBy: 'limit' | 'maxPages' | null = null;
-    let crossedSince = false;
-
-    while (pages < maxPages) {
-      const url = cursor !== undefined ? `/api/debugMessages?last=${cursor}` : '/api/debugMessages';
-      const page = await this.hc3.request(url);
-      pages++;
-      const messages: any[] = page?.messages ?? [];
-      fetched += messages.length;
-
-      for (const m of messages) {
-        if (matches(m)) {
-          collected.push(m);
-          if (collected.length >= limit) {
-            truncatedBy = 'limit';
-            break;
-          }
-        }
-      }
-      if (truncatedBy === 'limit') break;
-
-      const oldest = messages[messages.length - 1]?.timestamp;
-      if (since !== undefined && oldest !== undefined && oldest < since) {
-        crossedSince = true;
-        break;
-      }
-
-      const nextLast = page?.nextLast;
-      if (!nextLast || nextLast === 0) break;
-      cursor = nextLast;
-    }
-
-    if (truncatedBy === null && pages >= maxPages && !crossedSince) {
-      truncatedBy = 'maxPages';
-    }
-
-    const timestamps = collected.map(m => m.timestamp).filter((t: any) => typeof t === 'number');
-    return {
-      summary: {
-        fetched,
-        matched: collected.length,
-        returned: collected.length,
-        pages,
-        oldestTimestamp: timestamps.length ? Math.min(...timestamps) : null,
-        newestTimestamp: timestamps.length ? Math.max(...timestamps) : null,
-        truncatedBy,
-      },
-      messages: collected,
-    };
-  }
-
-  // iOS Devices Management Methods
-  private async getIosDevices(): Promise<any> {
-    return await this.hc3.request('/api/iosDevices');
-  }
-
-  private async registerIosDevice(args: { deviceToken: string; name: string }): Promise<any> {
-    const result = await this.hc3.request('/api/iosDevices', 'POST', {
-      deviceToken: args.deviceToken,
-      name: args.name
-    });
-    return `iOS device '${args.name}' registered successfully.`;
   }
 
   // QuickApp Management Methods
