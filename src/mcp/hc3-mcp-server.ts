@@ -15,13 +15,19 @@ import { MCPRequest, MCPResponse, MCPTool } from './types';
 import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
+import { deepEqual, deepMerge, verifyWrite } from './util';
 import { alarm } from './tools/alarm';
 import { sprinklers } from './tools/sprinklers';
 import { backups } from './tools/backups';
 import { debug } from './tools/debug';
 import { ios } from './tools/ios';
+import { climate } from './tools/climate';
+import { customEvents } from './tools/customEvents';
+import { notifications } from './tools/notifications';
+import { globals } from './tools/globals';
+import { users } from './tools/users';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users];
 const toolHandlers = mergeHandlers(toolModules);
 
 class HC3MCPServer {
@@ -543,64 +549,7 @@ class HC3MCPServer {
         }
       },
 
-      // Global Variables
-      {
-        name: 'get_global_variables',
-        description: 'Get all global variables from the HC3 system',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'set_global_variable',
-        description: 'Set the value of a global variable',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            varName: {
-              type: 'string',
-              description: 'Variable name',
-            },
-            value: {
-              type: ['string', 'number', 'boolean'],
-              description: 'Variable value',
-            },
-          },
-          required: ['varName', 'value'],
-        },
-      },
-      {
-        name: 'create_global_variable',
-        description: 'Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            varName: {
-              type: 'string',
-              description: 'Variable name. Must match [A-Za-z][A-Za-z0-9_]* (HC3 regex).'
-            },
-            value: {
-              type: ['string', 'number', 'boolean'],
-              description: 'Initial value. For isEnum globals must be one of enumValues.'
-            },
-            readOnly: {
-              type: 'boolean',
-              description: 'Mark as read-only system-style variable. Default false.'
-            },
-            isEnum: {
-              type: 'boolean',
-              description: 'Create as enum variable. Default false.'
-            },
-            enumValues: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Allowed enum values. Required when isEnum=true.'
-            }
-          },
-          required: ['varName', 'value']
-        }
-      },
+      ...globals.schemas,
 
       // User Management
       {
@@ -928,137 +877,13 @@ class HC3MCPServer {
         }
       },
 
-      // Climate Management
-      {
-        name: 'get_climate_zones',
-        description: 'Get all climate zones',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            detailed: {
-              type: 'boolean',
-              description: 'Return detailed climate zone information (default: false)',
-            },
-          },
-        },
-      },
-      {
-        name: 'get_climate_zone',
-        description: 'Get specific climate zone by ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            zoneId: {
-              type: 'number',
-              description: 'Climate zone ID',
-            },
-          },
-          required: ['zoneId'],
-        },
-      },
-      {
-        name: 'update_climate_zone',
-        description: 'Update climate zone fields in a single atomic PUT. Use `topLevel` for zone-body fields (e.g., `name`, `active`, `mode`) and `properties` for nested zone properties (e.g., `handSetPointHeating`, `vacationMode`, schedule objects like `monday.morning`). At least one must be provided. `properties` is written via read-modify-write: the tool fetches the current zone, deep-merges submitted scalars and nested-object keys into the existing properties, then PUTs the merged result. This preserves unsubmitted sibling keys inside schedule sub-objects. Array-valued properties (`devices`, `incompatibleDevices`, `temperatureSensors`) are fully replaced by whatever is submitted, so submit the complete array if editing them. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            zoneId: {
-              type: 'number',
-              description: 'Climate zone ID',
-            },
-            topLevel: {
-              type: 'object',
-              description: 'Top-level zone fields to modify (e.g., {name: "New Name", active: true, mode: "Schedule"}). Sent at the root of the PUT body.',
-            },
-            properties: {
-              type: 'object',
-              description: 'Nested zone properties to modify. Scalars (handSetPointHeating, vacationMode, etc.) and schedule sub-objects (monday.morning, etc.) are deep-merged into the current zone via read-modify-write, so sibling keys are preserved. Array-valued properties (devices, incompatibleDevices, temperatureSensors) are fully replaced — submit the full current array if editing them.',
-            },
-          },
-          required: ['zoneId'],
-        },
-      },
+      ...climate.schemas,
 
       ...alarm.schemas,
 
       ...sprinklers.schemas,
 
-      // Custom Events Management
-      {
-        name: 'get_custom_events',
-        description: 'Get all custom events',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'create_custom_event',
-        description: 'Create a new custom event',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'Event name',
-            },
-            userDescription: {
-              type: 'string',
-              description: 'Event description',
-            },
-          },
-          required: ['name'],
-        },
-      },
-      {
-        name: 'trigger_custom_event',
-        description: 'Trigger a custom event',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            eventId: {
-              type: 'number',
-              description: 'Custom event ID',
-            },
-          },
-          required: ['eventId'],
-        },
-      },
-      {
-        name: 'get_custom_event',
-        description: 'Read a single custom event by name. Wraps GET /api/customEvents/{name}. Returns {name, userDescription}. HTTP 404 if unknown.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Custom event name' }
-          },
-          required: ['name']
-        }
-      },
-      {
-        name: 'update_custom_event',
-        description: 'Update a custom event\'s userDescription and/or rename it. Wraps PUT /api/customEvents/{name}. Read-modify-write: reads current, merges submitted fields, PUTs. If newName is supplied, verifies by refetching via the new name. Otherwise verifies under the original name. Throws on mismatch.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Current custom event name' },
-            userDescription: { type: 'string', description: 'New description. Omit to leave unchanged.' },
-            newName: { type: 'string', description: 'New name. Omit to leave unchanged.' }
-          },
-          required: ['name']
-        }
-      },
-      {
-        name: 'delete_custom_event',
-        description: 'Delete a custom event by name. Wraps DELETE /api/customEvents/{name}. Reads the event first to capture userDescription as a recovery trail. Post-delete verifies by refetch expecting 404.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Custom event name to delete' }
-          },
-          required: ['name']
-        }
-      },
+      ...customEvents.schemas,
 
       // Location Management
       {
@@ -1088,79 +913,7 @@ class HC3MCPServer {
         },
       },
 
-      // Notifications Management
-      {
-        name: 'get_notifications',
-        description: 'Get system notifications',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            limit: {
-              type: 'number',
-              description: 'Limit number of results (default: 50)',
-            },
-            offset: {
-              type: 'number',
-              description: 'Offset for pagination (default: 0)',
-            },
-          },
-        },
-      },
-      {
-        name: 'mark_notification_read',
-        description: 'Mark notification as read',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            notificationId: {
-              type: 'number',
-              description: 'Notification ID',
-            },
-          },
-          required: ['notificationId'],
-        },
-      },
-      {
-        name: 'clear_all_notifications',
-        description: 'Clear all notifications',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_notification',
-        description: 'Read a single notification by id. Wraps GET /api/notificationCenter/{id}. 404 if unknown.',
-        inputSchema: {
-          type: 'object',
-          properties: { notificationId: { type: 'number', description: 'Notification id' } },
-          required: ['notificationId']
-        }
-      },
-      {
-        name: 'update_notification',
-        description: 'Update a notification via PUT /api/notificationCenter/{id}. Read-modify-write + post-write verify on submitted fields. Typically used to mark as read or to amend the data payload.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            notificationId: { type: 'number', description: 'Notification id' },
-            fields: { type: 'object', description: 'Partial update (wasRead, priority, data, canBeDeleted, etc.)' }
-          },
-          required: ['notificationId', 'fields']
-        }
-      },
-      {
-        name: 'delete_notification',
-        description: 'Delete a notification via DELETE /api/notificationCenter/{id}. Reads first to capture the data payload as a recovery trail. Refuses if canBeDeleted=false (HC3-system-protected) unless allow_system=true. Post-delete verifies by refetch expecting 404.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            notificationId: { type: 'number', description: 'Notification id' },
-            allow_system: { type: 'boolean', description: 'Required to delete notifications where canBeDeleted=false. Default false.' }
-          },
-          required: ['notificationId']
-        }
-      },
+      ...notifications.schemas,
 
       ...backups.schemas,
 
@@ -2010,25 +1763,6 @@ class HC3MCPServer {
           result = await this.getEnergyData(args);
           break;
 
-        // Global Variables
-        case 'get_global_variables':
-          result = await this.getGlobalVariables();
-          break;
-        case 'create_global_variable':
-          result = await this.createGlobalVariable(args);
-          break;
-        case 'set_global_variable':
-          result = await this.setGlobalVariable(args);
-          break;
-
-        // User Management
-        case 'get_users':
-          result = await this.getUsers();
-          break;
-        case 'update_user_rights':
-          result = await this.updateUserRights(args);
-          break;
-
         // Diagnostic Information
         case 'snapshot':
           result = await this.snapshot(args);
@@ -2119,63 +1853,12 @@ class HC3MCPServer {
           result = await this.setHomeStatus(args);
           break;
 
-        // Climate Management
-        case 'get_climate_zones':
-          result = await this.getClimateZones(args);
-          break;
-        case 'get_climate_zone':
-          result = await this.getClimateZone(args);
-          break;
-        case 'update_climate_zone':
-          result = await this.updateClimateZone(args);
-          break;
-
-        // Custom Events Management
-        case 'get_custom_events':
-          result = await this.getCustomEvents();
-          break;
-        case 'create_custom_event':
-          result = await this.createCustomEvent(args);
-          break;
-        case 'get_custom_event':
-          result = await this.getCustomEvent(args);
-          break;
-        case 'update_custom_event':
-          result = await this.updateCustomEvent(args);
-          break;
-        case 'delete_custom_event':
-          result = await this.deleteCustomEvent(args);
-          break;
-        case 'trigger_custom_event':
-          result = await this.triggerCustomEvent(args);
-          break;
-
         // Location Management
         case 'get_location_info':
           result = await this.getLocationInfo();
           break;
         case 'update_location_settings':
           result = await this.updateLocationSettings(args);
-          break;
-
-        // Notifications Management
-        case 'get_notifications':
-          result = await this.getNotifications(args);
-          break;
-        case 'mark_notification_read':
-          result = await this.markNotificationRead(args);
-          break;
-        case 'get_notification':
-          result = await this.getNotification(args);
-          break;
-        case 'update_notification':
-          result = await this.updateNotification(args);
-          break;
-        case 'delete_notification':
-          result = await this.deleteNotification(args);
-          break;
-        case 'clear_all_notifications':
-          result = await this.clearAllNotifications();
           break;
 
         // QuickApp Management
@@ -2297,9 +1980,6 @@ class HC3MCPServer {
           break;
         case 'delete_device':
           result = await this.deleteDevice(args);
-          break;
-        case 'delete_global_variable':
-          result = await this.deleteGlobalVariable(args);
           break;
         case 'delete_plugin':
           result = await this.deletePlugin(args);
@@ -2534,45 +2214,11 @@ class HC3MCPServer {
   }
 
   private deepEqual(a: any, b: any): boolean {
-    if (a === b) return true;
-    if (typeof a !== typeof b) return false;
-    if (a === null || b === null) return a === b;
-    if (Array.isArray(a)) {
-      if (!Array.isArray(b) || a.length !== b.length) return false;
-      return a.every((v, i) => this.deepEqual(v, b[i]));
-    }
-    if (typeof a === 'object') {
-      const keys = Object.keys(a);
-      return keys.every(k => this.deepEqual(a[k], b[k]));
-    }
-    return false;
+    return deepEqual(a, b);
   }
 
   private deepMerge(base: any, overlay: any): any {
-    if (overlay === null || typeof overlay !== 'object' || Array.isArray(overlay)) {
-      return overlay;
-    }
-    if (base === null || typeof base !== 'object' || Array.isArray(base)) {
-      return { ...overlay };
-    }
-    const result: Record<string, any> = { ...base };
-    for (const key of Object.keys(overlay)) {
-      const submittedVal = overlay[key];
-      const baseVal = base[key];
-      if (
-        submittedVal !== null &&
-        typeof submittedVal === 'object' &&
-        !Array.isArray(submittedVal) &&
-        baseVal !== null &&
-        typeof baseVal === 'object' &&
-        !Array.isArray(baseVal)
-      ) {
-        result[key] = this.deepMerge(baseVal, submittedVal);
-      } else {
-        result[key] = submittedVal;
-      }
-    }
-    return result;
+    return deepMerge(base, overlay);
   }
 
   private async tolerantFetch<T>(
@@ -2592,69 +2238,7 @@ class HC3MCPServer {
     after: any,
     entityLabel: string
   ): void {
-    const subsetMatch = (submitted: any, stored: any): boolean => {
-      if (submitted === null || typeof submitted !== 'object' || Array.isArray(submitted)) {
-        return this.deepEqual(submitted, stored);
-      }
-      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-        return false;
-      }
-      return Object.keys(submitted).every(k => this.deepEqual(submitted[k], stored[k]));
-    };
-
-    const fmt = (v: any) =>
-      v === undefined ? 'undefined' :
-      typeof v === 'string' ? JSON.stringify(v) :
-      (typeof v === 'object' ? JSON.stringify(v) : String(v));
-
-    const mismatches: string[] = [];
-    const afterProps = after?.properties ?? {};
-    const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
-    const propertiesKeys = properties ? Object.keys(properties) : [];
-
-    for (const key of topLevelKeys) {
-      const submitted = (topLevel as any)[key];
-      const stored = after?.[key];
-      const match = Array.isArray(submitted)
-        ? this.deepEqual(submitted, stored)
-        : (submitted !== null && typeof submitted === 'object'
-            ? subsetMatch(submitted, stored)
-            : submitted === stored);
-      if (!match) {
-        let line = `  - topLevel.${key}: submitted ${fmt(submitted)}, stored ${fmt(stored)}`;
-        if (stored === undefined && afterProps[key] !== undefined) {
-          line += ` (did you mean to put '${key}' in properties?)`;
-        }
-        mismatches.push(line);
-      }
-    }
-
-    for (const key of propertiesKeys) {
-      const submitted = (properties as any)[key];
-      const stored = afterProps[key];
-      const match = Array.isArray(submitted)
-        ? this.deepEqual(submitted, stored)
-        : (submitted !== null && typeof submitted === 'object'
-            ? subsetMatch(submitted, stored)
-            : submitted === stored);
-      if (!match) {
-        let line = `  - properties.${key}: submitted ${fmt(submitted)}, stored ${fmt(stored)}`;
-        if (stored === undefined && after?.[key] !== undefined) {
-          line += ` (did you mean to put '${key}' in topLevel?)`;
-        }
-        mismatches.push(line);
-      }
-    }
-
-    if (mismatches.length > 0) {
-      throw new Error(
-        `Post-write verification failed for ${entityLabel}.\n` +
-        `Mismatched fields:\n${mismatches.join('\n')}\n` +
-        `Likely causes: HC3 silently dropped the field (verify field name and location), ` +
-        `HC3 normalised the value (resubmit with HC3's representation), or the field is ` +
-        `under the wrong wrapper (top-level vs properties).`
-      );
-    }
+    verifyWrite(topLevel, properties, after, entityLabel);
   }
 
   // Room Management Methods
@@ -2961,236 +2545,6 @@ class HC3MCPServer {
     } else {
       return await this.hc3.request('/api/energy');
     }
-  }
-
-  // Global Variables Methods
-  private async getGlobalVariables(): Promise<any> {
-    return await this.hc3.request('/api/globalVariables');
-  }
-
-  private async createGlobalVariable(args: {
-    varName: string;
-    value: any;
-    readOnly?: boolean;
-    isEnum?: boolean;
-    enumValues?: string[];
-  }): Promise<any> {
-    if (typeof args?.varName !== 'string' || args.varName.length === 0) {
-      throw new Error('create_global_variable requires a non-empty varName.');
-    }
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(args.varName)) {
-      throw new Error(
-        `create_global_variable: varName ${JSON.stringify(args.varName)} does not match HC3's required format [A-Za-z][A-Za-z0-9_]* (must start with a letter; letters, digits, and underscores only).`
-      );
-    }
-    if (args.isEnum) {
-      if (!Array.isArray(args.enumValues) || args.enumValues.length === 0) {
-        throw new Error('create_global_variable: isEnum=true requires a non-empty enumValues array.');
-      }
-      const candidate = String(args.value);
-      if (!args.enumValues.includes(candidate)) {
-        throw new Error(
-          `create_global_variable: initial value ${JSON.stringify(args.value)} is not in enumValues ${JSON.stringify(args.enumValues)} (case-sensitive).`
-        );
-      }
-    }
-
-    const encoded = encodeURIComponent(args.varName);
-    try {
-      await this.hc3.request(`/api/globalVariables/${encoded}`);
-      throw new Error(
-        `create_global_variable refuses to overwrite: variable '${args.varName}' already exists. Use set_global_variable to update, or delete_global_variable first.`
-      );
-    } catch (e: any) {
-      const msg = String(e?.message ?? '');
-      if (!/404|not.?found/i.test(msg) && !msg.startsWith('create_global_variable refuses')) {
-        throw e;
-      }
-      if (msg.startsWith('create_global_variable refuses')) throw e;
-    }
-
-    const body: Record<string, any> = { name: args.varName, value: args.value };
-    if (args.readOnly !== undefined) body.readOnly = args.readOnly;
-    if (args.isEnum) {
-      body.isEnum = true;
-      body.enumValues = args.enumValues;
-    }
-
-    const created: any = await this.hc3.request('/api/globalVariables', 'POST', body);
-
-    const after: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
-    if (String(after?.value) !== String(args.value)) {
-      throw new Error(
-        `create_global_variable: post-create value mismatch for '${args.varName}'. Submitted ${JSON.stringify(args.value)}, stored ${JSON.stringify(after?.value)}.`
-      );
-    }
-    return {
-      created: args.varName,
-      value: after?.value,
-      isEnum: !!after?.isEnum,
-      enumValues: after?.enumValues,
-      readOnly: !!after?.readOnly,
-      raw: created
-    };
-  }
-
-  private async setGlobalVariable(args: { varName: string; value: any }): Promise<any> {
-    const encoded = encodeURIComponent(args.varName);
-    const existing: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
-
-    if (existing?.readOnly) {
-      throw new Error(
-        `Global variable '${args.varName}' is read-only (HC3 system variable) and cannot be set via this tool.`
-      );
-    }
-
-    let coerced: any;
-    if (existing?.isEnum) {
-      const enumValues: string[] = Array.isArray(existing.enumValues) ? existing.enumValues : [];
-      const candidate = String(args.value);
-      if (!enumValues.includes(candidate)) {
-        throw new Error(
-          `Global variable '${args.varName}' is an enum with values [${enumValues.map(v => `'${v}'`).join(', ')}]. ` +
-          `Submitted value ${JSON.stringify(args.value)} is not in the set (match is case-sensitive).`
-        );
-      }
-      coerced = candidate;
-    } else {
-      const storedType = typeof existing?.value;
-      if (storedType === 'number') {
-        const n = typeof args.value === 'number' ? args.value : Number(args.value);
-        if (!Number.isFinite(n)) {
-          throw new Error(
-            `Global variable '${args.varName}' is numeric; submitted value ${JSON.stringify(args.value)} is not a number.`
-          );
-        }
-        coerced = n;
-      } else if (storedType === 'boolean') {
-        if (typeof args.value === 'boolean') coerced = args.value;
-        else if (args.value === 'true' || args.value === 1) coerced = true;
-        else if (args.value === 'false' || args.value === 0) coerced = false;
-        else {
-          throw new Error(
-            `Global variable '${args.varName}' is boolean; submitted value ${JSON.stringify(args.value)} cannot be coerced to boolean.`
-          );
-        }
-      } else {
-        coerced = typeof args.value === 'string' ? args.value : String(args.value);
-      }
-    }
-
-    await this.hc3.request(`/api/globalVariables/${encoded}`, 'PUT', { value: coerced });
-
-    const after: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
-    if (String(after?.value) !== String(coerced)) {
-      throw new Error(
-        `Post-write verification failed for global variable '${args.varName}': ` +
-        `submitted ${JSON.stringify(coerced)}, HC3 stored ${JSON.stringify(after?.value)}.`
-      );
-    }
-
-    return {
-      name: args.varName,
-      previous: { value: existing?.value, isEnum: !!existing?.isEnum },
-      current: { value: after?.value, isEnum: !!after?.isEnum }
-    };
-  }
-
-  // User Management Methods
-  private async getUsers(): Promise<any> {
-    return await this.hc3.request('/api/users');
-  }
-
-  private async updateUserRights(args: {
-    userId: number;
-    rights: Record<string, any>;
-    allow_advanced_rights?: boolean;
-    allow_grant_all?: boolean;
-  }): Promise<any> {
-    if (typeof args?.userId !== 'number') {
-      throw new Error('update_user_rights requires a numeric userId.');
-    }
-    if (!args?.rights || typeof args.rights !== 'object' || Array.isArray(args.rights) || Object.keys(args.rights).length === 0) {
-      throw new Error('update_user_rights requires a non-empty rights object.');
-    }
-
-    if ('advanced' in args.rights && !args.allow_advanced_rights) {
-      const advancedKeys = Object.keys(args.rights.advanced || {});
-      throw new Error(
-        `update_user_rights: writing rights.advanced is a privilege-escalation footgun. ` +
-        `Submitted advanced keys: [${advancedKeys.join(', ')}]. ` +
-        `Pass allow_advanced_rights=true to override.`
-      );
-    }
-
-    const grantAllOffences: string[] = [];
-    for (const [category, val] of Object.entries(args.rights)) {
-      if (val && typeof val === 'object' && !Array.isArray(val) && (val as any).all === true) {
-        grantAllOffences.push(`rights.${category}.all=true`);
-      }
-    }
-    if (grantAllOffences.length > 0 && !args.allow_grant_all) {
-      throw new Error(
-        `update_user_rights: mass-grant write rejected — ${grantAllOffences.join(', ')}. ` +
-        `Pass allow_grant_all=true to override.`
-      );
-    }
-
-    const current: any = await this.hc3.request(`/api/users/${args.userId}`);
-    if (current?.type === 'superuser') {
-      throw new Error(
-        `update_user_rights: user ${args.userId} (${current.name}) is type 'superuser' — ` +
-        `rights are all-true by design. Any state change here could break admin access. Refusing.`
-      );
-    }
-
-    const currentRights = (current?.rights && typeof current.rights === 'object') ? current.rights : {};
-    const mergedRights = this.deepMerge(currentRights, args.rights);
-
-    // PUT only {rights: ...}, not the full user record. HC3 rejects writes
-    // to tosAccepted / privacyPolicyAccepted by anyone other than the user
-    // themselves, so a full-record echo-back will 403 with "Terms of service
-    // acceptance change forbidden". Partial PUT of just rights is accepted.
-    await this.hc3.request(`/api/users/${args.userId}`, 'PUT', { rights: mergedRights });
-
-    const after: any = await this.hc3.request(`/api/users/${args.userId}`);
-    const afterRights = after?.rights ?? {};
-
-    const mismatches: string[] = [];
-    for (const [category, submittedCat] of Object.entries(args.rights)) {
-      if (submittedCat === null || typeof submittedCat !== 'object' || Array.isArray(submittedCat)) continue;
-      const storedCat = afterRights[category] ?? {};
-      for (const [leafKey, submittedLeaf] of Object.entries(submittedCat)) {
-        const storedLeaf = storedCat[leafKey];
-        if (Array.isArray(submittedLeaf)) {
-          const storedArr = Array.isArray(storedLeaf) ? storedLeaf : [];
-          const missing = submittedLeaf.filter(v => !storedArr.includes(v));
-          const extra = storedArr.filter(v => !submittedLeaf.includes(v));
-          if (missing.length > 0 || extra.length > 0) {
-            mismatches.push(
-              `  - rights.${category}.${leafKey}: submitted ${JSON.stringify(submittedLeaf)}, stored ${JSON.stringify(storedLeaf)}`
-            );
-          }
-        } else if (!this.deepEqual(submittedLeaf, storedLeaf)) {
-          mismatches.push(
-            `  - rights.${category}.${leafKey}: submitted ${JSON.stringify(submittedLeaf)}, stored ${JSON.stringify(storedLeaf)}`
-          );
-        }
-      }
-    }
-    if (mismatches.length > 0) {
-      throw new Error(
-        `Post-write verification failed for user ${args.userId} (${current.name}).\nMismatched fields:\n${mismatches.join('\n')}\n` +
-        `HC3 did not persist the submitted rights as expected.`
-      );
-    }
-
-    return {
-      userId: args.userId,
-      name: current.name,
-      changedCategories: Object.keys(args.rights),
-      rights: afterRights
-    };
   }
 
   // Diagnostic Methods
@@ -4010,123 +3364,6 @@ class HC3MCPServer {
     return { profileId: args.profileId, partitionId: args.partitionId, action: entry.action };
   }
 
-  // Climate Management Methods
-  private async getClimateZones(args: { detailed?: boolean }): Promise<any> {
-    const detailed = args.detailed ? '?detailed=true' : '';
-    return await this.hc3.request(`/api/panels/climate${detailed}`);
-  }
-
-  private async getClimateZone(args: { zoneId: number }): Promise<any> {
-    return await this.hc3.request(`/api/panels/climate/${args.zoneId}`);
-  }
-
-  private async updateClimateZone(args: {
-    zoneId: number;
-    topLevel?: Record<string, any>;
-    properties?: Record<string, any>;
-  }): Promise<any> {
-    const { zoneId, topLevel, properties } = args;
-
-    const topLevelKeys = topLevel ? Object.keys(topLevel) : [];
-    const propertiesKeys = properties ? Object.keys(properties) : [];
-    if (topLevelKeys.length === 0 && propertiesKeys.length === 0) {
-      throw new Error(
-        'update_climate_zone requires at least one of topLevel or properties with at least one field.'
-      );
-    }
-
-    const body: Record<string, any> = {};
-    if (topLevelKeys.length > 0) {
-      Object.assign(body, topLevel);
-    }
-    if (propertiesKeys.length > 0) {
-      // Read-modify-write so partial submissions in nested schedule objects
-      // (e.g. {monday: {morning: {...}}}) don't wipe sibling keys.
-      const current = await this.hc3.request(`/api/panels/climate/${zoneId}`);
-      const currentProps = current?.properties ?? {};
-      body.properties = this.deepMerge(currentProps, properties);
-    }
-
-    await this.hc3.request(`/api/panels/climate/${zoneId}`, 'PUT', body);
-    const after = await this.hc3.request(`/api/panels/climate/${zoneId}`);
-    this.verifyWrite(topLevel, properties, after, `climate zone ${zoneId}`);
-
-    const submittedSummary: Record<string, any> = {};
-    if (topLevelKeys.length > 0) submittedSummary.topLevel = topLevel;
-    if (propertiesKeys.length > 0) submittedSummary.properties = properties;
-    return {
-      zoneId,
-      submitted: submittedSummary,
-      verified: true
-    };
-  }
-
-  // Custom Events Management Methods
-  private async getCustomEvents(): Promise<any> {
-    return await this.hc3.request('/api/customEvents');
-  }
-
-  private async createCustomEvent(args: { name: string; userDescription?: string }): Promise<any> {
-    const result = await this.hc3.request('/api/customEvents', 'POST', args);
-    return `Custom event '${args.name}' created successfully with ID ${result.id}.`;
-  }
-
-  private async triggerCustomEvent(args: { eventId: number }): Promise<any> {
-    await this.hc3.request(`/api/customEvents/${args.eventId}`, 'POST');
-    return `Custom event ${args.eventId} triggered successfully.`;
-  }
-
-  private async getCustomEvent(args: { name: string }): Promise<any> {
-    if (!args?.name) throw new Error('get_custom_event requires name.');
-    return await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`);
-  }
-
-  private async updateCustomEvent(args: {
-    name: string;
-    userDescription?: string;
-    newName?: string;
-  }): Promise<any> {
-    if (!args?.name) throw new Error('update_custom_event requires name.');
-    if (args.userDescription === undefined && args.newName === undefined) {
-      throw new Error('update_custom_event requires at least one of userDescription or newName.');
-    }
-    const current: any = await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`);
-    const body: Record<string, any> = { ...current };
-    if (args.userDescription !== undefined) body.userDescription = args.userDescription;
-    if (args.newName !== undefined) body.name = args.newName;
-    await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`, 'PUT', body);
-    const verifyName = args.newName ?? args.name;
-    const after: any = await this.hc3.request(`/api/customEvents/${encodeURIComponent(verifyName)}`);
-    if (args.userDescription !== undefined && after.userDescription !== args.userDescription) {
-      throw new Error(
-        `update_custom_event: post-write userDescription mismatch. Submitted ${JSON.stringify(args.userDescription)}, stored ${JSON.stringify(after.userDescription)}.`
-      );
-    }
-    if (args.newName !== undefined && after.name !== args.newName) {
-      throw new Error(
-        `update_custom_event: post-write name mismatch. Submitted ${JSON.stringify(args.newName)}, stored ${JSON.stringify(after.name)}.`
-      );
-    }
-    return { event: after, renamed: args.newName !== undefined && args.newName !== args.name };
-  }
-
-  private async deleteCustomEvent(args: { name: string }): Promise<any> {
-    if (!args?.name) throw new Error('delete_custom_event requires name.');
-    const encoded = encodeURIComponent(args.name);
-    const existing: any = await this.hc3.request(`/api/customEvents/${encoded}`);
-    await this.hc3.request(`/api/customEvents/${encoded}`, 'DELETE');
-    try {
-      await this.hc3.request(`/api/customEvents/${encoded}`);
-      throw new Error(`delete_custom_event: post-delete verify failed — '${args.name}' still exists.`);
-    } catch (e: any) {
-      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
-    }
-    return {
-      deleted: args.name,
-      lastUserDescription: existing?.userDescription ?? null
-    };
-  }
-
   // Location Management Methods
   private async getLocationInfo(): Promise<any> {
     return await this.hc3.request('/api/panels/location');
@@ -4162,78 +3399,6 @@ class HC3MCPServer {
       locationId,
       submitted: { fields },
       verified: true
-    };
-  }
-
-  // Notifications Management Methods
-  private async getNotifications(args: { limit?: number; offset?: number }): Promise<any> {
-    let url = '/api/panels/notifications';
-    const params = new URLSearchParams();
-    
-    if (args.limit) {
-      params.append('limit', args.limit.toString());
-    }
-    if (args.offset) {
-      params.append('offset', args.offset.toString());
-    }
-    
-    if (params.toString()) {
-      url += '?' + params.toString();
-    }
-    
-    return await this.hc3.request(url);
-  }
-
-  private async markNotificationRead(args: { notificationId: number }): Promise<any> {
-    await this.hc3.request(`/api/panels/notifications/${args.notificationId}/read`, 'POST');
-    return `Notification ${args.notificationId} marked as read.`;
-  }
-
-  private async clearAllNotifications(): Promise<any> {
-    await this.hc3.request('/api/panels/notifications/clear', 'POST');
-    return 'All notifications cleared successfully.';
-  }
-
-  private async getNotification(args: { notificationId: number }): Promise<any> {
-    if (typeof args?.notificationId !== 'number') throw new Error('get_notification requires numeric notificationId.');
-    return await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
-  }
-
-  private async updateNotification(args: {
-    notificationId: number;
-    fields: Record<string, any>;
-  }): Promise<any> {
-    if (typeof args?.notificationId !== 'number') throw new Error('update_notification requires numeric notificationId.');
-    if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
-      throw new Error('update_notification requires a non-empty fields object.');
-    }
-    const current: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
-    const merged = this.deepMerge(current, args.fields);
-    await this.hc3.request(`/api/notificationCenter/${args.notificationId}`, 'PUT', merged);
-    const after: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
-    this.verifyWrite(args.fields, undefined, after, `notification ${args.notificationId}`);
-    return { notificationId: args.notificationId, changedFields: Object.keys(args.fields), notification: after };
-  }
-
-  private async deleteNotification(args: { notificationId: number; allow_system?: boolean }): Promise<any> {
-    if (typeof args?.notificationId !== 'number') throw new Error('delete_notification requires numeric notificationId.');
-    const existing: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
-    if (existing?.canBeDeleted === false && !args.allow_system) {
-      throw new Error(
-        `delete_notification refuses notification ${args.notificationId}: canBeDeleted=false (HC3-system-protected). Pass allow_system=true to override.`
-      );
-    }
-    await this.hc3.request(`/api/notificationCenter/${args.notificationId}`, 'DELETE');
-    try {
-      await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
-      throw new Error(`delete_notification: post-delete verify failed — notification ${args.notificationId} still exists.`);
-    } catch (e: any) {
-      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
-    }
-    return {
-      deleted: args.notificationId,
-      lastType: existing?.type,
-      lastData: existing?.data
     };
   }
 
@@ -5130,38 +4295,6 @@ class HC3MCPServer {
       childrenRemovedWith: children.length > 0
         ? children.map(c => ({ id: c.id, name: c.name }))
         : []
-    };
-  }
-
-  private async deleteGlobalVariable(args: { varName: string; allow_system?: boolean }): Promise<any> {
-    if (typeof args?.varName !== 'string' || args.varName.length === 0) {
-      throw new Error('delete_global_variable requires a non-empty varName.');
-    }
-    const encoded = encodeURIComponent(args.varName);
-
-    const existing: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
-    if (existing?.readOnly && !args.allow_system) {
-      throw new Error(
-        `delete_global_variable refuses '${args.varName}': variable is readOnly (HC3 system variable). Pass allow_system=true to override.`
-      );
-    }
-
-    await this.hc3.request(`/api/globalVariables/${encoded}`, 'DELETE');
-
-    try {
-      await this.hc3.request(`/api/globalVariables/${encoded}`);
-      throw new Error(
-        `delete_global_variable: post-delete verify failed — '${args.varName}' still exists after DELETE.`
-      );
-    } catch (e: any) {
-      if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
-    }
-
-    return {
-      deleted: args.varName,
-      lastValue: existing?.value,
-      wasEnum: !!existing?.isEnum,
-      wasReadOnly: !!existing?.readOnly
     };
   }
 
