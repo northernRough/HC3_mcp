@@ -33,13 +33,20 @@ export const systemSchemas: Record<string, MCPTool> = {
   get_energy_data:
       {
         name: 'get_energy_data',
-        description: 'Get energy consumption data for devices or the entire system',
+        description:
+          'Energy data. With no args, returns { summary, meterDevices } — system-wide ' +
+          'current-billing-period totals and the list of energy-metering devices for ' +
+          'follow-up queries. With deviceId, returns the device\'s energy-meter ' +
+          'registration row from /api/energy/devices. Per-device historical energy ' +
+          'data is not exposed via REST on current HC3 firmware (the legacy ' +
+          '/api/energy/{id}/... 9-segment path is dead, and /api/energy itself ' +
+          'returns HTTP 500).',
         inputSchema: {
           type: 'object',
           properties: {
             deviceId: {
               type: 'number',
-              description: 'Optional: Specific device ID to get energy data for',
+              description: 'Optional: a device id. If provided, returns its energy-meter registration row from /api/energy/devices, or an explanatory error if the device exists but is not metered.',
             },
           },
         },
@@ -174,11 +181,31 @@ export const system: ToolModule = {
     },
 
     async get_energy_data(hc3, args: { deviceId?: number }): Promise<any> {
+      // /api/energy and /api/energy/{id} are both dead on current firmware (5.20x).
+      // The legacy 9-segment path /api/energy/{id}/{measure}/{interval}/{y1}/{m1}/{d1}/{y2}/{m2}/{d2}
+      // is rejected ("path: 9 arguments") on every form tested. /api/energy returns 500.
+      // Per-device historical energy data is not exposed via REST on current firmware.
+      // The only working endpoints are /api/energy/devices and /api/energy/billing/summary.
       if (args?.deviceId) {
-        return await hc3.request(`/api/energy/${args.deviceId}`);
-      } else {
-        return await hc3.request('/api/energy');
+        const meters = await hc3.request('/api/energy/devices') as any[];
+        const found = meters.find((m: any) => m.id === args.deviceId);
+        if (found) return found;
+        let deviceExists = false;
+        try {
+          await hc3.request(`/api/devices/${args.deviceId}`);
+          deviceExists = true;
+        } catch {}
+        throw new Error(
+          deviceExists
+            ? `Device ${args.deviceId} exists but is not registered as an energy meter (no entry under /api/energy/devices). Per-device energy history is not exposed via REST on current firmware.`
+            : `Device ${args.deviceId} not found on this HC3.`,
+        );
       }
+      const [summary, meterDevices] = await Promise.all([
+        hc3.request('/api/energy/billing/summary'),
+        hc3.request('/api/energy/devices'),
+      ]);
+      return { summary, meterDevices };
     },
 
     async get_diagnostics(hc3): Promise<any> {

@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.4.1] - 2026-05-02
+
+### Fixed
+- **`get_energy_data` repaired.** The tool was calling two endpoints that have been dead on HC3 firmware 5.20x (and likely much earlier): `GET /api/energy` returned HTTP 500 with empty body, and `GET /api/energy/{id}` returned HTTP 400 `path: 9 arguments` (the latter expects a legacy 9-segment path of the form `/api/energy/{deviceId}/{measure}/{interval}/{y1}/{m1}/{d1}/{y2}/{m2}/{d2}` which is no longer routed). Surfaced by the Phase 1 read-only test sweep; would have stayed latent indefinitely otherwise — `get_energy_data` had been silently broken since at least firmware 5.200.
+
+  The new behaviour calls only endpoints that actually work on current firmware:
+  - **No-args** → returns `{ summary, meterDevices }` where `summary` comes from `/api/energy/billing/summary` (system-wide current-billing-period totals — production / consumption / cost) and `meterDevices` comes from `/api/energy/devices` (the list of energy-metering devices, useful as a discovery hint for follow-up `deviceId` queries).
+  - **With `deviceId`** → returns the device's energy-meter registration row from `/api/energy/devices` if the device is metered, or a precise error distinguishing "device exists but isn't an energy meter" from "device id not found on this HC3" otherwise.
+
+  Per-device historical energy data is **not exposed by REST** on current firmware. The energy panel UI uses internal services that aren't accessible via the REST API; the legacy 9-segment path is permanently dead. The tool's description now states this explicitly so callers (LLM or human) don't waste time trying.
+
+### Breaking
+- **`get_energy_data` no-args response shape changed** from a (broken) bare object to `{ summary, meterDevices }`. Since the old behaviour returned HTTP 500, no callers can have been relying on the old shape — but if your LLM has the old shape in its training data, this is the migration. See the `Fixed` entry above for the new shape.
+
 ## [3.4.0] - 2026-05-02
 
 ### Changed (internal — no behaviour change)
