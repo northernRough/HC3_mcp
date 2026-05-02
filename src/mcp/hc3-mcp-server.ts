@@ -10,51 +10,14 @@ import { configurationGuide } from './docs/configuration';
 import { programmingGuide } from './docs/quickapp-programming';
 import { scenesGuide } from './docs/lua-scenes';
 import { examples } from './docs/programming-examples';
-
-interface MCPRequest {
-  jsonrpc: string;
-  id?: string | number;
-  method: string;
-  params?: any;
-}
-
-interface MCPResponse {
-  jsonrpc: string;
-  id?: string | number;
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-    data?: any;
-  };
-}
-
-interface MCPTool {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: string;
-    properties: Record<string, any>;
-    required?: string[];
-  };
-}
+import { HC3Client } from './hc3-client';
+import { MCPRequest, MCPResponse, MCPTool } from './types';
 
 class HC3MCPServer {
-  private config: {
-    host?: string;
-    username?: string;
-    password?: string;
-    port?: number;
-  } = {};
+  private hc3: HC3Client;
 
   constructor() {
-    // Get configuration from environment variables
-    this.config = {
-      host: process.env.FIBARO_HOST,
-      username: process.env.FIBARO_USERNAME,
-      password: process.env.FIBARO_PASSWORD,
-      port: process.env.FIBARO_PORT ? parseInt(process.env.FIBARO_PORT) : 80,
-    };
+    this.hc3 = HC3Client.fromEnv();
 
     const transport = (process.env.MCP_TRANSPORT ?? 'stdio').toLowerCase();
     if (transport === 'http') {
@@ -213,11 +176,11 @@ class HC3MCPServer {
       console.error(`Fibaro HC3 MCP server running on HTTP at http://${host}:${port}/mcp (${authMode})`);
       // Startup smoke test: confirm HC3 reachability so that a misconfigured
       // .env shows up in the logs immediately, not only on first user request.
-      void this.makeApiRequest('/api/settings/info')
+      void this.hc3.request('/api/settings/info')
         .then((info: any) => {
           const v = info?.softVersion ?? '?';
           const sn = info?.serialNumber ?? '?';
-          console.error(`HC3 reachable at ${this.config.host}:${this.config.port} — softVersion ${v}, serial ${sn}`);
+          console.error(`HC3 reachable at ${this.hc3.config.host}:${this.hc3.config.port} — softVersion ${v}, serial ${sn}`);
         })
         .catch((e: any) => {
           console.error(`HC3 reachability check FAILED: ${e?.message ?? e}. Server is running but tool calls will fail until HC3 credentials/network are correct.`);
@@ -2831,64 +2794,6 @@ class HC3MCPServer {
     }
   }
 
-  private async makeApiRequest(endpoint: string, method = 'GET', data?: any): Promise<any> {
-    if (!this.config.host || !this.config.username || !this.config.password) {
-      throw new Error('Fibaro HC3 not configured. Please check environment variables.');
-    }
-
-    const url = `http://${this.config.host}:${this.config.port}${endpoint}`;
-    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
-
-    const headers: Record<string, string> = {
-      'Authorization': `Basic ${auth}`,
-      'Content-Type': 'application/json',
-    };
-
-    const requestOptions: RequestInit = {
-      method,
-      headers,
-      signal: AbortSignal.timeout(15000),
-    };
-
-    if (data && method !== 'GET') {
-      requestOptions.body = JSON.stringify(data);
-    }
-
-    const response = await fetch(url, requestOptions);
-    const text = await response.text();
-
-    if (!response.ok) {
-      const detail = text.trim();
-      const suffix = detail ? ` - ${detail}` : '';
-      throw new Error(`HTTP ${response.status}: ${response.statusText}${suffix}`);
-    }
-
-    if (!text) {
-      return null;
-    }
-    const parsed = JSON.parse(text);
-
-    // HC3 action endpoints return HTTP 202 with a JSON-RPC envelope
-    // ({jsonrpc, id, error, result, ...}). A non-null `error` means the
-    // request was accepted but failed — "not implemented" etc. Without
-    // this check, those failures masquerade as success.
-    if (
-      parsed !== null &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed) &&
-      'jsonrpc' in parsed &&
-      parsed.error !== null &&
-      parsed.error !== undefined &&
-      typeof parsed.error === 'object'
-    ) {
-      const code = (parsed.error as any).code;
-      const msg = (parsed.error as any).message ?? JSON.stringify(parsed.error);
-      throw new Error(`HC3 action failed for ${method} ${endpoint} (code ${code}): ${msg}`);
-    }
-
-    return parsed;
-  }
-
   // Device Management Methods
   private async getDevices(args: { roomId?: number; deviceType?: string; interface?: string[] }): Promise<any> {
     let endpoint = '/api/devices';
@@ -2908,18 +2813,18 @@ class HC3MCPServer {
       endpoint += `?${queryParams.join('&')}`;
     }
 
-    return await this.makeApiRequest(endpoint);
+    return await this.hc3.request(endpoint);
   }
 
   private async getDeviceInfo(args: { deviceId: number }): Promise<any> {
-    return await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+    return await this.hc3.request(`/api/devices/${args.deviceId}`);
   }
 
   private async cancelDelayedAction(args: { deviceId: number; timestamp: number }): Promise<any> {
     if (typeof args?.deviceId !== 'number') throw new Error('cancel_delayed_action requires numeric deviceId.');
     if (typeof args?.timestamp !== 'number') throw new Error('cancel_delayed_action requires numeric timestamp.');
     const ts = Math.trunc(args.timestamp);
-    await this.makeApiRequest(`/api/devices/action/${ts}/${args.deviceId}`, 'DELETE');
+    await this.hc3.request(`/api/devices/action/${ts}/${args.deviceId}`, 'DELETE');
     return { cancelled: true, deviceId: args.deviceId, timestamp: ts };
   }
 
@@ -2928,7 +2833,7 @@ class HC3MCPServer {
     if (typeof args?.propertyName !== 'string' || args.propertyName.length === 0) {
       throw new Error('get_device_property requires a non-empty propertyName.');
     }
-    return await this.makeApiRequest(`/api/devices/${args.deviceId}/properties/${encodeURIComponent(args.propertyName)}`);
+    return await this.hc3.request(`/api/devices/${args.deviceId}/properties/${encodeURIComponent(args.propertyName)}`);
   }
 
   private async findDeviceByEndpoint(args: {
@@ -2938,7 +2843,7 @@ class HC3MCPServer {
     if (typeof args?.parentId !== 'number' || typeof args?.endpointId !== 'number') {
       throw new Error('find_device_by_endpoint requires numeric parentId and endpointId.');
     }
-    const children: any[] = await this.makeApiRequest(`/api/devices?parentId=${args.parentId}`);
+    const children: any[] = await this.hc3.request(`/api/devices?parentId=${args.parentId}`);
     const matches = children.filter(c => c?.properties?.endPointId === args.endpointId);
     return matches.map(c => ({
       id: c.id,
@@ -2963,7 +2868,7 @@ class HC3MCPServer {
       filters: args.filters,
       attributes: { main: args.attributes && args.attributes.length > 0 ? args.attributes : [] }
     };
-    return await this.makeApiRequest('/api/devices/filter', 'POST', body);
+    return await this.hc3.request('/api/devices/filter', 'POST', body);
   }
 
   private async findDevicesByName(args: {
@@ -2982,7 +2887,7 @@ class HC3MCPServer {
     const endpoint = args.roomId !== undefined
       ? `/api/devices?roomID=${args.roomId}`
       : '/api/devices';
-    const devices: any[] = await this.makeApiRequest(endpoint);
+    const devices: any[] = await this.hc3.request(endpoint);
 
     const matches = devices.filter(d => {
       const pid = d?.parentId;
@@ -3013,7 +2918,7 @@ class HC3MCPServer {
         "documented PUT /api/devices/{id} endpoint with post-write verification."
       );
     }
-    const device = await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+    const device = await this.hc3.request(`/api/devices/${args.deviceId}`);
     const declared = (device?.actions && typeof device.actions === 'object') ? device.actions : {};
     const declaredNames = Object.keys(declared);
     if (declaredNames.length > 0 && !(args.action in declared)) {
@@ -3036,7 +2941,7 @@ class HC3MCPServer {
       requestData.delay = args.delay;
     }
 
-    await this.makeApiRequest(endpoint, 'POST', requestData);
+    await this.hc3.request(endpoint, 'POST', requestData);
     return `Device ${args.deviceId} action '${args.action}' executed successfully.`;
   }
 
@@ -3081,8 +2986,8 @@ class HC3MCPServer {
       body.properties = { ...properties };
     }
 
-    await this.makeApiRequest(`/api/devices/${deviceId}`, 'PUT', body);
-    const after = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    await this.hc3.request(`/api/devices/${deviceId}`, 'PUT', body);
+    const after = await this.hc3.request(`/api/devices/${deviceId}`);
     this.verifyWrite(topLevel, properties, after, `device ${deviceId}`);
 
     const submittedSummary: Record<string, any> = {};
@@ -3221,12 +3126,12 @@ class HC3MCPServer {
 
   // Room Management Methods
   private async getRooms(): Promise<any> {
-    return await this.makeApiRequest('/api/rooms');
+    return await this.hc3.request('/api/rooms');
   }
 
   private async getRoom(args: { roomId: number }): Promise<any> {
     if (typeof args?.roomId !== 'number') throw new Error('get_room requires numeric roomId.');
-    return await this.makeApiRequest(`/api/rooms/${args.roomId}`);
+    return await this.hc3.request(`/api/rooms/${args.roomId}`);
   }
 
   private async createRoom(args: {
@@ -3248,12 +3153,12 @@ class HC3MCPServer {
     if (args.icon !== undefined) body.icon = args.icon;
     if (args.category !== undefined) body.category = args.category;
     if (args.visible !== undefined) body.visible = args.visible;
-    const created: any = await this.makeApiRequest('/api/rooms', 'POST', body);
+    const created: any = await this.hc3.request('/api/rooms', 'POST', body);
     const newId = created?.id;
     if (typeof newId !== 'number') {
       throw new Error(`create_room: HC3 returned no id. Raw: ${JSON.stringify(created).slice(0, 300)}`);
     }
-    const after: any = await this.makeApiRequest(`/api/rooms/${newId}`);
+    const after: any = await this.hc3.request(`/api/rooms/${newId}`);
     if (after?.name !== args.name) {
       throw new Error(`create_room: post-create name mismatch. Submitted ${JSON.stringify(args.name)}, stored ${JSON.stringify(after?.name)}.`);
     }
@@ -3268,21 +3173,21 @@ class HC3MCPServer {
     if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
       throw new Error('modify_room requires a non-empty fields object.');
     }
-    const current: any = await this.makeApiRequest(`/api/rooms/${args.roomId}`);
+    const current: any = await this.hc3.request(`/api/rooms/${args.roomId}`);
     const merged = this.deepMerge(current, args.fields);
-    await this.makeApiRequest(`/api/rooms/${args.roomId}`, 'PUT', merged);
-    const after: any = await this.makeApiRequest(`/api/rooms/${args.roomId}`);
+    await this.hc3.request(`/api/rooms/${args.roomId}`, 'PUT', merged);
+    const after: any = await this.hc3.request(`/api/rooms/${args.roomId}`);
     this.verifyWrite(args.fields, undefined, after, `room ${args.roomId}`);
     return { roomId: args.roomId, changedFields: Object.keys(args.fields), room: after };
   }
 
   private async deleteRoom(args: { roomId: number; reassign_to?: number }): Promise<any> {
     if (typeof args?.roomId !== 'number') throw new Error('delete_room requires numeric roomId.');
-    const room: any = await this.makeApiRequest(`/api/rooms/${args.roomId}`);
+    const room: any = await this.hc3.request(`/api/rooms/${args.roomId}`);
     if (room?.isDefault) {
       throw new Error(`delete_room refuses room ${args.roomId} (${room.name}): it is the default room and cannot be deleted.`);
     }
-    const devices: any[] = await this.makeApiRequest(`/api/devices?roomID=${args.roomId}`);
+    const devices: any[] = await this.hc3.request(`/api/devices?roomID=${args.roomId}`);
     if (devices.length > 0) {
       if (typeof args.reassign_to !== 'number') {
         throw new Error(
@@ -3290,13 +3195,13 @@ class HC3MCPServer {
           `Pass reassign_to=<targetRoomId> to batch-move them first, or move them manually.`
         );
       }
-      await this.makeApiRequest(`/api/rooms/${args.reassign_to}/groupAssignment`, 'POST', {
+      await this.hc3.request(`/api/rooms/${args.reassign_to}/groupAssignment`, 'POST', {
         deviceIds: devices.map(d => d.id)
       });
     }
-    await this.makeApiRequest(`/api/rooms/${args.roomId}`, 'DELETE');
+    await this.hc3.request(`/api/rooms/${args.roomId}`, 'DELETE');
     try {
-      await this.makeApiRequest(`/api/rooms/${args.roomId}`);
+      await this.hc3.request(`/api/rooms/${args.roomId}`);
       throw new Error(`delete_room: post-delete verify failed — room ${args.roomId} still exists.`);
     } catch (e: any) {
       if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
@@ -3317,13 +3222,13 @@ class HC3MCPServer {
     if (!Array.isArray(args?.deviceIds) || args.deviceIds.length === 0) {
       throw new Error('assign_devices_to_room requires a non-empty deviceIds array.');
     }
-    await this.makeApiRequest(`/api/rooms/${args.roomId}/groupAssignment`, 'POST', {
+    await this.hc3.request(`/api/rooms/${args.roomId}/groupAssignment`, 'POST', {
       deviceIds: args.deviceIds
     });
     const mismatches: Array<{ deviceId: number; reportedRoom: number }> = [];
     await Promise.all(args.deviceIds.map(async id => {
       try {
-        const d: any = await this.makeApiRequest(`/api/devices/${id}`);
+        const d: any = await this.hc3.request(`/api/devices/${id}`);
         if (d?.roomID !== args.roomId) mismatches.push({ deviceId: id, reportedRoom: d?.roomID });
       } catch {
         mismatches.push({ deviceId: id, reportedRoom: -1 });
@@ -3351,7 +3256,7 @@ class HC3MCPServer {
       endpoint += `?${queryParams.join('&')}`;
     }
 
-    const scenes = await this.makeApiRequest(endpoint);
+    const scenes = await this.hc3.request(endpoint);
     
     if (args?.roomId) {
       return scenes.filter((scene: any) => scene.roomID === args.roomId);
@@ -3361,12 +3266,12 @@ class HC3MCPServer {
   }
 
   private async runScene(args: { sceneId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}/execute`, 'POST', {});
+    await this.hc3.request(`/api/scenes/${args.sceneId}/execute`, 'POST', {});
     return `Scene ${args.sceneId} started successfully.`;
   }
 
   private async stopScene(args: { sceneId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}/kill`, 'POST', {});
+    await this.hc3.request(`/api/scenes/${args.sceneId}/kill`, 'POST', {});
     return `Scene ${args.sceneId} stopped successfully.`;
   }
 
@@ -3375,7 +3280,7 @@ class HC3MCPServer {
       throw new Error('run_scene_sync requires numeric sceneId.');
     }
     const started = Date.now();
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}/executeSync`, 'POST', {});
+    await this.hc3.request(`/api/scenes/${args.sceneId}/executeSync`, 'POST', {});
     return {
       sceneId: args.sceneId,
       mode: 'sync',
@@ -3387,8 +3292,8 @@ class HC3MCPServer {
     if (!args?.properties || Object.keys(args.properties).length === 0) {
       throw new Error('modify_scene requires at least one field in properties.');
     }
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}`, 'PUT', args.properties);
-    const updated = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+    await this.hc3.request(`/api/scenes/${args.sceneId}`, 'PUT', args.properties);
+    const updated = await this.hc3.request(`/api/scenes/${args.sceneId}`);
     this.verifyWrite(args.properties, undefined, updated, `scene ${args.sceneId}`);
     return {
       sceneId: args.sceneId,
@@ -3435,12 +3340,12 @@ class HC3MCPServer {
     if (args.content !== undefined) {
       body.content = typeof args.content === 'string' ? args.content : JSON.stringify(args.content);
     }
-    const created: any = await this.makeApiRequest('/api/scenes', 'POST', body);
+    const created: any = await this.hc3.request('/api/scenes', 'POST', body);
     const newId = created?.id;
     if (typeof newId !== 'number') {
       throw new Error(`create_scene: HC3 returned no id. Raw: ${JSON.stringify(created).slice(0, 300)}`);
     }
-    const after: any = await this.makeApiRequest(`/api/scenes/${newId}`);
+    const after: any = await this.hc3.request(`/api/scenes/${newId}`);
     if (after?.name !== args.name) {
       throw new Error(`create_scene: post-create name mismatch. Submitted ${JSON.stringify(args.name)}, stored ${JSON.stringify(after?.name)}.`);
     }
@@ -3455,7 +3360,7 @@ class HC3MCPServer {
       throw new Error('update_scene_content requires at least one of actions or conditions.');
     }
 
-    const existing = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+    const existing = await this.hc3.request(`/api/scenes/${args.sceneId}`);
 
     if (existing.type !== 'lua') {
       throw new Error(
@@ -3480,8 +3385,8 @@ class HC3MCPServer {
       actions: args.actions !== undefined ? args.actions : previous.actions,
     };
 
-    await this.makeApiRequest(`/api/scenes/${args.sceneId}`, 'PUT', { content: JSON.stringify(newContent) });
-    const updated = await this.makeApiRequest(`/api/scenes/${args.sceneId}`);
+    await this.hc3.request(`/api/scenes/${args.sceneId}`, 'PUT', { content: JSON.stringify(newContent) });
+    const updated = await this.hc3.request(`/api/scenes/${args.sceneId}`);
 
     let current: { conditions: string; actions: string } = { conditions: '', actions: '' };
     try {
@@ -3509,25 +3414,25 @@ class HC3MCPServer {
 
   // System Information Methods
   private async getSystemInfo(): Promise<any> {
-    return await this.makeApiRequest('/api/settings/info');
+    return await this.hc3.request('/api/settings/info');
   }
 
   private async getNetworkStatus(): Promise<any> {
-    return await this.makeApiRequest('/api/settings/network');
+    return await this.hc3.request('/api/settings/network');
   }
 
   // Energy Management Methods
   private async getEnergyData(args: { deviceId?: number }): Promise<any> {
     if (args?.deviceId) {
-      return await this.makeApiRequest(`/api/energy/${args.deviceId}`);
+      return await this.hc3.request(`/api/energy/${args.deviceId}`);
     } else {
-      return await this.makeApiRequest('/api/energy');
+      return await this.hc3.request('/api/energy');
     }
   }
 
   // Global Variables Methods
   private async getGlobalVariables(): Promise<any> {
-    return await this.makeApiRequest('/api/globalVariables');
+    return await this.hc3.request('/api/globalVariables');
   }
 
   private async createGlobalVariable(args: {
@@ -3559,7 +3464,7 @@ class HC3MCPServer {
 
     const encoded = encodeURIComponent(args.varName);
     try {
-      await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+      await this.hc3.request(`/api/globalVariables/${encoded}`);
       throw new Error(
         `create_global_variable refuses to overwrite: variable '${args.varName}' already exists. Use set_global_variable to update, or delete_global_variable first.`
       );
@@ -3578,9 +3483,9 @@ class HC3MCPServer {
       body.enumValues = args.enumValues;
     }
 
-    const created: any = await this.makeApiRequest('/api/globalVariables', 'POST', body);
+    const created: any = await this.hc3.request('/api/globalVariables', 'POST', body);
 
-    const after: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    const after: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
     if (String(after?.value) !== String(args.value)) {
       throw new Error(
         `create_global_variable: post-create value mismatch for '${args.varName}'. Submitted ${JSON.stringify(args.value)}, stored ${JSON.stringify(after?.value)}.`
@@ -3598,7 +3503,7 @@ class HC3MCPServer {
 
   private async setGlobalVariable(args: { varName: string; value: any }): Promise<any> {
     const encoded = encodeURIComponent(args.varName);
-    const existing: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    const existing: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
 
     if (existing?.readOnly) {
       throw new Error(
@@ -3641,9 +3546,9 @@ class HC3MCPServer {
       }
     }
 
-    await this.makeApiRequest(`/api/globalVariables/${encoded}`, 'PUT', { value: coerced });
+    await this.hc3.request(`/api/globalVariables/${encoded}`, 'PUT', { value: coerced });
 
-    const after: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    const after: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
     if (String(after?.value) !== String(coerced)) {
       throw new Error(
         `Post-write verification failed for global variable '${args.varName}': ` +
@@ -3660,7 +3565,7 @@ class HC3MCPServer {
 
   // User Management Methods
   private async getUsers(): Promise<any> {
-    return await this.makeApiRequest('/api/users');
+    return await this.hc3.request('/api/users');
   }
 
   private async updateUserRights(args: {
@@ -3698,7 +3603,7 @@ class HC3MCPServer {
       );
     }
 
-    const current: any = await this.makeApiRequest(`/api/users/${args.userId}`);
+    const current: any = await this.hc3.request(`/api/users/${args.userId}`);
     if (current?.type === 'superuser') {
       throw new Error(
         `update_user_rights: user ${args.userId} (${current.name}) is type 'superuser' — ` +
@@ -3713,9 +3618,9 @@ class HC3MCPServer {
     // to tosAccepted / privacyPolicyAccepted by anyone other than the user
     // themselves, so a full-record echo-back will 403 with "Terms of service
     // acceptance change forbidden". Partial PUT of just rights is accepted.
-    await this.makeApiRequest(`/api/users/${args.userId}`, 'PUT', { rights: mergedRights });
+    await this.hc3.request(`/api/users/${args.userId}`, 'PUT', { rights: mergedRights });
 
-    const after: any = await this.makeApiRequest(`/api/users/${args.userId}`);
+    const after: any = await this.hc3.request(`/api/users/${args.userId}`);
     const afterRights = after?.rights ?? {};
 
     const mismatches: string[] = [];
@@ -3793,7 +3698,7 @@ class HC3MCPServer {
     for (const name of selected) {
       if (name in simple) {
         jobs.push(
-          this.makeApiRequest(simple[name])
+          this.hc3.request(simple[name])
             .then((v: any) => { surfaces[name] = v; })
             .catch((e: any) => { surfaceErrors[name] = String(e?.message ?? e); })
         );
@@ -3804,10 +3709,10 @@ class HC3MCPServer {
         jobs.push((async () => {
           const docs: Record<string, any> = {};
           await Promise.allSettled([
-            this.makeApiRequest('/assets/docs/hc/plugins.json')
+            this.hc3.request('/assets/docs/hc/plugins.json')
               .then((v: any) => { docs['plugins.json'] = v; })
               .catch((e: any) => { surfaceErrors['hc3-docs.plugins.json'] = String(e?.message ?? e); }),
-            this.makeApiRequest('/assets/docs/hc/quickapp.json')
+            this.hc3.request('/assets/docs/hc/quickapp.json')
               .then((v: any) => { docs['quickapp.json'] = v; })
               .catch((e: any) => { surfaceErrors['hc3-docs.quickapp.json'] = String(e?.message ?? e); })
           ]);
@@ -3819,15 +3724,15 @@ class HC3MCPServer {
       if (name === 'quickapps') {
         jobs.push((async () => {
           try {
-            const qas: any[] = await this.makeApiRequest('/api/devices?interface=quickApp');
+            const qas: any[] = await this.hc3.request('/api/devices?interface=quickApp');
             const result: any[] = [];
             await Promise.allSettled(qas.map(async (qa: any) => {
               try {
-                const fileList: any[] = await this.makeApiRequest(`/api/quickApp/${qa.id}/files`);
+                const fileList: any[] = await this.hc3.request(`/api/quickApp/${qa.id}/files`);
                 const files = await Promise.allSettled(
                   (fileList ?? []).map(async f => {
                     try {
-                      const content: any = await this.makeApiRequest(
+                      const content: any = await this.hc3.request(
                         `/api/quickApp/${qa.id}/files/${encodeURIComponent(f.name)}`
                       );
                       return { name: f.name, isMain: !!f.isMain, isOpen: !!f.isOpen, type: f.type ?? null, content: content?.content ?? '' };
@@ -3856,7 +3761,7 @@ class HC3MCPServer {
       if (name === 'zwave-parameters') {
         jobs.push((async () => {
           try {
-            const devices: any[] = await this.makeApiRequest('/api/devices?interface=zwave');
+            const devices: any[] = await this.hc3.request('/api/devices?interface=zwave');
             const parents = devices.filter(d => {
               const nid = d?.properties?.nodeId;
               return typeof nid === 'number' && (d.parentId === 1 || d.parentId === 0);
@@ -3870,7 +3775,7 @@ class HC3MCPServer {
                 const ep = d.properties.endPointId ?? 0;
                 const addr = `${nid}.${ep}`;
                 try {
-                  const v: any = await this.makeApiRequest(
+                  const v: any = await this.hc3.request(
                     `/api/zwave/configuration_parameters/${encodeURIComponent(addr)}`
                   );
                   return { deviceId: d.id, nodeId: nid, addr, parameters: v?.items ?? [] };
@@ -3905,7 +3810,7 @@ class HC3MCPServer {
 
   // Icon methods
   private async listIcons(): Promise<any> {
-    return await this.makeApiRequest('/api/icons');
+    return await this.hc3.request('/api/icons');
   }
 
   private async getIcon(args: {
@@ -3922,8 +3827,8 @@ class HC3MCPServer {
       : args.category;
     const base = args.userIcon ? '/assets/userIcons' : '/assets/icon/fibaro';
     const path = `${base}/${segment}/${encodeURIComponent(args.name)}.${ext}`;
-    const url = `http://${this.config.host}:${this.config.port}${path}`;
-    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
+    const url = `http://${this.hc3.config.host}:${this.hc3.config.port}${path}`;
+    const auth = Buffer.from(`${this.hc3.config.username}:${this.hc3.config.password}`).toString('base64');
     const response = await fetch(url, {
       headers: { 'Authorization': `Basic ${auth}` },
       signal: AbortSignal.timeout(15000),
@@ -3958,7 +3863,7 @@ class HC3MCPServer {
     if (!args?.base64) throw new Error('upload_icon requires base64.');
     if (!args?.mime) throw new Error('upload_icon requires mime.');
     if (!args?.category) throw new Error('upload_icon requires category.');
-    if (!this.config.host || !this.config.username || !this.config.password) {
+    if (!this.hc3.config.host || !this.hc3.config.username || !this.hc3.config.password) {
       throw new Error('Fibaro HC3 not configured.');
     }
     const ext = args.mime === 'image/svg+xml' ? 'svg'
@@ -3989,7 +3894,7 @@ class HC3MCPServer {
       }
     }
 
-    const before: any = await this.makeApiRequest('/api/icons');
+    const before: any = await this.hc3.request('/api/icons');
     const bucketBefore: any[] = (before?.[args.category] as any[]) || [];
     const userIdsBefore = new Set(bucketBefore.map(i => i.id));
 
@@ -4008,8 +3913,8 @@ class HC3MCPServer {
       Buffer.from(CRLF + partHead('fileExtension') + ext + CRLF + `--${boundary}--${CRLF}`)
     ]);
 
-    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64');
-    const response = await fetch(`http://${this.config.host}:${this.config.port}/api/icons`, {
+    const auth = Buffer.from(`${this.hc3.config.username}:${this.hc3.config.password}`).toString('base64');
+    const response = await fetch(`http://${this.hc3.config.host}:${this.hc3.config.port}/api/icons`, {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${auth}`,
@@ -4032,7 +3937,7 @@ class HC3MCPServer {
     // also re-list as a sanity check.
     let created: any;
     try { created = JSON.parse(await response.text()); } catch { created = null; }
-    const after: any = await this.makeApiRequest('/api/icons');
+    const after: any = await this.hc3.request('/api/icons');
     const bucketAfter: any[] = (after?.[args.category] as any[]) || [];
     const newOnes = bucketAfter.filter(i => !userIdsBefore.has(i.id));
     if (newOnes.length === 0) {
@@ -4061,7 +3966,7 @@ class HC3MCPServer {
     if (!args?.fileExtension) throw new Error('delete_icon requires fileExtension.');
     if (!args?.category) throw new Error('delete_icon requires category.');
 
-    const before: any = await this.makeApiRequest('/api/icons');
+    const before: any = await this.hc3.request('/api/icons');
     const bucket: any[] = (before?.[args.category] as any[]) || [];
     const found = bucket.find(i =>
       i.iconName === args.name || i.iconSetName === args.name
@@ -4086,9 +3991,9 @@ class HC3MCPServer {
       name: args.name,
       fileExtension: args.fileExtension,
     });
-    await this.makeApiRequest(`/api/icons?${params.toString()}`, 'DELETE');
+    await this.hc3.request(`/api/icons?${params.toString()}`, 'DELETE');
 
-    const after: any = await this.makeApiRequest('/api/icons');
+    const after: any = await this.hc3.request('/api/icons');
     const stillThere = (after?.[args.category] as any[] ?? []).find(i =>
       i.iconName === args.name || i.iconSetName === args.name
     );
@@ -4102,13 +4007,13 @@ class HC3MCPServer {
   }
 
   private async getDiagnostics(): Promise<any> {
-    return await this.makeApiRequest('/api/diagnostics');
+    return await this.hc3.request('/api/diagnostics');
   }
 
   private async getZwaveMeshHealth(): Promise<any> {
     const [devices, rooms] = await Promise.all([
-      this.makeApiRequest('/api/devices?interface=zwave'),
-      this.makeApiRequest('/api/rooms')
+      this.hc3.request('/api/devices?interface=zwave'),
+      this.hc3.request('/api/rooms')
     ]);
 
     const roomNameById: Record<number, string> = {};
@@ -4155,9 +4060,9 @@ class HC3MCPServer {
 
   private async getZwaveNodeDiagnostics(minOutgoingFailedPercent?: number, sortBy?: string): Promise<any> {
     const [transmissions, devices, rooms] = await Promise.all([
-      this.makeApiRequest('/api/zwave/nodes/diagnostics/transmissions'),
-      this.makeApiRequest('/api/devices?interface=zwave'),
-      this.makeApiRequest('/api/rooms')
+      this.hc3.request('/api/zwave/nodes/diagnostics/transmissions'),
+      this.hc3.request('/api/devices?interface=zwave'),
+      this.hc3.request('/api/rooms')
     ]);
 
     const roomNameById: Record<number, string> = {};
@@ -4228,7 +4133,7 @@ class HC3MCPServer {
     if (typeof deviceId !== 'number') {
       throw new Error('get_device_parameters requires a numeric deviceId.');
     }
-    const device: any = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const device: any = await this.hc3.request(`/api/devices/${deviceId}`);
     const nodeId = device?.properties?.nodeId;
     if (nodeId === undefined || nodeId === null) {
       throw new Error(
@@ -4240,9 +4145,9 @@ class HC3MCPServer {
     const encodedAddr = encodeURIComponent(addr);
 
     const [valuesRes, templateRes] = await Promise.all([
-      this.makeApiRequest(`/api/zwave/configuration_parameters/${encodedAddr}`)
+      this.hc3.request(`/api/zwave/configuration_parameters/${encodedAddr}`)
         .catch((e: any) => ({ __error: String(e?.message ?? e) })),
-      this.makeApiRequest(`/api/zwave/parameters_templates/${encodedAddr}`)
+      this.hc3.request(`/api/zwave/parameters_templates/${encodedAddr}`)
         .catch((e: any) => ({ __error: String(e?.message ?? e) }))
     ]);
 
@@ -4299,9 +4204,9 @@ class HC3MCPServer {
 
   private async getZwaveReconfigurationTasks(): Promise<any> {
     const [tasks, devices, rooms] = await Promise.all([
-      this.makeApiRequest('/api/zwaveReconfigurationTasks'),
-      this.makeApiRequest('/api/devices?interface=zwave'),
-      this.makeApiRequest('/api/rooms')
+      this.hc3.request('/api/zwaveReconfigurationTasks'),
+      this.hc3.request('/api/devices?interface=zwave'),
+      this.hc3.request('/api/rooms')
     ]);
 
     const roomNameById: Record<number, string> = {};
@@ -4340,7 +4245,7 @@ class HC3MCPServer {
 
   private async getRefreshStates(args: { last?: number }): Promise<any> {
     const last = typeof args?.last === 'number' ? args.last : 0;
-    return await this.makeApiRequest(`/api/refreshStates?last=${last}&lang=en`);
+    return await this.hc3.request(`/api/refreshStates?last=${last}&lang=en`);
   }
 
   private async getEventHistory(
@@ -4356,7 +4261,7 @@ class HC3MCPServer {
     if (eventType) params.set('eventType', eventType);
     if (objectId !== undefined) params.set('objectId', String(objectId));
     if (objectType) params.set('objectType', objectType);
-    const events: any[] = await this.makeApiRequest(`/api/events/history?${params.toString()}`);
+    const events: any[] = await this.hc3.request(`/api/events/history?${params.toString()}`);
     if (sinceTimestamp !== undefined) {
       return events.filter(e => (e?.timestamp ?? 0) >= sinceTimestamp);
     }
@@ -4365,12 +4270,12 @@ class HC3MCPServer {
 
   // Weather Methods
   private async getWeather(): Promise<any> {
-    return await this.makeApiRequest('/api/weather');
+    return await this.hc3.request('/api/weather');
   }
 
   // Home Status Methods
   private async getHomeStatus(): Promise<any> {
-    return await this.makeApiRequest('/api/panels/location');
+    return await this.hc3.request('/api/panels/location');
   }
 
   private async setHomeStatus(args: { status: string }): Promise<any> {
@@ -4378,33 +4283,33 @@ class HC3MCPServer {
     if (!validModes.includes(args.status)) {
       throw new Error(`set_home_status: invalid status '${args.status}'. Must be one of: ${validModes.join(', ')}.`);
     }
-    await this.makeApiRequest('/api/panels/location', 'PUT', { mode: args.status });
+    await this.hc3.request('/api/panels/location', 'PUT', { mode: args.status });
     return `Home status set to '${args.status}' successfully.`;
   }
 
   // Profile Methods
   private async getProfiles(): Promise<any> {
-    return await this.makeApiRequest('/api/profiles');
+    return await this.hc3.request('/api/profiles');
   }
 
   private async getProfile(args: { profileId: number }): Promise<any> {
     if (typeof args?.profileId !== 'number') {
       throw new Error('get_profile requires numeric profileId.');
     }
-    return await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    return await this.hc3.request(`/api/profiles/${args.profileId}`);
   }
 
   private async activateProfile(args: { profileId: number }): Promise<any> {
     if (typeof args?.profileId !== 'number') {
       throw new Error('activate_profile requires numeric profileId.');
     }
-    const before: any = await this.makeApiRequest('/api/profiles');
+    const before: any = await this.hc3.request('/api/profiles');
     const profile = (before?.profiles ?? []).find((p: any) => p.id === args.profileId);
     if (!profile) {
       throw new Error(`activate_profile: profile ${args.profileId} not found.`);
     }
-    await this.makeApiRequest(`/api/profiles/activeProfile/${args.profileId}`, 'POST', {});
-    const after: any = await this.makeApiRequest('/api/profiles');
+    await this.hc3.request(`/api/profiles/activeProfile/${args.profileId}`, 'POST', {});
+    const after: any = await this.hc3.request('/api/profiles');
     if (after?.activeProfile !== args.profileId) {
       throw new Error(
         `activate_profile: post-activation verify failed. Submitted activeProfile=${args.profileId}, HC3 reports activeProfile=${after?.activeProfile}.`
@@ -4427,10 +4332,10 @@ class HC3MCPServer {
     if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
       throw new Error('modify_profile requires a non-empty fields object.');
     }
-    const current: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    const current: any = await this.hc3.request(`/api/profiles/${args.profileId}`);
     const merged = this.deepMerge(current, args.fields);
-    await this.makeApiRequest(`/api/profiles/${args.profileId}`, 'PUT', merged);
-    const after: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    await this.hc3.request(`/api/profiles/${args.profileId}`, 'PUT', merged);
+    const after: any = await this.hc3.request(`/api/profiles/${args.profileId}`);
     this.verifyWrite(args.fields, undefined, after, `profile ${args.profileId}`);
     return {
       profileId: args.profileId,
@@ -4443,12 +4348,12 @@ class HC3MCPServer {
     if (!args?.name) throw new Error('create_profile requires name.');
     const body: Record<string, any> = { name: args.name };
     if (args.iconId !== undefined) body.iconId = args.iconId;
-    const created: any = await this.makeApiRequest('/api/profiles', 'POST', body);
+    const created: any = await this.hc3.request('/api/profiles', 'POST', body);
     const newId = created?.id;
     if (typeof newId !== 'number') {
       throw new Error(`create_profile: HC3 returned no id. Raw: ${JSON.stringify(created).slice(0, 300)}`);
     }
-    const after: any = await this.makeApiRequest(`/api/profiles/${newId}`);
+    const after: any = await this.hc3.request(`/api/profiles/${newId}`);
     if (after?.name !== args.name) {
       throw new Error(`create_profile: post-create name mismatch. Submitted ${JSON.stringify(args.name)}, stored ${JSON.stringify(after?.name)}.`);
     }
@@ -4457,7 +4362,7 @@ class HC3MCPServer {
 
   private async deleteProfile(args: { profileId: number }): Promise<any> {
     if (typeof args?.profileId !== 'number') throw new Error('delete_profile requires numeric profileId.');
-    const list: any = await this.makeApiRequest('/api/profiles');
+    const list: any = await this.hc3.request('/api/profiles');
     if (list?.activeProfile === args.profileId) {
       const name = (list.profiles ?? []).find((p: any) => p.id === args.profileId)?.name ?? '?';
       throw new Error(
@@ -4469,9 +4374,9 @@ class HC3MCPServer {
     if (!existing) {
       throw new Error(`delete_profile: profile ${args.profileId} not found.`);
     }
-    await this.makeApiRequest(`/api/profiles/${args.profileId}`, 'DELETE');
+    await this.hc3.request(`/api/profiles/${args.profileId}`, 'DELETE');
     try {
-      await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+      await this.hc3.request(`/api/profiles/${args.profileId}`);
       throw new Error(`delete_profile: post-delete verify failed — profile ${args.profileId} still exists.`);
     } catch (e: any) {
       if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
@@ -4485,7 +4390,7 @@ class HC3MCPServer {
         'reset_profiles refuses: this DESTROYS all custom profile configuration (device lists, scene actions, climate zone actions, partition actions) across every profile. Pass confirm=true to proceed. No undo.'
       );
     }
-    await this.makeApiRequest('/api/profiles/reset', 'POST', null);
+    await this.hc3.request('/api/profiles/reset', 'POST', null);
     return { reset: true, warning: 'All profiles reset to HC3 defaults. Custom configuration erased.' };
   }
 
@@ -4497,12 +4402,12 @@ class HC3MCPServer {
     if (typeof args?.profileId !== 'number') throw new Error('set_profile_scene_action requires numeric profileId.');
     if (typeof args?.sceneId !== 'number') throw new Error('set_profile_scene_action requires numeric sceneId.');
     if (!Array.isArray(args?.actions)) throw new Error('set_profile_scene_action requires actions array.');
-    await this.makeApiRequest(
+    await this.hc3.request(
       `/api/profiles/${args.profileId}/scenes/${args.sceneId}`,
       'PUT',
       { actions: args.actions }
     );
-    const after: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    const after: any = await this.hc3.request(`/api/profiles/${args.profileId}`);
     const entry = (after?.scenes ?? []).find((s: any) => s.sceneId === args.sceneId);
     if (!entry) {
       throw new Error(
@@ -4529,12 +4434,12 @@ class HC3MCPServer {
     if (typeof args?.mode !== 'string') throw new Error('set_profile_climate_zone_action requires mode.');
     const body: Record<string, any> = { mode: args.mode };
     if (args.properties !== undefined) body.properties = args.properties;
-    await this.makeApiRequest(
+    await this.hc3.request(
       `/api/profiles/${args.profileId}/climateZones/${args.zoneId}`,
       'PUT',
       body
     );
-    const after: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    const after: any = await this.hc3.request(`/api/profiles/${args.profileId}`);
     const entry = (after?.climateZones ?? []).find((z: any) => z.id === args.zoneId);
     if (!entry || entry.mode !== args.mode) {
       throw new Error(
@@ -4552,12 +4457,12 @@ class HC3MCPServer {
   }): Promise<any> {
     if (typeof args?.profileId !== 'number') throw new Error('set_profile_partition_action requires numeric profileId.');
     if (typeof args?.partitionId !== 'number') throw new Error('set_profile_partition_action requires numeric partitionId.');
-    await this.makeApiRequest(
+    await this.hc3.request(
       `/api/profiles/${args.profileId}/partitions/${args.partitionId}`,
       'PUT',
       { action: args.action ?? null }
     );
-    const after: any = await this.makeApiRequest(`/api/profiles/${args.profileId}`);
+    const after: any = await this.hc3.request(`/api/profiles/${args.profileId}`);
     const entry = (after?.partitions ?? []).find((p: any) => p.id === args.partitionId);
     if (!entry) {
       throw new Error(
@@ -4575,11 +4480,11 @@ class HC3MCPServer {
   // Climate Management Methods
   private async getClimateZones(args: { detailed?: boolean }): Promise<any> {
     const detailed = args.detailed ? '?detailed=true' : '';
-    return await this.makeApiRequest(`/api/panels/climate${detailed}`);
+    return await this.hc3.request(`/api/panels/climate${detailed}`);
   }
 
   private async getClimateZone(args: { zoneId: number }): Promise<any> {
-    return await this.makeApiRequest(`/api/panels/climate/${args.zoneId}`);
+    return await this.hc3.request(`/api/panels/climate/${args.zoneId}`);
   }
 
   private async updateClimateZone(args: {
@@ -4604,13 +4509,13 @@ class HC3MCPServer {
     if (propertiesKeys.length > 0) {
       // Read-modify-write so partial submissions in nested schedule objects
       // (e.g. {monday: {morning: {...}}}) don't wipe sibling keys.
-      const current = await this.makeApiRequest(`/api/panels/climate/${zoneId}`);
+      const current = await this.hc3.request(`/api/panels/climate/${zoneId}`);
       const currentProps = current?.properties ?? {};
       body.properties = this.deepMerge(currentProps, properties);
     }
 
-    await this.makeApiRequest(`/api/panels/climate/${zoneId}`, 'PUT', body);
-    const after = await this.makeApiRequest(`/api/panels/climate/${zoneId}`);
+    await this.hc3.request(`/api/panels/climate/${zoneId}`, 'PUT', body);
+    const after = await this.hc3.request(`/api/panels/climate/${zoneId}`);
     this.verifyWrite(topLevel, properties, after, `climate zone ${zoneId}`);
 
     const submittedSummary: Record<string, any> = {};
@@ -4625,22 +4530,22 @@ class HC3MCPServer {
 
   // Alarm System Management Methods
   private async getAlarmPartitions(): Promise<any> {
-    return await this.makeApiRequest('/api/alarms/v1/partitions');
+    return await this.hc3.request('/api/alarms/v1/partitions');
   }
 
   private async getAlarmPartition(args: { partitionId: number }): Promise<any> {
-    return await this.makeApiRequest(`/api/alarms/v1/partitions/${args.partitionId}`);
+    return await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}`);
   }
 
   private async armAlarmPartition(args: { partitionId: number; armingType: string }): Promise<any> {
-    await this.makeApiRequest(`/api/alarms/v1/partitions/${args.partitionId}/actions/arm`, 'POST', {
+    await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}/actions/arm`, 'POST', {
       armingType: args.armingType
     });
     return `Alarm partition ${args.partitionId} armed with ${args.armingType} mode.`;
   }
 
   private async disarmAlarmPartition(args: { partitionId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/alarms/v1/partitions/${args.partitionId}/actions/disarm`, 'POST');
+    await this.hc3.request(`/api/alarms/v1/partitions/${args.partitionId}/actions/disarm`, 'POST');
     return `Alarm partition ${args.partitionId} disarmed successfully.`;
   }
 
@@ -4662,7 +4567,7 @@ class HC3MCPServer {
       url += '?' + params.toString();
     }
     
-    return await this.makeApiRequest(url);
+    return await this.hc3.request(url);
   }
 
   private async getAlarmDevices(args: { partitionId?: number }): Promise<any> {
@@ -4670,16 +4575,16 @@ class HC3MCPServer {
     if (args.partitionId) {
       url += `?partitionId=${args.partitionId}`;
     }
-    return await this.makeApiRequest(url);
+    return await this.hc3.request(url);
   }
 
   // Sprinkler System Management Methods
   private async getSprinklerSystems(): Promise<any> {
-    return await this.makeApiRequest('/api/panels/sprinklers');
+    return await this.hc3.request('/api/panels/sprinklers');
   }
 
   private async getSprinklerSystem(args: { systemId: number }): Promise<any> {
-    return await this.makeApiRequest(`/api/panels/sprinklers/${args.systemId}`);
+    return await this.hc3.request(`/api/panels/sprinklers/${args.systemId}`);
   }
 
   private async controlSprinklerSystem(args: { systemId: number; action: string; zoneId?: number; duration?: number }): Promise<any> {
@@ -4693,28 +4598,28 @@ class HC3MCPServer {
       requestData.duration = args.duration;
     }
     
-    await this.makeApiRequest(endpoint, 'POST', Object.keys(requestData).length > 0 ? requestData : undefined);
+    await this.hc3.request(endpoint, 'POST', Object.keys(requestData).length > 0 ? requestData : undefined);
     return `Sprinkler system ${args.systemId} action '${args.action}' executed successfully.`;
   }
 
   // Custom Events Management Methods
   private async getCustomEvents(): Promise<any> {
-    return await this.makeApiRequest('/api/customEvents');
+    return await this.hc3.request('/api/customEvents');
   }
 
   private async createCustomEvent(args: { name: string; userDescription?: string }): Promise<any> {
-    const result = await this.makeApiRequest('/api/customEvents', 'POST', args);
+    const result = await this.hc3.request('/api/customEvents', 'POST', args);
     return `Custom event '${args.name}' created successfully with ID ${result.id}.`;
   }
 
   private async triggerCustomEvent(args: { eventId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/customEvents/${args.eventId}`, 'POST');
+    await this.hc3.request(`/api/customEvents/${args.eventId}`, 'POST');
     return `Custom event ${args.eventId} triggered successfully.`;
   }
 
   private async getCustomEvent(args: { name: string }): Promise<any> {
     if (!args?.name) throw new Error('get_custom_event requires name.');
-    return await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`);
+    return await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`);
   }
 
   private async updateCustomEvent(args: {
@@ -4726,13 +4631,13 @@ class HC3MCPServer {
     if (args.userDescription === undefined && args.newName === undefined) {
       throw new Error('update_custom_event requires at least one of userDescription or newName.');
     }
-    const current: any = await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`);
+    const current: any = await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`);
     const body: Record<string, any> = { ...current };
     if (args.userDescription !== undefined) body.userDescription = args.userDescription;
     if (args.newName !== undefined) body.name = args.newName;
-    await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(args.name)}`, 'PUT', body);
+    await this.hc3.request(`/api/customEvents/${encodeURIComponent(args.name)}`, 'PUT', body);
     const verifyName = args.newName ?? args.name;
-    const after: any = await this.makeApiRequest(`/api/customEvents/${encodeURIComponent(verifyName)}`);
+    const after: any = await this.hc3.request(`/api/customEvents/${encodeURIComponent(verifyName)}`);
     if (args.userDescription !== undefined && after.userDescription !== args.userDescription) {
       throw new Error(
         `update_custom_event: post-write userDescription mismatch. Submitted ${JSON.stringify(args.userDescription)}, stored ${JSON.stringify(after.userDescription)}.`
@@ -4749,10 +4654,10 @@ class HC3MCPServer {
   private async deleteCustomEvent(args: { name: string }): Promise<any> {
     if (!args?.name) throw new Error('delete_custom_event requires name.');
     const encoded = encodeURIComponent(args.name);
-    const existing: any = await this.makeApiRequest(`/api/customEvents/${encoded}`);
-    await this.makeApiRequest(`/api/customEvents/${encoded}`, 'DELETE');
+    const existing: any = await this.hc3.request(`/api/customEvents/${encoded}`);
+    await this.hc3.request(`/api/customEvents/${encoded}`, 'DELETE');
     try {
-      await this.makeApiRequest(`/api/customEvents/${encoded}`);
+      await this.hc3.request(`/api/customEvents/${encoded}`);
       throw new Error(`delete_custom_event: post-delete verify failed — '${args.name}' still exists.`);
     } catch (e: any) {
       if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
@@ -4765,7 +4670,7 @@ class HC3MCPServer {
 
   // Location Management Methods
   private async getLocationInfo(): Promise<any> {
-    return await this.makeApiRequest('/api/panels/location');
+    return await this.hc3.request('/api/panels/location');
   }
 
   private async updateLocationSettings(args: {
@@ -4788,10 +4693,10 @@ class HC3MCPServer {
       );
     }
 
-    const current = await this.makeApiRequest(`/api/panels/location/${locationId}`);
+    const current = await this.hc3.request(`/api/panels/location/${locationId}`);
     const merged = this.deepMerge(current, fields);
-    await this.makeApiRequest(`/api/panels/location/${locationId}`, 'PUT', merged);
-    const after = await this.makeApiRequest(`/api/panels/location/${locationId}`);
+    await this.hc3.request(`/api/panels/location/${locationId}`, 'PUT', merged);
+    const after = await this.hc3.request(`/api/panels/location/${locationId}`);
     this.verifyWrite(fields, undefined, after, `location ${locationId}`);
 
     return {
@@ -4817,22 +4722,22 @@ class HC3MCPServer {
       url += '?' + params.toString();
     }
     
-    return await this.makeApiRequest(url);
+    return await this.hc3.request(url);
   }
 
   private async markNotificationRead(args: { notificationId: number }): Promise<any> {
-    await this.makeApiRequest(`/api/panels/notifications/${args.notificationId}/read`, 'POST');
+    await this.hc3.request(`/api/panels/notifications/${args.notificationId}/read`, 'POST');
     return `Notification ${args.notificationId} marked as read.`;
   }
 
   private async clearAllNotifications(): Promise<any> {
-    await this.makeApiRequest('/api/panels/notifications/clear', 'POST');
+    await this.hc3.request('/api/panels/notifications/clear', 'POST');
     return 'All notifications cleared successfully.';
   }
 
   private async getNotification(args: { notificationId: number }): Promise<any> {
     if (typeof args?.notificationId !== 'number') throw new Error('get_notification requires numeric notificationId.');
-    return await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    return await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
   }
 
   private async updateNotification(args: {
@@ -4843,25 +4748,25 @@ class HC3MCPServer {
     if (!args?.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
       throw new Error('update_notification requires a non-empty fields object.');
     }
-    const current: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    const current: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
     const merged = this.deepMerge(current, args.fields);
-    await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`, 'PUT', merged);
-    const after: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    await this.hc3.request(`/api/notificationCenter/${args.notificationId}`, 'PUT', merged);
+    const after: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
     this.verifyWrite(args.fields, undefined, after, `notification ${args.notificationId}`);
     return { notificationId: args.notificationId, changedFields: Object.keys(args.fields), notification: after };
   }
 
   private async deleteNotification(args: { notificationId: number; allow_system?: boolean }): Promise<any> {
     if (typeof args?.notificationId !== 'number') throw new Error('delete_notification requires numeric notificationId.');
-    const existing: any = await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+    const existing: any = await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
     if (existing?.canBeDeleted === false && !args.allow_system) {
       throw new Error(
         `delete_notification refuses notification ${args.notificationId}: canBeDeleted=false (HC3-system-protected). Pass allow_system=true to override.`
       );
     }
-    await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`, 'DELETE');
+    await this.hc3.request(`/api/notificationCenter/${args.notificationId}`, 'DELETE');
     try {
-      await this.makeApiRequest(`/api/notificationCenter/${args.notificationId}`);
+      await this.hc3.request(`/api/notificationCenter/${args.notificationId}`);
       throw new Error(`delete_notification: post-delete verify failed — notification ${args.notificationId} still exists.`);
     } catch (e: any) {
       if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
@@ -4875,15 +4780,15 @@ class HC3MCPServer {
 
   // Backup Management Methods
   private async canCreateBackup(): Promise<any> {
-    return await this.makeApiRequest('/api/service/canCreateBackups');
+    return await this.hc3.request('/api/service/canCreateBackups');
   }
 
   private async getLocalBackupStatus(): Promise<any> {
-    return await this.makeApiRequest('/api/service/getLocalBackupsStatus');
+    return await this.hc3.request('/api/service/getLocalBackupsStatus');
   }
 
   private async getRemoteBackupStatus(): Promise<any> {
-    return await this.makeApiRequest('/api/service/getRemoteBackupsStatus');
+    return await this.hc3.request('/api/service/getRemoteBackupsStatus');
   }
 
   private async getBackups(args: { type?: string }): Promise<any> {
@@ -4891,11 +4796,11 @@ class HC3MCPServer {
     if (args.type && args.type !== 'all') {
       url += `?type=${args.type}`;
     }
-    return await this.makeApiRequest(url);
+    return await this.hc3.request(url);
   }
 
   private async createBackup(args: { name: string; type: string }): Promise<any> {
-    const result = await this.makeApiRequest('/api/service/backups', 'POST', {
+    const result = await this.hc3.request('/api/service/backups', 'POST', {
       name: args.name,
       type: args.type
     });
@@ -4906,13 +4811,13 @@ class HC3MCPServer {
   private async clearDebugMessages(): Promise<any> {
     let cleared: number | null = null;
     try {
-      const before: any = await this.makeApiRequest('/api/debugMessages');
+      const before: any = await this.hc3.request('/api/debugMessages');
       cleared = Array.isArray(before) ? before.length
         : (Array.isArray(before?.messages) ? before.messages.length : null);
     } catch {
       // non-fatal; DELETE still proceeds, just no count
     }
-    await this.makeApiRequest('/api/debugMessages', 'DELETE');
+    await this.hc3.request('/api/debugMessages', 'DELETE');
     return { cleared };
   }
 
@@ -4945,7 +4850,7 @@ class HC3MCPServer {
 
     while (pages < maxPages) {
       const url = cursor !== undefined ? `/api/debugMessages?last=${cursor}` : '/api/debugMessages';
-      const page = await this.makeApiRequest(url);
+      const page = await this.hc3.request(url);
       pages++;
       const messages: any[] = page?.messages ?? [];
       fetched += messages.length;
@@ -4993,11 +4898,11 @@ class HC3MCPServer {
 
   // iOS Devices Management Methods
   private async getIosDevices(): Promise<any> {
-    return await this.makeApiRequest('/api/iosDevices');
+    return await this.hc3.request('/api/iosDevices');
   }
 
   private async registerIosDevice(args: { deviceToken: string; name: string }): Promise<any> {
-    const result = await this.makeApiRequest('/api/iosDevices', 'POST', {
+    const result = await this.hc3.request('/api/iosDevices', 'POST', {
       deviceToken: args.deviceToken,
       name: args.name
     });
@@ -5006,11 +4911,11 @@ class HC3MCPServer {
 
   // QuickApp Management Methods
   private async getQuickApps(): Promise<any> {
-    return await this.makeApiRequest('/api/quickApp/');
+    return await this.hc3.request('/api/quickApp/');
   }
 
   private async getQuickApp(args: { quickAppId: number }): Promise<any> {
-    return await this.makeApiRequest(`/api/quickApp/${args.quickAppId}`);
+    return await this.hc3.request(`/api/quickApp/${args.quickAppId}`);
   }
 
   private async restartQuickApp(args: { quickAppId: number }): Promise<any> {
@@ -5018,7 +4923,7 @@ class HC3MCPServer {
     // /api/plugins/restart with {deviceId} for both QAs and plugin devices.
     // restart_quickapp is now a thin alias over the same endpoint as
     // restart_plugin (different parameter name preserved for callers).
-    await this.makeApiRequest('/api/plugins/restart', 'POST', { deviceId: args.quickAppId });
+    await this.hc3.request('/api/plugins/restart', 'POST', { deviceId: args.quickAppId });
     return `QuickApp ${args.quickAppId} restarted successfully.`;
   }
 
@@ -5029,12 +4934,12 @@ class HC3MCPServer {
       // HC3 unreachability surfaces instead of returning empty arrays.
       // Ancillary (info/weather) tolerated and reported via _fetch_errors.
       const [infoResult, devices, rooms, scenes, variables, weatherResult] = await Promise.all([
-        this.tolerantFetch('system_info', this.makeApiRequest('/api/settings/info')),
-        this.makeApiRequest('/api/devices'),
-        this.makeApiRequest('/api/rooms'),
-        this.makeApiRequest('/api/scenes'),
-        this.makeApiRequest('/api/globalVariables'),
-        this.tolerantFetch('weather', this.makeApiRequest('/api/weather'))
+        this.tolerantFetch('system_info', this.hc3.request('/api/settings/info')),
+        this.hc3.request('/api/devices'),
+        this.hc3.request('/api/rooms'),
+        this.hc3.request('/api/scenes'),
+        this.hc3.request('/api/globalVariables'),
+        this.tolerantFetch('weather', this.hc3.request('/api/weather'))
       ]);
 
       const info = infoResult.ok ? infoResult.value : null;
@@ -5065,9 +4970,9 @@ class HC3MCPServer {
     try {
       const deviceId = args.deviceId;
       const [devices, rooms, scenes] = await Promise.all([
-        this.makeApiRequest('/api/devices'),
-        this.makeApiRequest('/api/rooms'),
-        this.makeApiRequest('/api/scenes')
+        this.hc3.request('/api/devices'),
+        this.hc3.request('/api/rooms'),
+        this.hc3.request('/api/scenes')
       ]);
 
       if (deviceId) {
@@ -5114,9 +5019,9 @@ class HC3MCPServer {
   private async getAutomationSuggestions(args: any): Promise<any> {
     try {
       const [devices, scenesResult, variablesResult] = await Promise.all([
-        this.makeApiRequest('/api/devices'),
-        this.tolerantFetch('scenes', this.makeApiRequest('/api/scenes')),
-        this.tolerantFetch('variables', this.makeApiRequest('/api/globalVariables'))
+        this.hc3.request('/api/devices'),
+        this.tolerantFetch('scenes', this.hc3.request('/api/scenes')),
+        this.tolerantFetch('variables', this.hc3.request('/api/globalVariables'))
       ]);
 
       const scenes: any[] = scenesResult.ok ? scenesResult.value : [];
@@ -5190,7 +5095,7 @@ class HC3MCPServer {
   private async explainDeviceCapabilities(args: any): Promise<any> {
     try {
       const deviceId = args.deviceId;
-      const devices = await this.makeApiRequest('/api/devices');
+      const devices = await this.hc3.request('/api/devices');
 
       if (!deviceId) {
         throw new Error('deviceId is required');
@@ -5346,12 +5251,12 @@ class HC3MCPServer {
   // QuickApp file manipulation methods
   private async listQuickAppFiles(args: { deviceId: number }): Promise<any> {
     const { deviceId } = args;
-    return await this.makeApiRequest(`/api/quickApp/${deviceId}/files`);
+    return await this.hc3.request(`/api/quickApp/${deviceId}/files`);
   }
 
   private async getQuickAppFile(args: { deviceId: number; fileName: string }): Promise<any> {
     const { deviceId, fileName } = args;
-    return await this.makeApiRequest(`/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`);
+    return await this.hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`);
   }
 
   private async createQuickAppFile(args: {
@@ -5369,9 +5274,9 @@ class HC3MCPServer {
       isOpen,
       isMain: false
     };
-    const postResult = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'POST', fileData);
+    const postResult = await this.hc3.request(`/api/quickApp/${deviceId}/files`, 'POST', fileData);
 
-    const after = await this.makeApiRequest(
+    const after = await this.hc3.request(
       `/api/quickApp/${deviceId}/files/${encodeURIComponent(name)}`
     );
     if (!after) {
@@ -5402,14 +5307,14 @@ class HC3MCPServer {
       updateData.isOpen = isOpen;
     }
 
-    const putResult = await this.makeApiRequest(
+    const putResult = await this.hc3.request(
       `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`,
       'PUT',
       updateData
     );
 
     if (content !== undefined) {
-      const after = await this.makeApiRequest(
+      const after = await this.hc3.request(
         `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`
       );
       if (after?.content !== content) {
@@ -5429,7 +5334,7 @@ class HC3MCPServer {
     files: Array<{ name: string; content: string; type?: string; isOpen?: boolean }>
   }): Promise<any> {
     const { deviceId, files } = args;
-    const existing = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`);
+    const existing = await this.hc3.request(`/api/quickApp/${deviceId}/files`);
     const isMainByName = new Map<string, boolean>(
       (existing ?? []).map((f: any) => [f.name, !!f.isMain])
     );
@@ -5440,11 +5345,11 @@ class HC3MCPServer {
       isOpen: file.isOpen || false,
       isMain: isMainByName.get(file.name) ?? false
     }));
-    const putResult = await this.makeApiRequest(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
+    const putResult = await this.hc3.request(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
 
     const stored = await Promise.all(
       files.map(f =>
-        this.makeApiRequest(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.name)}`)
+        this.hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.name)}`)
           .then((v: any) => ({ name: f.name, content: v?.content ?? null }))
           .catch(() => ({ name: f.name, content: null }))
       )
@@ -5473,7 +5378,7 @@ class HC3MCPServer {
 
   private async deleteQuickAppFile(args: { deviceId: number; fileName: string }): Promise<any> {
     const { deviceId, fileName } = args;
-    return await this.makeApiRequest(
+    return await this.hc3.request(
       `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`,
       'DELETE'
     );
@@ -5481,7 +5386,7 @@ class HC3MCPServer {
 
   private async getQuickAppVariable(args: { deviceId: number; name: string }): Promise<any> {
     const { deviceId, name } = args;
-    const device = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const device = await this.hc3.request(`/api/devices/${deviceId}`);
     const vars: any[] = device?.properties?.quickAppVariables ?? [];
     const found = vars.find(v => v.name === name);
     if (!found) {
@@ -5503,7 +5408,7 @@ class HC3MCPServer {
   }): Promise<any> {
     const { deviceId, name, value } = args;
 
-    const device = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const device = await this.hc3.request(`/api/devices/${deviceId}`);
     const vars: any[] = device?.properties?.quickAppVariables ?? [];
     const existing = vars.find(v => v.name === name);
     if (!existing) {
@@ -5543,11 +5448,11 @@ class HC3MCPServer {
       v.name === name ? { ...v, value: coercedValue } : v
     );
 
-    await this.makeApiRequest(`/api/devices/${deviceId}`, 'PUT', {
+    await this.hc3.request(`/api/devices/${deviceId}`, 'PUT', {
       properties: { quickAppVariables: newVars }
     });
 
-    const after = await this.makeApiRequest(`/api/devices/${deviceId}`);
+    const after = await this.hc3.request(`/api/devices/${deviceId}`);
     const afterVars: any[] = after?.properties?.quickAppVariables ?? [];
     const afterVar = afterVars.find(v => v.name === name);
     if (!afterVar) {
@@ -5588,10 +5493,10 @@ class HC3MCPServer {
         encrypted: true,
         serialNumbers
       };
-      return await this.makeApiRequest(`/api/quickApp/export/${deviceId}`, 'POST', exportData);
+      return await this.hc3.request(`/api/quickApp/export/${deviceId}`, 'POST', exportData);
     } else {
       // Export as open source
-      return await this.makeApiRequest(`/api/quickApp/export/${deviceId}`, 'POST', { encrypted: false });
+      return await this.hc3.request(`/api/quickApp/export/${deviceId}`, 'POST', { encrypted: false });
     }
   }
 
@@ -5615,7 +5520,7 @@ class HC3MCPServer {
     if (args.initialInterfaces !== undefined) body.initialInterfaces = args.initialInterfaces;
     if (args.initialView !== undefined) body.initialView = args.initialView;
 
-    const created: any = await this.makeApiRequest('/api/quickApp', 'POST', body);
+    const created: any = await this.hc3.request('/api/quickApp', 'POST', body);
     const newId = created?.id;
     if (typeof newId !== 'number') {
       throw new Error(
@@ -5623,7 +5528,7 @@ class HC3MCPServer {
       );
     }
 
-    const after: any = await this.makeApiRequest(`/api/devices/${newId}`);
+    const after: any = await this.hc3.request(`/api/devices/${newId}`);
     if (after?.name !== args.name) {
       throw new Error(
         `create_quickapp: post-create name mismatch for device ${newId}. ` +
@@ -5647,7 +5552,7 @@ class HC3MCPServer {
   }
 
   private async getQuickAppAvailableTypes(): Promise<any> {
-    return await this.makeApiRequest('/api/quickApp/availableTypes');
+    return await this.hc3.request('/api/quickApp/availableTypes');
   }
 
   private async importQuickApp(args: { filePath: string; roomId?: number }): Promise<any> {
@@ -5663,11 +5568,11 @@ class HC3MCPServer {
 
   // Plugin management methods
   private async getPlugins(args: any): Promise<any> {
-    return await this.makeApiRequest('/api/plugins');
+    return await this.hc3.request('/api/plugins');
   }
 
   private async getInstalledPlugins(args: any): Promise<any> {
-    return await this.makeApiRequest('/api/plugins/installed');
+    return await this.hc3.request('/api/plugins/installed');
   }
 
   private async getPluginTypes(args: { language?: string }): Promise<any> {
@@ -5675,7 +5580,7 @@ class HC3MCPServer {
     
     // For now, we'll use the basic API request without custom headers
     // The language preference can be handled by the client
-    return await this.makeApiRequest('/api/plugins/types');
+    return await this.hc3.request('/api/plugins/types');
   }
 
   private async getPluginView(args: { 
@@ -5703,7 +5608,7 @@ class HC3MCPServer {
     url += params.toString();
     
     // For now, we'll use JSON format by default
-    return await this.makeApiRequest(url);
+    return await this.hc3.request(url);
   }
 
   private async updatePluginView(args: { 
@@ -5719,7 +5624,7 @@ class HC3MCPServer {
       propertyName,
       newValue
     };
-    return await this.makeApiRequest('/api/plugins/updateView', 'POST', updateData);
+    return await this.hc3.request('/api/plugins/updateView', 'POST', updateData);
   }
 
   private async callUIEvent(args: { 
@@ -5735,7 +5640,7 @@ class HC3MCPServer {
       url += `&value=${encodeURIComponent(value)}`;
     }
     
-    return await this.makeApiRequest(url, 'GET');
+    return await this.hc3.request(url, 'GET');
   }
 
   private async createChildDevice(args: { 
@@ -5753,7 +5658,7 @@ class HC3MCPServer {
       ...(initialProperties && { initialProperties }),
       ...(initialInterfaces && { initialInterfaces })
     };
-    return await this.makeApiRequest('/api/plugins/createChildDevice', 'POST', deviceData);
+    return await this.hc3.request('/api/plugins/createChildDevice', 'POST', deviceData);
   }
 
   private async managePluginInterfaces(args: { 
@@ -5767,13 +5672,13 @@ class HC3MCPServer {
       deviceId,
       interfaces
     };
-    return await this.makeApiRequest('/api/plugins/interfaces', 'POST', requestData);
+    return await this.hc3.request('/api/plugins/interfaces', 'POST', requestData);
   }
 
   private async restartPlugin(args: { deviceId: number }): Promise<any> {
     const { deviceId } = args;
     const requestData = { deviceId };
-    return await this.makeApiRequest('/api/plugins/restart', 'POST', requestData);
+    return await this.hc3.request('/api/plugins/restart', 'POST', requestData);
   }
 
   private async updateDeviceProperty(args: { 
@@ -5787,7 +5692,7 @@ class HC3MCPServer {
       propertyName,
       value
     };
-    return await this.makeApiRequest('/api/plugins/updateProperty', 'POST', requestData);
+    return await this.hc3.request('/api/plugins/updateProperty', 'POST', requestData);
   }
 
   private async publishPluginEvent(args: { 
@@ -5807,23 +5712,23 @@ class HC3MCPServer {
       eventData.data = data;
     }
     
-    return await this.makeApiRequest('/api/plugins/publishEvent', 'POST', eventData);
+    return await this.hc3.request('/api/plugins/publishEvent', 'POST', eventData);
   }
 
   private async getIPCameras(args: any): Promise<any> {
-    return await this.makeApiRequest('/api/plugins/ipCameras');
+    return await this.hc3.request('/api/plugins/ipCameras');
   }
 
   private async installPlugin(args: { type: string }): Promise<any> {
     const { type } = args;
     const url = `/api/plugins/installed?type=${encodeURIComponent(type)}`;
-    return await this.makeApiRequest(url, 'POST');
+    return await this.hc3.request(url, 'POST');
   }
 
   private async deletePlugin(args: { type: string; allow_bulk?: boolean }): Promise<any> {
     const { type } = args;
     if (!type) throw new Error('delete_plugin requires type.');
-    const devices: any[] = await this.makeApiRequest(`/api/devices?type=${encodeURIComponent(type)}`);
+    const devices: any[] = await this.hc3.request(`/api/devices?type=${encodeURIComponent(type)}`);
     if (devices.length > 1 && !args.allow_bulk) {
       throw new Error(
         `delete_plugin would uninstall ${devices.length} devices of type '${type}' (ids: ${devices.map(d => d.id).slice(0, 10).join(', ')}${devices.length > 10 ? ', …' : ''}). ` +
@@ -5831,7 +5736,7 @@ class HC3MCPServer {
       );
     }
     const url = `/api/plugins/installed?type=${encodeURIComponent(type)}`;
-    const res = await this.makeApiRequest(url, 'DELETE');
+    const res = await this.hc3.request(url, 'DELETE');
     return {
       type,
       devicesAffected: devices.length,
@@ -5850,7 +5755,7 @@ class HC3MCPServer {
       );
     }
 
-    const device: any = await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+    const device: any = await this.hc3.request(`/api/devices/${args.deviceId}`);
     const interfaces: string[] = Array.isArray(device?.interfaces) ? device.interfaces : [];
     const isQuickApp = interfaces.includes('quickApp');
     const isPlugin = !!device?.isPlugin;
@@ -5868,7 +5773,7 @@ class HC3MCPServer {
       );
     }
 
-    const children: any[] = await this.makeApiRequest(`/api/devices?parentId=${args.deviceId}`);
+    const children: any[] = await this.hc3.request(`/api/devices?parentId=${args.deviceId}`);
     if (children.length > 0 && !args.cascade) {
       const childSummary = children.slice(0, 10).map(c => `${c.id} (${c.name})`).join(', ');
       throw new Error(
@@ -5877,10 +5782,10 @@ class HC3MCPServer {
       );
     }
 
-    await this.makeApiRequest(`/api/devices/${args.deviceId}`, 'DELETE');
+    await this.hc3.request(`/api/devices/${args.deviceId}`, 'DELETE');
 
     try {
-      await this.makeApiRequest(`/api/devices/${args.deviceId}`);
+      await this.hc3.request(`/api/devices/${args.deviceId}`);
       throw new Error(
         `delete_device: post-delete verify failed — device ${args.deviceId} still exists after DELETE.`
       );
@@ -5906,17 +5811,17 @@ class HC3MCPServer {
     }
     const encoded = encodeURIComponent(args.varName);
 
-    const existing: any = await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+    const existing: any = await this.hc3.request(`/api/globalVariables/${encoded}`);
     if (existing?.readOnly && !args.allow_system) {
       throw new Error(
         `delete_global_variable refuses '${args.varName}': variable is readOnly (HC3 system variable). Pass allow_system=true to override.`
       );
     }
 
-    await this.makeApiRequest(`/api/globalVariables/${encoded}`, 'DELETE');
+    await this.hc3.request(`/api/globalVariables/${encoded}`, 'DELETE');
 
     try {
-      await this.makeApiRequest(`/api/globalVariables/${encoded}`);
+      await this.hc3.request(`/api/globalVariables/${encoded}`);
       throw new Error(
         `delete_global_variable: post-delete verify failed — '${args.varName}' still exists after DELETE.`
       );
