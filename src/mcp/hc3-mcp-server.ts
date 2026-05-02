@@ -33,8 +33,10 @@ import { devices } from './tools/devices';
 import { quickapps, quickappsCoreSchemas, quickappsExtSchemas } from './tools/quickapps';
 import { icons } from './tools/icons';
 import { intelligence } from './tools/intelligence';
+import { system, systemSchemas } from './tools/system';
+import { zwave, zwaveSchemas } from './tools/zwave';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave];
 const toolHandlers = mergeHandlers(toolModules);
 
 class HC3MCPServer {
@@ -119,37 +121,11 @@ class HC3MCPServer {
       ...scenes.schemas,
 
       // System Information
-      {
-        name: 'get_system_info',
-        description: 'Get Fibaro HC3 system information including version, serial number, and status',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_network_status',
-        description: 'Get network configuration and status information',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
+      systemSchemas.get_system_info,
+      systemSchemas.get_network_status,
 
       // Energy Management
-      {
-        name: 'get_energy_data',
-        description: 'Get energy consumption data for devices or the entire system',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            deviceId: {
-              type: 'number',
-              description: 'Optional: Specific device ID to get energy data for',
-            },
-          },
-        },
-      },
+      systemSchemas.get_energy_data,
 
       {
         name: 'update_user_rights',
@@ -214,139 +190,20 @@ class HC3MCPServer {
       },
 
       ...icons.schemas,
-      {
-        name: 'get_diagnostics',
-        description: 'Get system diagnostic information',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_zwave_mesh_health',
-        description: 'Summarise Z-wave mesh health: counts of dead/unconfigured devices, dead devices listed with node IDs and reasons, and breakdowns by room and manufacturer to help identify mesh dead zones. Uses /api/devices?interface=zwave (documented) rather than undocumented /api/diagnostics/* subpaths.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_refresh_states',
-        description: 'Poll HC3\'s native event/state-change stream via GET /api/refreshStates?last={cursor}. Returns the `changes` delta (current device state snapshot for first call; only changed devices on subsequent calls) and the `events` list (discrete events since last cursor — scene starts, device actions, central scene button presses, etc.), plus a new `last` cursor to pass to the next call. This is the underlying mechanism HC3 QuickApps use for refreshStates-based event subscriptions. HC3 long-polls with up to ~30s block if no new events — expect a brief wait when everything is quiet. FIRST CALL (last=0 or omitted): returns a full snapshot, potentially hundreds of change entries. SUBSEQUENT CALLS (with prior last): incremental, usually small. Complementary to get_event_history: refreshStates is live poll; event_history is retrospective query.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            last: {
-              type: 'number',
-              description: 'Cursor from a previous call. Omit or 0 for a full snapshot. Use the `last` field from the previous response to continue polling incrementally.'
-            }
-          }
-        }
-      },
-      {
-        name: 'get_event_history',
-        description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            limit: {
-              type: 'number',
-              description: 'Maximum events to return. Default 30, capped at 1000 client-side to prevent hangs (HC3 has no server-side cap and large requests time out).'
-            },
-            event_type: {
-              type: 'string',
-              description: 'Filter to one event type. Case-sensitive exact match — typos return an empty array silently. Examples: "SceneStartedEvent", "DevicePropertyUpdatedEvent", "DeviceActionRanEvent", "CentralSceneEvent".'
-            },
-            object_id: {
-              type: 'number',
-              description: 'Filter to events for a specific object (usually device or scene id). Requires object_type to narrow correctly.'
-            },
-            object_type: {
-              type: 'string',
-              description: 'Object type for object_id filter (e.g. "device", "scene").'
-            },
-            since_timestamp: {
-              type: 'number',
-              description: 'Unix epoch seconds; return only events whose timestamp >= this value. Filtered client-side after fetch (HC3 silently ignores server-side time params on this endpoint). For a time window, fetch with a large limit then rely on this filter.'
-            }
-          },
-        },
-      },
-      {
-        name: 'get_device_parameters',
-        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels, descriptions, defaults, and format. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. PROVENANCE: the `source` field is verbatim from HC3. `"template"` does NOT mean "catalogue default returned as placeholder" — empirically, parameters with non-default values still carry `source: "template"`. It means the value is from HC3\'s template-backed storage layer: what HC3 recorded the device as being configured to, usually via the HC3 UI\'s native Z-Wave configuration path (which transmits). In normal operation these values match the physical device. What HC3 5.x cannot do over REST is re-verify the stored value against the physical device on demand (the mesh read-back path — `getParameter`, `reconfigure`, `pollConfigurationParameter` — is not-implemented or silently no-ops). So treat returned values as "HC3\'s best knowledge, almost certainly accurate", not "guaranteed live readback". Drift from physical reality only occurs if the device was reset physically, a different controller reached it, or someone used the broken PUT `/api/devices/{id}` `{properties: {parameters: [...]}}` path (see S14 — `modify_device` rejects it for this reason). Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            deviceId: {
-              type: 'number',
-              description: 'HC3 device id of a Z-Wave device. Must have a nodeId in its properties.'
-            }
-          },
-          required: ['deviceId']
-        },
-      },
-      {
-        name: 'get_zwave_reconfiguration_tasks',
-        description: 'Active Z-Wave reconfiguration tasks: what HC3 is currently reconfiguring over the mesh. Each task surfaces the device being reconfigured, its nodeId, the task status (Completed, Failed, InProgress, Queued, Downloading, Reconfiguring), whether it is a soft or full reconfiguration, and the count/names of affected child devices. Sources the undocumented endpoint /api/zwaveReconfigurationTasks (read-only); may break across HC3 firmware updates. Use when a reconfigure has been initiated and you want to check progress without opening the HC3 UI. Returns empty list if no task is active.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_zwave_node_diagnostics',
-        description: 'Per-node Z-Wave transmission counters: incoming/outgoing frame totals, outgoing failures, incoming CRC/S0/S2/TransportService/MultiChannel failures, and nonce exchange counts. Enriches each node with device name, room, and a computed outgoingFailedPercent so problem nodes surface immediately. Counters are cumulative since the controller last reset them. Sources the undocumented endpoint /api/zwave/nodes/diagnostics/transmissions (read-only); may break across HC3 firmware updates. Use for identifying which Z-Wave nodes are experiencing retries, CRC errors, or security-layer negotiation problems.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            min_outgoing_failed_percent: {
-              type: 'number',
-              description: 'If set, only return nodes whose outgoingFailedPercent is >= this threshold (0-100). Useful to filter to problem nodes only.'
-            },
-            sort_by: {
-              type: 'string',
-              enum: ['outgoingFailedPercent', 'outgoingFailed', 'incomingTotal', 'outgoingTotal', 'nodeId'],
-              description: 'Field to sort nodes by, descending (except nodeId which is ascending). Defaults to outgoingFailedPercent.'
-            }
-          },
-        },
-      },
+      systemSchemas.get_diagnostics,
+      zwaveSchemas.get_zwave_mesh_health,
+      systemSchemas.get_refresh_states,
+      systemSchemas.get_event_history,
+      zwaveSchemas.get_device_parameters,
+      zwaveSchemas.get_zwave_reconfiguration_tasks,
+      zwaveSchemas.get_zwave_node_diagnostics,
 
       // Weather Information
-      {
-        name: 'get_weather',
-        description: 'Get current weather information and forecast',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
+      systemSchemas.get_weather,
 
       // Home/Away Status
-      {
-        name: 'get_home_status',
-        description: 'Get current home/away status and location information',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'set_home_status',
-        description: 'Set home/away status',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            status: {
-              type: 'string',
-              description: 'Home status (Home, Away, Night, Vacation)',
-              enum: ['Home', 'Away', 'Night', 'Vacation'],
-            },
-          },
-          required: ['status'],
-        },
-      },
+      systemSchemas.get_home_status,
+      systemSchemas.set_home_status,
 
       ...profiles.schemas,
 
@@ -359,32 +216,8 @@ class HC3MCPServer {
       ...customEvents.schemas,
 
       // Location Management
-      {
-        name: 'get_location_info',
-        description: 'Get location and geofencing information',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'update_location_settings',
-        description: 'Update a single location/geofence by ID in a verified PUT. Fetches the current location, deep-merges submitted `fields` into it, and PUTs the full merged object to /api/panels/location/{id}. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. Read-only fields (`id`, `created`, `modified`) are rejected if submitted. Get the full list of configured locations with `get_location_info` first to find the ID you want to edit.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            locationId: {
-              type: 'number',
-              description: 'ID of the location/geofence to update (from get_location_info)',
-            },
-            fields: {
-              type: 'object',
-              description: 'Fields to update (e.g. {name: "Home", latitude: 51.1, longitude: -0.77, radius: 500, address: "..."}). Submitted fields are deep-merged into the current location; unspecified fields are preserved. Read-only fields (id, created, modified) will be rejected.',
-            },
-          },
-          required: ['locationId', 'fields'],
-        },
-      },
+      systemSchemas.get_location_info,
+      systemSchemas.update_location_settings,
 
       ...notifications.schemas,
 
@@ -796,72 +629,9 @@ class HC3MCPServer {
         result = await toolHandlers[name](this.hc3, args);
       } else { switch (name) {
         // System Information
-        case 'get_system_info':
-          result = await this.getSystemInfo();
-          break;
-        case 'get_network_status':
-          result = await this.getNetworkStatus();
-          break;
-
-        // Energy Management
-        case 'get_energy_data':
-          result = await this.getEnergyData(args);
-          break;
-
         // Diagnostic Information
         case 'snapshot':
           result = await this.snapshot(args);
-          break;
-        case 'get_diagnostics':
-          result = await this.getDiagnostics();
-          break;
-        case 'get_zwave_mesh_health':
-          result = await this.getZwaveMeshHealth();
-          break;
-        case 'get_zwave_node_diagnostics':
-          result = await this.getZwaveNodeDiagnostics(
-            args?.min_outgoing_failed_percent as number | undefined,
-            args?.sort_by as string | undefined
-          );
-          break;
-        case 'get_zwave_reconfiguration_tasks':
-          result = await this.getZwaveReconfigurationTasks();
-          break;
-        case 'get_device_parameters':
-          result = await this.getDeviceParameters(args?.deviceId as number);
-          break;
-        case 'get_refresh_states':
-          result = await this.getRefreshStates(args);
-          break;
-        case 'get_event_history':
-          result = await this.getEventHistory(
-            args?.limit as number | undefined,
-            args?.event_type as string | undefined,
-            args?.object_id as number | undefined,
-            args?.object_type as string | undefined,
-            args?.since_timestamp as number | undefined
-          );
-          break;
-
-        // Weather Information
-        case 'get_weather':
-          result = await this.getWeather();
-          break;
-
-        // Home/Away Status
-        case 'get_home_status':
-          result = await this.getHomeStatus();
-          break;
-        case 'set_home_status':
-          result = await this.setHomeStatus(args);
-          break;
-
-        // Location Management
-        case 'get_location_info':
-          result = await this.getLocationInfo();
-          break;
-        case 'update_location_settings':
-          result = await this.updateLocationSettings(args);
           break;
 
         // HC3 Documentation & Programming Context
@@ -966,24 +736,6 @@ class HC3MCPServer {
     entityLabel: string
   ): void {
     verifyWrite(topLevel, properties, after, entityLabel);
-  }
-
-  // System Information Methods
-  private async getSystemInfo(): Promise<any> {
-    return await this.hc3.request('/api/settings/info');
-  }
-
-  private async getNetworkStatus(): Promise<any> {
-    return await this.hc3.request('/api/settings/network');
-  }
-
-  // Energy Management Methods
-  private async getEnergyData(args: { deviceId?: number }): Promise<any> {
-    if (args?.deviceId) {
-      return await this.hc3.request(`/api/energy/${args.deviceId}`);
-    } else {
-      return await this.hc3.request('/api/energy');
-    }
   }
 
   // Diagnostic Methods
@@ -1133,326 +885,6 @@ class HC3MCPServer {
       includeResolved: selected
     };
   }
-
-  private async getDiagnostics(): Promise<any> {
-    return await this.hc3.request('/api/diagnostics');
-  }
-
-  private async getZwaveMeshHealth(): Promise<any> {
-    const [devices, rooms] = await Promise.all([
-      this.hc3.request('/api/devices?interface=zwave'),
-      this.hc3.request('/api/rooms')
-    ]);
-
-    const roomNameById: Record<number, string> = {};
-    for (const r of rooms) roomNameById[r.id] = r.name;
-
-    const nodes: any[] = (devices as any[]).filter(d => d?.properties?.nodeId !== undefined);
-    const dead = nodes.filter(d => d.properties.dead === true);
-    const unconfigured = nodes.filter(d => d.properties.configured === false);
-
-    const deadByRoom: Record<string, number> = {};
-    const deadByManufacturer: Record<string, number> = {};
-    for (const d of dead) {
-      const roomName = roomNameById[d.roomID] ?? `room ${d.roomID}`;
-      deadByRoom[roomName] = (deadByRoom[roomName] ?? 0) + 1;
-      const mfr = d.properties.zwaveCompany || 'Unknown';
-      deadByManufacturer[mfr] = (deadByManufacturer[mfr] ?? 0) + 1;
-    }
-
-    return {
-      total_zwave_devices: nodes.length,
-      dead_count: dead.length,
-      dead_rate_pct: nodes.length > 0 ? Math.round((dead.length / nodes.length) * 1000) / 10 : 0,
-      unconfigured_count: unconfigured.length,
-      dead_devices: dead.map(d => ({
-        id: d.id,
-        name: d.name,
-        nodeId: d.properties.nodeId,
-        roomID: d.roomID,
-        roomName: roomNameById[d.roomID] ?? null,
-        deadReason: d.properties.deadReason || null,
-        zwaveCompany: d.properties.zwaveCompany || null
-      })),
-      unconfigured_devices: unconfigured.map(d => ({
-        id: d.id,
-        name: d.name,
-        nodeId: d.properties.nodeId,
-        roomID: d.roomID,
-        roomName: roomNameById[d.roomID] ?? null
-      })),
-      dead_by_room: deadByRoom,
-      dead_by_manufacturer: deadByManufacturer
-    };
-  }
-
-  private async getZwaveNodeDiagnostics(minOutgoingFailedPercent?: number, sortBy?: string): Promise<any> {
-    const [transmissions, devices, rooms] = await Promise.all([
-      this.hc3.request('/api/zwave/nodes/diagnostics/transmissions'),
-      this.hc3.request('/api/devices?interface=zwave'),
-      this.hc3.request('/api/rooms')
-    ]);
-
-    const roomNameById: Record<number, string> = {};
-    for (const r of rooms) roomNameById[r.id] = r.name;
-
-    const deviceByNodeId: Record<number, any> = {};
-    for (const d of devices as any[]) {
-      const nid = d?.properties?.nodeId;
-      if (nid !== undefined && deviceByNodeId[nid] === undefined) deviceByNodeId[nid] = d;
-    }
-
-    const items: any[] = (transmissions?.items as any[]) || [];
-    const enriched = items.map(n => {
-      const dev = deviceByNodeId[n.nodeId];
-      const incomingFailedTotal =
-        (n.incomingFailedUndefined || 0) +
-        (n.incomingFailedCrc || 0) +
-        (n.incomingFailedS0 || 0) +
-        (n.incomingFailedS2 || 0) +
-        (n.incomingFailedTransportService || 0) +
-        (n.incomingFailedMultiChannel || 0);
-      const outgoingFailedPercent = n.outgoingTotal > 0
-        ? Math.round((n.outgoingFailed / n.outgoingTotal) * 1000) / 10
-        : 0;
-      return {
-        nodeId: n.nodeId,
-        deviceName: dev?.name ?? null,
-        deviceId: dev?.id ?? null,
-        roomName: dev ? (roomNameById[dev.roomID] ?? null) : null,
-        zwaveCompany: dev?.properties?.zwaveCompany ?? null,
-        incomingTotal: n.incomingTotal,
-        incomingFailedTotal,
-        incomingFailedUndefined: n.incomingFailedUndefined,
-        incomingFailedCrc: n.incomingFailedCrc,
-        incomingFailedS0: n.incomingFailedS0,
-        incomingFailedS2: n.incomingFailedS2,
-        incomingFailedTransportService: n.incomingFailedTransportService,
-        incomingFailedMultiChannel: n.incomingFailedMultiChannel,
-        incomingNonceGet: n.incomingNonceGet,
-        incomingNonceReport: n.incomingNonceReport,
-        outgoingTotal: n.outgoingTotal,
-        outgoingFailed: n.outgoingFailed,
-        outgoingFailedPercent,
-        outgoingNonceGet: n.outgoingNonceGet,
-        outgoingNonceReport: n.outgoingNonceReport
-      };
-    });
-
-    const filtered = typeof minOutgoingFailedPercent === 'number'
-      ? enriched.filter(n => n.outgoingFailedPercent >= minOutgoingFailedPercent)
-      : enriched;
-
-    const sortKey = sortBy || 'outgoingFailedPercent';
-    const sorted = [...filtered].sort((a: any, b: any) => {
-      if (sortKey === 'nodeId') return a.nodeId - b.nodeId;
-      return (b[sortKey] ?? 0) - (a[sortKey] ?? 0);
-    });
-
-    return {
-      source: '/api/zwave/nodes/diagnostics/transmissions (undocumented)',
-      counters_are: 'cumulative since last controller reset',
-      node_count: sorted.length,
-      nodes: sorted
-    };
-  }
-
-  private async getDeviceParameters(deviceId: number): Promise<any> {
-    if (typeof deviceId !== 'number') {
-      throw new Error('get_device_parameters requires a numeric deviceId.');
-    }
-    const device: any = await this.hc3.request(`/api/devices/${deviceId}`);
-    const nodeId = device?.properties?.nodeId;
-    if (nodeId === undefined || nodeId === null) {
-      throw new Error(
-        `Device ${deviceId} (${device?.name}) has no Z-Wave nodeId; get_device_parameters only supports Z-Wave devices.`
-      );
-    }
-    const endpoint = device?.properties?.endPointId ?? 0;
-    const addr = `${nodeId}.${endpoint}`;
-    const encodedAddr = encodeURIComponent(addr);
-
-    const [valuesRes, templateRes] = await Promise.all([
-      this.hc3.request(`/api/zwave/configuration_parameters/${encodedAddr}`)
-        .catch((e: any) => ({ __error: String(e?.message ?? e) })),
-      this.hc3.request(`/api/zwave/parameters_templates/${encodedAddr}`)
-        .catch((e: any) => ({ __error: String(e?.message ?? e) }))
-    ]);
-
-    const values: any[] = Array.isArray((valuesRes as any)?.items) ? (valuesRes as any).items : [];
-    const templateParams: any[] = Array.isArray((templateRes as any)?.parameters) ? (templateRes as any).parameters : [];
-    const templateByNumber = new Map<number, any>(
-      templateParams.map(p => [p.parameterNumber, p])
-    );
-
-    const pickEn = (localised: any): string | null => {
-      if (typeof localised === 'string') return localised;
-      if (localised && typeof localised === 'object') return localised.en ?? null;
-      return null;
-    };
-
-    const merged = values.map(v => {
-      const tpl = templateByNumber.get(v.parameterNumber) ?? {};
-      return {
-        parameterNumber: v.parameterNumber,
-        value: v.configurationValue,
-        size: v.size,
-        source: v.source?.type ?? null,
-        label: pickEn(tpl.label),
-        description: pickEn(tpl.description),
-        defaultValue: tpl.defaultValue ?? null,
-        format: tpl.format ?? null
-      };
-    });
-
-    const storedOnly = values.every(v => v.source?.type === 'template');
-
-    return {
-      deviceId,
-      deviceName: device?.name ?? null,
-      nodeId,
-      endpoint,
-      addr,
-      productType: (templateRes as any)?.description ?? null,
-      parameters: merged,
-      provenance_note:
-        'Values are from HC3\'s stored-values layer, normally populated when the device was configured ' +
-        'via HC3\'s native Z-Wave path (the HC3 UI, which transmits). In normal operation they match ' +
-        'the physical device. HC3 5.x cannot re-verify them over REST on demand — the mesh read-back ' +
-        'path is not-implemented on this firmware — so treat the values as "almost certainly correct, ' +
-        'not programmatically re-provable". Drift from physical reality only occurs if the device was ' +
-        'physically reset, a different controller reached it, or someone used the PUT ' +
-        '/api/devices/{id} {properties: {parameters:[...]}} path (cache-only — modify_device rejects ' +
-        'this for the same reason). `source: "template"` on a parameter means "stored in HC3\'s ' +
-        'template-backed storage", NOT "this is the catalogue default". Empirically, parameters with ' +
-        'non-default values still carry source "template".',
-      all_values_are_hc3_stored: storedOnly
-    };
-  }
-
-  private async getZwaveReconfigurationTasks(): Promise<any> {
-    const [tasks, devices, rooms] = await Promise.all([
-      this.hc3.request('/api/zwaveReconfigurationTasks'),
-      this.hc3.request('/api/devices?interface=zwave'),
-      this.hc3.request('/api/rooms')
-    ]);
-
-    const roomNameById: Record<number, string> = {};
-    for (const r of rooms) roomNameById[r.id] = r.name;
-
-    const roomIdByDeviceId: Record<number, number> = {};
-    for (const d of devices as any[]) {
-      if (d?.id !== undefined && d?.roomID !== undefined) roomIdByDeviceId[d.id] = d.roomID;
-    }
-
-    const items: any[] = Array.isArray(tasks) ? tasks : [];
-    const enriched = items.map((t: any) => {
-      const roomId = roomIdByDeviceId[t.deviceId];
-      const children: any[] = Array.isArray(t.childDevices) ? t.childDevices : [];
-      return {
-        id: t.id,
-        status: t.status,
-        deviceId: t.deviceId,
-        deviceName: t.name ?? null,
-        roomName: roomId !== undefined ? (roomNameById[roomId] ?? null) : null,
-        nodeId: t.nodeId,
-        softReconfiguration: t.softReconfiguration,
-        battery: t.battery,
-        remoteGateway: t.remoteGateway || null,
-        childDeviceCount: children.length,
-        childDeviceNames: children.map(c => c?.data?.name).filter((n: any) => typeof n === 'string').slice(0, 20)
-      };
-    });
-
-    return {
-      source: '/api/zwaveReconfigurationTasks (undocumented)',
-      task_count: enriched.length,
-      tasks: enriched
-    };
-  }
-
-  private async getRefreshStates(args: { last?: number }): Promise<any> {
-    const last = typeof args?.last === 'number' ? args.last : 0;
-    return await this.hc3.request(`/api/refreshStates?last=${last}&lang=en`);
-  }
-
-  private async getEventHistory(
-    limit?: number,
-    eventType?: string,
-    objectId?: number,
-    objectType?: string,
-    sinceTimestamp?: number
-  ): Promise<any> {
-    const cappedLimit = Math.min(limit ?? 30, 1000);
-    const params = new URLSearchParams();
-    params.set('numberOfRecords', String(cappedLimit));
-    if (eventType) params.set('eventType', eventType);
-    if (objectId !== undefined) params.set('objectId', String(objectId));
-    if (objectType) params.set('objectType', objectType);
-    const events: any[] = await this.hc3.request(`/api/events/history?${params.toString()}`);
-    if (sinceTimestamp !== undefined) {
-      return events.filter(e => (e?.timestamp ?? 0) >= sinceTimestamp);
-    }
-    return events;
-  }
-
-  // Weather Methods
-  private async getWeather(): Promise<any> {
-    return await this.hc3.request('/api/weather');
-  }
-
-  // Home Status Methods
-  private async getHomeStatus(): Promise<any> {
-    return await this.hc3.request('/api/panels/location');
-  }
-
-  private async setHomeStatus(args: { status: string }): Promise<any> {
-    const validModes = ['Home', 'Away', 'Night', 'Vacation'];
-    if (!validModes.includes(args.status)) {
-      throw new Error(`set_home_status: invalid status '${args.status}'. Must be one of: ${validModes.join(', ')}.`);
-    }
-    await this.hc3.request('/api/panels/location', 'PUT', { mode: args.status });
-    return `Home status set to '${args.status}' successfully.`;
-  }
-
-  // Location Management Methods
-  private async getLocationInfo(): Promise<any> {
-    return await this.hc3.request('/api/panels/location');
-  }
-
-  private async updateLocationSettings(args: {
-    locationId: number;
-    fields: Record<string, any>;
-  }): Promise<any> {
-    const { locationId, fields } = args;
-
-    if (!fields || Object.keys(fields).length === 0) {
-      throw new Error(
-        'update_location_settings requires fields with at least one key.'
-      );
-    }
-
-    const readOnly = ['id', 'created', 'modified'];
-    const submittedReadOnly = Object.keys(fields).filter(k => readOnly.includes(k));
-    if (submittedReadOnly.length > 0) {
-      throw new Error(
-        `update_location_settings cannot change read-only fields: ${submittedReadOnly.join(', ')}.`
-      );
-    }
-
-    const current = await this.hc3.request(`/api/panels/location/${locationId}`);
-    const merged = this.deepMerge(current, fields);
-    await this.hc3.request(`/api/panels/location/${locationId}`, 'PUT', merged);
-    const after = await this.hc3.request(`/api/panels/location/${locationId}`);
-    this.verifyWrite(fields, undefined, after, `location ${locationId}`);
-
-    return {
-      locationId,
-      submitted: { fields },
-      verified: true
-    };
-  }
-
 
   // HC3 Documentation & Programming Context Methods
   private async getHC3ConfigurationGuide(args: any): Promise<any> {
