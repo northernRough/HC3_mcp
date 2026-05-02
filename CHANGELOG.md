@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.5.0] - 2026-05-02
+
+### Added
+- **`audit_id_references`** — find every place a device id is referenced across the entire HC3 controller. Walks every QuickApp source file, every Lua/scenario scene's actions and conditions, every JSON (block-editor) scene's nested action tree, and every global variable's stored value. Returns a structured list of hits with the source surface, line number (where applicable), and a 120-char snippet centred on the match.
+
+  Universal HC3 question: *"if I delete or replace this device, what breaks?"* Inputs: `deviceId` or `name` (resolves to one or more ids), optional `includeChildren` (default `true` — also audits child devices of a parent), optional `includeComments` (default `false` — by default skips Lua comment lines). Whole-word regex matching (`\b<id>\b`) so `2494` doesn't match `24941`.
+
+  Cost-aware: each call fetches every QA file + scene + global on the controller; expect 30-90s on a typical install. Hard cap of 5 MB total content scanned; beyond that, response carries `truncated: true` plus a partial result. Stateless — does not mutate HC3 or local files.
+
+  Lives in the new `src/mcp/tools/audit.ts` module. Future audit-family tools (`audit_qa_devices`, etc.) will be added to the same module.
+
 ## [3.4.1] - 2026-05-02
 
 ### Fixed

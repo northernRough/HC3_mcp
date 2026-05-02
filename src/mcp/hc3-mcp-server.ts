@@ -38,8 +38,9 @@ import { zwave, zwaveSchemas } from './tools/zwave';
 import { snapshot } from './tools/snapshot';
 import { docs } from './tools/docs';
 import { plugins } from './tools/plugins';
+import { audit } from './tools/audit';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, docs, plugins];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
 
 class HC3MCPServer {
@@ -109,7 +110,7 @@ class HC3MCPServer {
         },
         serverInfo: {
           name: 'hc3-mcp-server',
-          version: '3.4.1',
+          version: '3.5.0',
         },
       },
     };
@@ -187,6 +188,8 @@ class HC3MCPServer {
       ...plugins.schemas,
       deleteDeviceSchema,
       deleteGlobalVariableSchema,
+
+      ...audit.schemas,
     ];
 
     return {
