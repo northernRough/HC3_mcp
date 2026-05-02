@@ -1,19 +1,59 @@
 // User-management tools.
 //
-// Note: this module owns the get_users and update_user_rights handlers
-// only. Schemas stay inline in handleListTools because they are not
-// adjacent in the legacy tools/list ordering (update_user_rights sits
-// between get_energy_data and the globals cluster, get_users is a
-// singleton between the globals cluster and snapshot). Order is preserved
-// byte-for-byte in tools/list.
+// Schemas are exposed as `usersSchemas.update_user_rights` /
+// `usersSchemas.get_users` because the legacy tools/list ordering
+// places them at non-adjacent positions (update_user_rights between
+// get_energy_data and the globals cluster, get_users between globals
+// and snapshot). The server references each at its tools/list slot.
 
 import { ToolModule } from './registry';
+import { MCPTool } from '../types';
 import { deepMerge, deepEqual } from '../util';
 
+export const usersSchemas: Record<string, MCPTool> = {
+  update_user_rights:
+      {
+        name: 'update_user_rights',
+        description: 'Update a user\'s access rights (devices / scenes / climateZones / profiles / alarmPartitions) via PUT /api/users/{id}. Follows the standard read-modify-write + post-write-verify pattern: reads the full user record, deep-merges the submitted rights.* subkeys onto the current, and full-array-replaces the leaf arrays (devices, rooms, sections, scenes, zones, etc.) — same HC3 PUT semantics as other array-valued properties. Verifies every submitted array member is present after the write. SAFETY: rejects writes to rights.advanced.* unless allow_advanced_rights=true (17 sensitive subkeys including zWave, backup, access, update — unauthorised access here is a privilege-escalation footgun). Rejects any rights.*.all=true (mass-grant "oops I gave everyone access") unless allow_grant_all=true. Rejects writes targeting superuser-type users (their rights are already all-true by design; any state change there breaks admin access).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            userId: {
+              type: 'number',
+              description: 'HC3 user id (from get_users). Must be a non-superuser.'
+            },
+            rights: {
+              type: 'object',
+              description: 'Partial rights object. Only submitted subkeys are modified; unsubmitted subkeys (scenes, climateZones, etc.) are preserved untouched. Array-valued leaves (rights.devices.devices, rights.devices.rooms, rights.scenes.scenes, etc.) fully replace the current array.'
+            },
+            allow_advanced_rights: {
+              type: 'boolean',
+              description: 'Required to write rights.advanced.* (admin / zwave / backup / update / access / alarm / climate etc.). Defaults false.'
+            },
+            allow_grant_all: {
+              type: 'boolean',
+              description: 'Required to set rights.<category>.all = true (mass grant). Defaults false.'
+            }
+          },
+          required: ['userId', 'rights']
+        }
+      },
+  get_users:
+      {
+        name: 'get_users',
+        description: 'Get all users configured in the HC3 system',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+};
+
 export const users: ToolModule = {
-  schemas: [],
+  schemas: Object.values(usersSchemas),
 
   handlers: {
+
     async get_users(hc3): Promise<any> {
       return await hc3.request('/api/users');
     },

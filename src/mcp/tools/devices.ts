@@ -4,14 +4,41 @@
 // of HC3 silent-write traps, and delete_device with Z-Wave / cascade /
 // system-id guards.
 //
-// Note: the delete_device schema currently sits inline at the legacy
-// "deletes" cluster (delete_device / delete_global_variable /
-// delete_plugin) at the tools/list tail to preserve byte-equivalent
-// ordering. This module exports only the 9 cluster schemas; the handler
-// for delete_device is dispatched here via the registry.
+// `devices.schemas` is the contiguous 9-tool cluster spread by
+// handleListTools. The 10th tool's schema (`delete_device`) lives at
+// the legacy tools/list tail with delete_global_variable and
+// delete_plugin and is exported separately as `deleteDeviceSchema`
+// so the server can reference it at that slot. The handler for
+// delete_device is part of `devices.handlers` and dispatches via
+// the registry.
 
 import { ToolModule } from './registry';
+import { MCPTool } from '../types';
 import { verifyWrite } from '../util';
+
+export const deleteDeviceSchema: MCPTool =
+      {
+        name: "delete_device",
+        description: "Delete a single device by id via DELETE /api/devices/{id}. Intended for QuickApps and explicitly-installed plugins. Guards: (1) refuses ids < 10 (reserved HC3 system devices); (2) reads the device first to inspect interfaces + children; (3) refuses Z-Wave devices (interfaces includes 'zwave' with no quickApp) unless allow_physical=true — the REST delete does not perform a proper Z-Wave exclusion, leaving the mesh with a ghost node entry; exclude via the HC3 Web UI for Z-Wave hardware; (4) refuses devices with children unless cascade=true, listing them in the rejection so the caller knows the blast radius. Post-delete verifies by refetch (expects HTTP 404).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "HC3 device id to delete. Must be >= 10."
+            },
+            cascade: {
+              type: "boolean",
+              description: "Allow deletion even when the device has children (children are deleted with it). Defaults false."
+            },
+            allow_physical: {
+              type: "boolean",
+              description: "Allow deletion of Z-Wave physical devices via REST. Defaults false — REST delete skips mesh exclusion."
+            }
+          },
+          required: ["deviceId"]
+        }
+      };
 
 export const devices: ToolModule = {
   schemas: [
