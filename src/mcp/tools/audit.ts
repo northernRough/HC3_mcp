@@ -178,6 +178,50 @@ export const audit: ToolModule = {
         required: ['deviceId'],
       },
     },
+    {
+      name: 'introspect_device_group',
+      description:
+        'Take a numeric Devices.X.Y = { foo = 1234, bar = 5678 } group inside a QA file ' +
+        'and return a structured snapshot of the live state behind each id (name, type, ' +
+        'parentId, endPointId from /api/devices/{id}). Useful for documenting a group, ' +
+        'diffing it against the snapshot tree, or confirming it is still pointing at the ' +
+        'right devices after a Z-Wave re-inclusion. Auto-detects whether the group is ' +
+        'endpoint-mode (all entries share a common parentId; each entry is a channel of one ' +
+        'physical device, ep numbers are captured) or flat (independent devices, no shared ' +
+        'parent). v1 supports json and markdown-table outputs; bind-lua and yaml are ' +
+        'planned for a follow-up. Stateless; does not modify HC3 or local files.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          deviceId: {
+            type: 'number',
+            description: 'QA device id whose file will be read. Must be a QuickApp.',
+          },
+          fileName: {
+            type: 'string',
+            description: 'File containing the group definition. Default "config".',
+            default: 'config',
+          },
+          groupPath: {
+            type: 'string',
+            description: 'Dotted path to the group (last segment is the table being introspected). Example: "Devices.Mae.ensuiteRGBW". The Lua-source parser navigates the path using brace-balanced search; non-trivial paths with shadowed leaf names may resolve to the first match — disambiguate by passing a more specific path in that case.',
+          },
+          outputFormat: {
+            type: 'string',
+            enum: ['json', 'markdown-table'],
+            description: 'Output shape. json: canonical machine-readable record. markdown-table: H2 heading, parent line (if endpoint mode), and a markdown table of entries. Default json.',
+            default: 'json',
+          },
+          mode: {
+            type: 'string',
+            enum: ['auto', 'flat', 'endpoint'],
+            description: 'Force a particular mode rather than auto-detect. Default auto: endpoint if all entries share a common parentId, flat otherwise.',
+            default: 'auto',
+          },
+        },
+        required: ['deviceId', 'groupPath'],
+      },
+    },
   ],
 
   handlers: {
@@ -614,6 +658,220 @@ export const audit: ToolModule = {
         },
         issues,
         parseErrors: [],
+      };
+    },
+
+    async introspect_device_group(
+      hc3,
+      args: {
+        deviceId: number;
+        fileName?: string;
+        groupPath: string;
+        outputFormat?: 'json' | 'markdown-table';
+        mode?: 'auto' | 'flat' | 'endpoint';
+      },
+    ): Promise<any> {
+      if (typeof args?.deviceId !== 'number') throw new Error('deviceId is required.');
+      if (typeof args?.groupPath !== 'string' || !args.groupPath.includes('.')) {
+        throw new Error('groupPath is required and must be a dotted path (e.g. "Devices.Mae.ensuiteRGBW").');
+      }
+      const fileName = args.fileName ?? 'config';
+      const outputFormat = args.outputFormat ?? 'json';
+      const mode = args.mode ?? 'auto';
+
+      // 1. Confirm target is a QA, fetch the file content.
+      const dev = await hc3.request(`/api/devices/${args.deviceId}`) as any;
+      const isQA = Array.isArray(dev?.interfaces) && dev.interfaces.includes('quickApp');
+      if (!isQA) {
+        throw new Error(
+          `Device ${args.deviceId} is not a QuickApp; introspect_device_group operates on QA source files.`,
+        );
+      }
+      const file = await hc3.request(
+        `/api/quickApp/${args.deviceId}/files/${encodeURIComponent(fileName)}`,
+      ) as any;
+      const content: string = typeof file?.content === 'string' ? file.content : '';
+      if (!content) {
+        throw new Error(`File '${fileName}' on QA ${args.deviceId} is empty or missing.`);
+      }
+
+      // 2. Locate the group's body. Walk the dotted path properly so a
+      // shadowed leaf name (multiple `ensuiteRGBW = {` blocks under
+      // different parents) resolves to the correct one.
+      //
+      // Strategy: try the longest path prefix as a top-level Lua assignment
+      // ("Devices.Mae = {" matches that exact phrasing). Once a prefix
+      // matches and brace-balanced scanning gives us its body, descend into
+      // the body looking for each remaining segment as a nested key.
+      const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const findBalancedOpen = (haystack: string, regex: RegExp): { openIndex: number; closeIndex: number } | null => {
+        const m2 = regex.exec(haystack);
+        if (!m2) return null;
+        const openIndex = m2.index + m2[0].length - 1; // index of the `{`
+        let depth = 1;
+        for (let i = openIndex + 1; i < haystack.length; i++) {
+          const c = haystack[i];
+          if (c === '{') depth++;
+          else if (c === '}') {
+            depth--;
+            if (depth === 0) return { openIndex, closeIndex: i };
+          }
+        }
+        return null;
+      };
+
+      const segments = args.groupPath.split('.').filter(s => s.length > 0);
+      let body: string | null = null;
+      // Try each prefix from longest to shortest.
+      for (let prefixLen = segments.length; prefixLen >= 1; prefixLen--) {
+        const prefix = segments.slice(0, prefixLen).join('.');
+        const prefixRegex = new RegExp(`(?:^|[^\\w.])${reEsc(prefix)}\\s*=\\s*\\{`);
+        const found = findBalancedOpen(content, prefixRegex);
+        if (!found) continue;
+        let cursor = content.slice(found.openIndex + 1, found.closeIndex);
+        // Descend into remaining segments.
+        let descentOk = true;
+        for (let s = prefixLen; s < segments.length; s++) {
+          const key = segments[s];
+          const keyRegex = new RegExp(`\\b${reEsc(key)}\\s*=\\s*\\{`);
+          const nested = findBalancedOpen(cursor, keyRegex);
+          if (!nested) { descentOk = false; break; }
+          cursor = cursor.slice(nested.openIndex + 1, nested.closeIndex);
+        }
+        if (descentOk) { body = cursor; break; }
+      }
+      if (body === null) {
+        // Check whether the path resolves to a bind(...) descriptor — those
+        // already carry the live-state shape and don't need introspection.
+        const leaf = segments[segments.length - 1];
+        const bindRegex = new RegExp(`\\b${reEsc(leaf)}\\s*=\\s*bind\\s*\\(`);
+        if (bindRegex.test(content)) {
+          throw new Error(
+            `Path '${args.groupPath}' resolves to a bind(...) descriptor in '${fileName}', not a numeric { field = id } table. bind() blocks already carry name/type/ep alongside each id, so introspecting them adds nothing — use the descriptor directly. introspect_device_group is for the legacy numeric-table form.`,
+          );
+        }
+        throw new Error(
+          `Could not navigate path '${args.groupPath}' in QA ${args.deviceId} file '${fileName}'. Tried each prefix from longest to shortest; none resolved to a table assignment with the remaining segments as nested keys.`,
+        );
+      }
+
+      // 3. Parse `field = id, ...` pairs from the body.
+      // Tolerate trailing commas, end-of-line comments, whitespace.
+      // Skip nested tables — if the leaf has them, the entries with `{...}`
+      // values get a parseError entry rather than failing the whole call.
+      type Entry = { field: string; id: number; live?: any };
+      const entries: Entry[] = [];
+      const parseErrors: Array<{ field: string; reason: string; raw: string }> = [];
+      const pairRegex = /(\w+)\s*=\s*([^,\n]+?)(?:,|$|\n)/g;
+      let pm;
+      while ((pm = pairRegex.exec(body)) !== null) {
+        const field = pm[1];
+        const rawValue = pm[2].trim().replace(/--.*$/, '').trim();
+        // Numeric literal? capture as id.
+        const num = /^(\d+)$/.exec(rawValue);
+        if (num) {
+          entries.push({ field, id: parseInt(num[1], 10) });
+        } else if (/^\{/.test(rawValue)) {
+          parseErrors.push({ field, reason: 'nested-table', raw: rawValue.slice(0, 60) });
+        } else if (rawValue.length === 0) {
+          // skip empty values (likely from a trailing-comma artefact)
+        } else {
+          parseErrors.push({ field, reason: 'non-numeric', raw: rawValue.slice(0, 60) });
+        }
+      }
+      if (entries.length === 0 && parseErrors.length === 0) {
+        throw new Error(
+          `Group '${args.groupPath}' in '${fileName}' parsed but contained no numeric field=id pairs. Body was: ${body.trim().slice(0, 200)}`,
+        );
+      }
+
+      // 4. Resolve each id to live HC3 device record.
+      for (const e of entries) {
+        try {
+          e.live = await hc3.request(`/api/devices/${e.id}`);
+        } catch {
+          e.live = null;
+        }
+      }
+
+      // 5. Decide mode (flat vs endpoint).
+      const parentIds = new Set<number>();
+      for (const e of entries) {
+        const pid = e.live?.parentId;
+        if (typeof pid === 'number' && pid > 0) parentIds.add(pid);
+      }
+      const detectedMode: 'flat' | 'endpoint' =
+        mode === 'flat' ? 'flat'
+        : mode === 'endpoint' ? 'endpoint'
+        : (parentIds.size === 1 && entries.length > 1) ? 'endpoint' : 'flat';
+
+      // 6. Capture parent if endpoint mode.
+      let parent: { id: number; name?: string; type?: string } | null = null;
+      if (detectedMode === 'endpoint' && parentIds.size === 1) {
+        const parentId = [...parentIds][0];
+        try {
+          const p = await hc3.request(`/api/devices/${parentId}`) as any;
+          parent = { id: parentId, name: p?.name, type: p?.type };
+        } catch {
+          parent = { id: parentId };
+        }
+      }
+
+      // 7. Build the canonical entry list.
+      const canonicalEntries = entries.map(e => {
+        const live = e.live;
+        const out: any = { field: e.field, id: e.id };
+        if (detectedMode === 'endpoint' && live?.parentId === parent?.id) {
+          if (typeof live?.properties?.endPointId === 'number') {
+            out.ep = live.properties.endPointId;
+          } else if (typeof live?.endPointId === 'number') {
+            out.ep = live.endPointId;
+          }
+        }
+        out.name = live?.name;
+        out.type = live?.type;
+        return out;
+      });
+
+      // 8. Render in requested format.
+      if (outputFormat === 'markdown-table') {
+        const lines: string[] = [];
+        lines.push(`## ${args.groupPath}`);
+        lines.push('');
+        if (parent) {
+          lines.push(`Parent: **${parent.name ?? '(unknown)'}** (id ${parent.id}, ${parent.type ?? '(unknown type)'})`);
+          lines.push('');
+          lines.push('| Field | id | ep | Name | Type |');
+          lines.push('|-------|----|----|------|------|');
+          for (const e of canonicalEntries) {
+            lines.push(`| ${e.field} | ${e.id} | ${e.ep ?? ''} | ${e.name ?? ''} | ${e.type ?? ''} |`);
+          }
+        } else {
+          lines.push('Flat group (no shared parent detected).');
+          lines.push('');
+          lines.push('| Field | id | Name | Type |');
+          lines.push('|-------|----|------|------|');
+          for (const e of canonicalEntries) {
+            lines.push(`| ${e.field} | ${e.id} | ${e.name ?? ''} | ${e.type ?? ''} |`);
+          }
+        }
+        return {
+          groupPath: args.groupPath,
+          detectedMode,
+          markdown: lines.join('\n'),
+          parent,
+          entries: canonicalEntries,
+          parseErrors,
+        };
+      }
+
+      // json (default)
+      return {
+        groupPath: args.groupPath,
+        detectedMode,
+        parent,
+        entries: canonicalEntries,
+        parseErrors,
       };
     },
   },

@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.1.0] - 2026-05-02
+
+### Added
+- **`introspect_device_group`** — take a numeric `Devices.X.Y = { foo = 1234, bar = 5678 }` group inside a QA file and return a structured snapshot of the live state behind each id (name, type, parentId, endPointId from `/api/devices/{id}`). Auto-detects whether the group is endpoint-mode (all entries share a common parentId; each entry is a channel of one physical device, ep numbers captured) or flat (independent devices). Output formats: `json` (canonical, default) and `markdown-table` (h2 heading, parent line if endpoint mode, markdown table of entries — directly pasteable into a doc). Stateless; does not modify HC3 or local files.
+
+  Lua-source navigation: brace-balanced search for the leaf table-key in the dotted path. Tolerates trailing commas, end-of-line comments, whitespace; nested-table or computed-expression entries surface as `parseErrors` rather than failing the whole call. Limitation: shadowed leaf names (multiple `<name> = {` blocks in the file) resolve to the first match — pass a more specific path if disambiguation matters.
+
+  Lives in the existing `src/mcp/tools/audit.ts` module alongside `audit_id_references` (3.5.0) and `audit_qa_devices` (3.6.0). Future patch will add `bind-lua` and `yaml` output formats.
+
 ## [4.0.0] - 2026-05-02
 
 ### BREAKING
