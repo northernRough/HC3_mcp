@@ -351,11 +351,27 @@ export const quickapps: ToolModule = {
 
   handlers: {
     async get_quickapps(hc3): Promise<any> {
-      return await hc3.request('/api/quickApp/');
+      // /api/quickApp/ returns HTTP 501 on current firmware (5.20x) — same
+      // dead-endpoint cluster as /api/info, /api/firmware, /api/energy.
+      // Enumerate via /api/devices?interface=quickApp instead. Returned shape
+      // is the canonical /api/devices record, with QAs identified by the
+      // "quickApp" interface entry.
+      return await hc3.request('/api/devices?interface=quickApp');
     },
 
     async get_quickapp(hc3, args: { quickAppId: number }): Promise<any> {
-      return await hc3.request(`/api/quickApp/${args.quickAppId}`);
+      // /api/quickApp/{id} returns HTTP 501 on current firmware (5.20x).
+      // Use /api/devices/{id} which carries the same data; sanity-check the
+      // device is actually a QuickApp before returning so callers don't get
+      // a silent non-QA device back when they pass a bad id.
+      const dev = await hc3.request(`/api/devices/${args.quickAppId}`) as any;
+      const isQA = Array.isArray(dev?.interfaces) && dev.interfaces.includes('quickApp');
+      if (!isQA) {
+        throw new Error(
+          `Device ${args.quickAppId} exists but is not a QuickApp (its interfaces do not include 'quickApp'). Use get_quickapps to list QuickApp devices, or get_device_info if you wanted a non-QA device record.`,
+        );
+      }
+      return dev;
     },
 
     async restart_quickapp(hc3, args: { quickAppId: number }): Promise<any> {

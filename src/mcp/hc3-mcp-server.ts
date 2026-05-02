@@ -110,7 +110,7 @@ class HC3MCPServer {
         },
         serverInfo: {
           name: 'hc3-mcp-server',
-          version: '3.5.0',
+          version: '3.5.1',
         },
       },
     };

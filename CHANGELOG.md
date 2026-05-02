@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.5.1] - 2026-05-02
+
+### Fixed
+- **`get_quickapps` and `get_quickapp` repaired.** Both tools called endpoints that return HTTP 501 on current firmware (5.20x): `GET /api/quickApp/` for the list, `GET /api/quickApp/{id}` for a single QA. Aside-discovered while building `audit_id_references` (3.5.0) — the same dead-endpoint pattern as the `get_energy_data` regression fixed in 3.4.1.
+
+  Replacements use the canonical `/api/devices` family which works on current firmware:
+  - `get_quickapps` → `GET /api/devices?interface=quickApp` returns the same QA list (filtered to devices whose `interfaces` array contains `"quickApp"`).
+  - `get_quickapp` → `GET /api/devices/{id}` plus a sanity check that the returned device's `interfaces` includes `"quickApp"`. If the id resolves to a non-QA device, the tool throws a precise error pointing at `get_device_info` for non-QA records — better than the original endpoint which would have errored without explanation.
+
+  The `/api/quickApp/{id}/files...` family (file CRUD) still works on current firmware and is untouched. Only the bare-id forms are dead.
+
+### Notes
+- Kept the dead-endpoint catalogue growing: the count is now 8 confirmed dead endpoints (`/api/energy`, `/api/energy/{id}`, `/api/quickApp/`, `/api/quickApp/{id}`, `/api/info`, `/api/firmware`, `/api/firmware/v1/status`, `/api/eventsHistory`, `/api/panels/event`). The forthcoming `docs/known-dead-endpoints` patch will document them all in one place.
+
 ## [3.5.0] - 2026-05-02
 
 ### Added
