@@ -2,6 +2,40 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [3.4.0] - 2026-05-02
+
+### Changed (internal — no behaviour change)
+- **Modularised `src/mcp/hc3-mcp-server.ts`.** The single 7,330-line class that owned every transport, schema, dispatch arm, and handler was split into a 244-line orchestrator plus 23 per-domain tool modules under `src/mcp/tools/`, with shared helpers in `src/mcp/util.ts` (`deepEqual` / `deepMerge` / `verifyWrite` / `tolerantFetch`), the MCP envelope types in `src/mcp/types.ts`, the HC3 REST client in `src/mcp/hc3-client.ts`, and the two transports in `src/mcp/transport/{stdio,http}.ts`. The four HC3 documentation/programming guides moved earlier (3.3.x development) to `src/mcp/docs/*` and now feed `src/mcp/tools/docs.ts`.
+
+  Every commit in the 12-step series was byte-preserving: `tools/list` JSON output and the four `get_hc3_*_guide` tool responses are sha256-identical to 3.3.1 across all 39 documented test cases. Every guard message (control_device's setVariable rejection, modify_device's quickAppVariables/parameters/associations rejection, delete_device's Z-Wave/cascade/<10 guards, set_quickapp_variable type coercion + verify, delete_plugin bulk guard, set_home_status mode whitelist, update_user_rights privilege-escalation guard, etc.) was live-checked at every PR boundary.
+
+  New patterns introduced:
+  - **Tool registry** (`src/mcp/tools/registry.ts`): each domain module exports `{schemas, handlers}`. `mergeHandlers` collects them at boot. `handleCallTool` is a 4-line direct dispatch with an explicit `Unknown tool` throw — the legacy ~125-arm switch is gone.
+  - **Named-record schemas** (`<module>Schemas: Record<string, MCPTool>`) for domains whose tools are non-contiguous in the legacy `tools/list` ordering (system/zwave interleave; the deletes cluster at the tail; user tools sandwiched around globals). Each schema is referenced by name at its exact slot to preserve byte-identical ordering.
+  - **Snapshot scripts** (`scripts/snapshot-doc-tools.mjs`, `scripts/snapshot-tools-list.mjs`) committed in the first PR as durable regression checks. The same `ddf8f9c5…` and `6342a6a4…` SHAs hold across all 12 PRs.
+
+### Fixed
+- **`get_zwave_node_diagnostics` arg name mismatch (pre-existing).** The tool's input schema declared `min_outgoing_failed_percent` and `sort_by` (snake_case), but the legacy in-class method took camelCase positional arguments — with the dispatch case arm doing the snake→positional mapping. The new module handler reads snake_case directly from `args`. Behaviour from a caller's perspective is identical (the schema was always the wire contract); the bug was that the legacy method's parameter names didn't match the schema's field names, which would have surfaced if anyone hand-rolled a different dispatch path. Fixed in PR #10 of the modularisation series and verified live.
+
+### Final layout
+```
+src/mcp/
+├── hc3-mcp-server.ts        244 lines  (was 7,330 — 97% reduction)
+├── types.ts                  31
+├── hc3-client.ts             89
+├── util.ts                  126
+├── transport/{stdio,http}.ts
+├── docs/{configuration,quickapp-programming,lua-scenes,programming-examples}.ts
+└── tools/                    23 modules covering all 129 tools
+    ├── registry.ts
+    ├── alarm.ts        backups.ts      climate.ts       customEvents.ts
+    ├── debug.ts        devices.ts      docs.ts          globals.ts
+    ├── icons.ts        intelligence.ts ios.ts           notifications.ts
+    ├── plugins.ts      profiles.ts     quickapps.ts     rooms.ts
+    ├── scenes.ts       snapshot.ts     sprinklers.ts    system.ts
+    └── users.ts        zwave.ts
+```
+
 ## [3.3.1] - 2026-04-27
 
 ### Fixed
