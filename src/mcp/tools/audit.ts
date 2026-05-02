@@ -216,8 +216,8 @@ export const audit: ToolModule = {
           },
           outputFormat: {
             type: 'string',
-            enum: ['json', 'markdown-table'],
-            description: 'Output shape. json: canonical machine-readable record. markdown-table: H2 heading, parent line (if endpoint mode), and a markdown table of entries. Default json.',
+            enum: ['json', 'markdown-table', 'bind-lua', 'yaml'],
+            description: 'Output shape. json: canonical machine-readable record (default). markdown-table: H2 heading, parent line (if endpoint mode), and a markdown table — pasteable into a doc. bind-lua: ready-to-paste Lua bind("RoleStem", { ... }) descriptor block matching the SceneManager bind() pattern; the role stem is the groupPath with any leading "Devices." stripped. yaml: a YAML document mirroring the json shape. Default json.',
             default: 'json',
           },
           mode: {
@@ -225,6 +225,11 @@ export const audit: ToolModule = {
             enum: ['auto', 'flat', 'endpoint'],
             description: 'Force a particular mode rather than auto-detect. Default auto: endpoint if all entries share a common parentId, flat otherwise.',
             default: 'auto',
+          },
+          lockNameForControllers: {
+            type: 'boolean',
+            description: 'Only relevant for bind-lua output. If true (default), set lockName = true on entries whose type matches *FGRGBW442CC (RGBW master controllers — their name must not drift, or downstream channels lose their controller reference). Set false to omit the flag.',
+            default: true,
           },
         },
         required: ['deviceId', 'groupPath'],
@@ -684,7 +689,8 @@ export const audit: ToolModule = {
         deviceId: number;
         fileName?: string;
         groupPath: string;
-        outputFormat?: 'json' | 'markdown-table';
+        outputFormat?: 'json' | 'markdown-table' | 'bind-lua' | 'yaml';
+        lockNameForControllers?: boolean;
         mode?: 'auto' | 'flat' | 'endpoint';
       },
     ): Promise<any> {
@@ -876,6 +882,95 @@ export const audit: ToolModule = {
           groupPath: args.groupPath,
           detectedMode,
           markdown: lines.join('\n'),
+          parent,
+          entries: canonicalEntries,
+          parseErrors,
+        };
+      }
+
+      if (outputFormat === 'bind-lua') {
+        // Pretty-aligned bind() descriptor block, ready to paste into a QA's
+        // config.lua. The role stem is the groupPath with any leading
+        // "Devices." stripped.
+        const lockController = args.lockNameForControllers !== false;
+        const roleStem = args.groupPath.replace(/^Devices\./, '');
+        const luaEsc = (s: string | undefined): string => {
+          if (s === undefined) return '';
+          return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        };
+        const fieldWidth = Math.max(...['parent', ...canonicalEntries.map(e => e.field)].map(f => f.length));
+        const pad = (f: string) => f + ' '.repeat(Math.max(0, fieldWidth - f.length));
+        const localWarnings: string[] = [];
+        const lines: string[] = [];
+        lines.push(`${args.groupPath} = bind("${luaEsc(roleStem)}", {`);
+        if (parent) {
+          lines.push(`    ${pad('parent')} = { id = ${parent.id}, name = "${luaEsc(parent.name)}", type = "${luaEsc(parent.type)}" },`);
+        }
+        for (const e of canonicalEntries) {
+          const epPart = e.ep !== undefined ? `, ep = ${e.ep}` : '';
+          const isController = lockController && typeof e.type === 'string' && /FGRGBW442CC$/.test(e.type);
+          const lockPart = isController ? ', lockName = true' : '';
+          if (isController) {
+            localWarnings.push(`Field '${e.field}' is FGRGBW442CC; lockName=true added (use lockNameForControllers=false to disable).`);
+          }
+          if (typeof e.name === 'string' && /[&"\\]/.test(e.name)) {
+            localWarnings.push(`Field '${e.field}' name contains ${e.name.includes('&') ? '\'&\'' : 'special chars'} — verify Lua source escaping after paste.`);
+          }
+          lines.push(`    ${pad(e.field)} = { id = ${e.id}${epPart}, name = "${luaEsc(e.name)}", type = "${luaEsc(e.type)}"${lockPart} },`);
+        }
+        lines.push('})');
+        return {
+          groupPath: args.groupPath,
+          detectedMode,
+          block: lines.join('\n'),
+          parent,
+          entries: canonicalEntries,
+          warnings: localWarnings,
+          parseErrors,
+        };
+      }
+
+      if (outputFormat === 'yaml') {
+        // Hand-emitted YAML — small enough that pulling in a YAML library
+        // would be silly. Quote any string that contains a YAML-special char.
+        const yEsc = (s: string | undefined): string => {
+          if (s === undefined || s === null) return '~';
+          if (/^(yes|no|true|false|null|~|on|off)$/i.test(s) || /[:#&*!|>'"%@`{}\[\],?]/.test(s) || /^\s|\s$/.test(s)) {
+            return JSON.stringify(s);
+          }
+          return s;
+        };
+        const lines: string[] = [];
+        lines.push(`groupPath: ${yEsc(args.groupPath)}`);
+        lines.push(`detectedMode: ${detectedMode}`);
+        if (parent) {
+          lines.push('parent:');
+          lines.push(`  id: ${parent.id}`);
+          if (parent.name !== undefined) lines.push(`  name: ${yEsc(parent.name)}`);
+          if (parent.type !== undefined) lines.push(`  type: ${yEsc(parent.type)}`);
+        } else {
+          lines.push('parent: ~');
+        }
+        lines.push('entries:');
+        for (const e of canonicalEntries) {
+          lines.push(`  - field: ${yEsc(e.field)}`);
+          lines.push(`    id: ${e.id}`);
+          if (e.ep !== undefined) lines.push(`    ep: ${e.ep}`);
+          if (e.name !== undefined) lines.push(`    name: ${yEsc(e.name)}`);
+          if (e.type !== undefined) lines.push(`    type: ${yEsc(e.type)}`);
+        }
+        if (parseErrors.length > 0) {
+          lines.push('parseErrors:');
+          for (const p of parseErrors) {
+            lines.push(`  - field: ${yEsc(p.field)}`);
+            lines.push(`    reason: ${yEsc(p.reason)}`);
+            lines.push(`    raw: ${yEsc(p.raw)}`);
+          }
+        }
+        return {
+          groupPath: args.groupPath,
+          detectedMode,
+          yaml: lines.join('\n'),
           parent,
           entries: canonicalEntries,
           parseErrors,

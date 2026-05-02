@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.2.1] - 2026-05-03
+
+### Added
+- **`introspect_device_group` bind-lua and yaml output formats.** `outputFormat: "bind-lua"` returns a ready-to-paste Lua `bind("RoleStem", { ... })` descriptor block matching the SceneManager bind() pattern (the role stem is the groupPath with any leading `Devices.` stripped). `outputFormat: "yaml"` returns a YAML document mirroring the json shape.
+
+  bind-lua output: pretty-aligned field names, escaped Lua string values (handles `"` and `\\`), and a `lockNameForControllers` toggle (default `true`) which sets `lockName = true` on entries whose type matches `*FGRGBW442CC` — RGBW master controllers' names must not drift, or downstream channels lose their controller reference. Surfaces warnings on the response for FGRGBW442CC entries that were locked, and for any name containing `&`, `"`, or `\\` (special-character escaping warning so the operator double-checks the Lua paste).
+
+  yaml output: hand-emitted (no library dependency), quotes any string that contains a YAML-special character, omits absent fields rather than emitting `null` keys.
+
+  Both formats now complete the spec's full set of four outputs: `json`, `markdown-table`, `bind-lua`, `yaml`. Stateless; does not modify HC3 or local files.
+
 ## [4.2.0] - 2026-05-03
 
 ### Added
