@@ -15,7 +15,7 @@ import { MCPRequest, MCPResponse, MCPTool } from './types';
 import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
-import { deepEqual, deepMerge, verifyWrite } from './util';
+import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
 import { alarm } from './tools/alarm';
 import { sprinklers } from './tools/sprinklers';
 import { backups } from './tools/backups';
@@ -31,8 +31,10 @@ import { scenes } from './tools/scenes';
 import { profiles } from './tools/profiles';
 import { devices } from './tools/devices';
 import { quickapps, quickappsCoreSchemas, quickappsExtSchemas } from './tools/quickapps';
+import { icons } from './tools/icons';
+import { intelligence } from './tools/intelligence';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence];
 const toolHandlers = mergeHandlers(toolModules);
 
 class HC3MCPServer {
@@ -211,53 +213,7 @@ class HC3MCPServer {
         }
       },
 
-      // Diagnostic Information
-      {
-        name: 'list_icons',
-        description: 'List all icons HC3 knows about, grouped by `device` / `room` / `scene`. Each entry has the icon name, fileExtension (typically "png" or "svg"), and an internal id. Built-in icons live under /assets/icon/fibaro/{rooms,scena,...}/; user-uploaded icons live under /assets/userIcons/...',
-        inputSchema: { type: 'object', properties: {} }
-      },
-      {
-        name: 'get_icon',
-        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Built-in icons resolve to /assets/icon/fibaro/{category}/{name}.{ext}; user-uploaded icons resolve to /assets/userIcons/{category}/{name}.{ext} when userIcon=true. Returns {name, mime, base64, sizeBytes}. The MCP itself does not manipulate images — decode, edit (e.g. with ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Maps to URL segment: "room"→rooms, "scene"→scena, "device"→{deviceType}/{iconSetName}.' },
-            name: { type: 'string', description: 'Icon name (e.g. "room_bedroom"). For device icons see list_icons → device[].iconSetName.' },
-            extension: { type: 'string', description: 'File extension. Defaults to "png" for room/scene, must be supplied accurately for device icons (often "svg").' },
-            userIcon: { type: 'boolean', description: 'If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false.' }
-          },
-          required: ['category', 'name']
-        }
-      },
-      {
-        name: 'upload_icon',
-        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "User1010"}})). HC3 5.x has two undocumented PNG constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png` to produce a compatible palette PNG. Returns `{newName, newId, category, extension, hint}`.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            base64: { type: 'string', description: 'Base64-encoded image bytes (no data URL prefix). For PNG: must be 128×128 in palette mode (8-bit colormap, color type 3). For SVG: as-is.' },
-            mime: { type: 'string', description: '"image/png" or "image/svg+xml".' },
-            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Category — records under that bucket in list_icons.' }
-          },
-          required: ['base64', 'mime', 'category']
-        }
-      },
-      {
-        name: 'delete_icon',
-        description: 'Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon\'s category ("room", "scene", or "device") — passing "custom" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Icon name (typically User<N>).' },
-            fileExtension: { type: 'string', description: 'File extension matching the stored icon ("png" or "svg").' },
-            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Used both for the existence pre-check and as the type query param.' },
-            id: { type: 'number', description: 'Optional. If omitted, looked up via list_icons.' }
-          },
-          required: ['name', 'fileExtension', 'category']
-        }
-      },
+      ...icons.schemas,
       {
         name: 'get_diagnostics',
         description: 'Get system diagnostic information',
@@ -439,50 +395,7 @@ class HC3MCPServer {
       ...ios.schemas,
 
       ...quickappsCoreSchemas,
-      // System Context & Intelligence
-      {
-        name: 'get_system_context',
-        description: 'Get comprehensive system context including device capabilities, room layouts, scene purposes, and system intelligence data',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'get_device_relationships',
-        description: 'Get relationships between devices, including grouped devices, dependencies, and automation connections',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            deviceId: {
-              type: 'number',
-              description: 'Optional: Get relationships for specific device',
-            },
-          },
-        },
-      },
-      {
-        name: 'get_automation_suggestions',
-        description: 'Get intelligent automation suggestions based on device usage patterns, time of day, and system state',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'explain_device_capabilities',
-        description: 'Get human-readable explanations of what devices can do and how to control them effectively',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            deviceId: {
-              type: 'number',
-              description: 'Device ID to explain',
-            },
-          },
-          required: ['deviceId'],
-        },
-      },
+      ...intelligence.schemas,
 
       // HC3 Documentation & Programming Context
       {
@@ -899,18 +812,6 @@ class HC3MCPServer {
         case 'snapshot':
           result = await this.snapshot(args);
           break;
-        case 'list_icons':
-          result = await this.listIcons();
-          break;
-        case 'get_icon':
-          result = await this.getIcon(args);
-          break;
-        case 'upload_icon':
-          result = await this.uploadIcon(args);
-          break;
-        case 'delete_icon':
-          result = await this.deleteIcon(args);
-          break;
         case 'get_diagnostics':
           result = await this.getDiagnostics();
           break;
@@ -961,20 +862,6 @@ class HC3MCPServer {
           break;
         case 'update_location_settings':
           result = await this.updateLocationSettings(args);
-          break;
-
-        // System Context & Intelligence
-        case 'get_system_context':
-          result = await this.getSystemContext(args);
-          break;
-        case 'get_device_relationships':
-          result = await this.getDeviceRelationships(args);
-          break;
-        case 'get_automation_suggestions':
-          result = await this.getAutomationSuggestions(args);
-          break;
-        case 'explain_device_capabilities':
-          result = await this.explainDeviceCapabilities(args);
           break;
 
         // HC3 Documentation & Programming Context
@@ -1069,11 +956,7 @@ class HC3MCPServer {
     label: string,
     promise: Promise<T>
   ): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
-    try {
-      return { ok: true, value: await promise };
-    } catch (err) {
-      return { ok: false, error: (err as Error)?.message ?? String(err) };
-    }
+    return tolerantFetch(label, promise);
   }
 
   private verifyWrite(
@@ -1249,204 +1132,6 @@ class HC3MCPServer {
       surfaceErrors,
       includeResolved: selected
     };
-  }
-
-  // Icon methods
-  private async listIcons(): Promise<any> {
-    return await this.hc3.request('/api/icons');
-  }
-
-  private async getIcon(args: {
-    category: 'room' | 'scene' | 'device';
-    name: string;
-    extension?: string;
-    userIcon?: boolean;
-  }): Promise<any> {
-    if (!args?.category) throw new Error('get_icon requires category.');
-    if (!args?.name) throw new Error('get_icon requires name.');
-    const ext = args.extension ?? 'png';
-    const segment = args.category === 'room' ? 'rooms'
-      : args.category === 'scene' ? 'scena'
-      : args.category;
-    const base = args.userIcon ? '/assets/userIcons' : '/assets/icon/fibaro';
-    const path = `${base}/${segment}/${encodeURIComponent(args.name)}.${ext}`;
-    const url = `http://${this.hc3.config.host}:${this.hc3.config.port}${path}`;
-    const auth = Buffer.from(`${this.hc3.config.username}:${this.hc3.config.password}`).toString('base64');
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Basic ${auth}` },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) {
-      throw new Error(`get_icon: HTTP ${response.status} fetching ${path}`);
-    }
-    const mime = response.headers.get('content-type') ?? 'application/octet-stream';
-    const buf = Buffer.from(await response.arrayBuffer());
-    // Detect HC3's silent-fallback for missing icons: when a .png path is
-    // requested but the server returns image/svg+xml, HC3 has substituted its
-    // 1888-byte "unknown icon" SVG fallback rather than 404'ing.
-    if (ext === 'png' && mime.startsWith('image/svg')) {
-      throw new Error(
-        `get_icon: ${path} not found — HC3 silently returned its SVG "unknown icon" fallback (1.9 KB) instead of 404. Check name/extension via list_icons.`
-      );
-    }
-    return {
-      name: args.name,
-      extension: ext,
-      mime,
-      sizeBytes: buf.length,
-      base64: buf.toString('base64')
-    };
-  }
-
-  private async uploadIcon(args: {
-    base64: string;
-    mime: string;
-    category: 'room' | 'scene' | 'device';
-  }): Promise<any> {
-    if (!args?.base64) throw new Error('upload_icon requires base64.');
-    if (!args?.mime) throw new Error('upload_icon requires mime.');
-    if (!args?.category) throw new Error('upload_icon requires category.');
-    if (!this.hc3.config.host || !this.hc3.config.username || !this.hc3.config.password) {
-      throw new Error('Fibaro HC3 not configured.');
-    }
-    const ext = args.mime === 'image/svg+xml' ? 'svg'
-      : args.mime === 'image/png' ? 'png'
-      : args.mime === 'image/jpeg' ? 'jpg'
-      : 'png';
-    const bytes = Buffer.from(args.base64, 'base64');
-
-    // Validate PNG dimensions + palette mode at the tool boundary so callers
-    // get a clear error rather than HC3's misleading silent-500 on RGB or
-    // wrong-size PNGs.
-    if (ext === 'png') {
-      if (bytes.length < 24 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
-        throw new Error('upload_icon: provided bytes are not a valid PNG.');
-      }
-      const width = bytes.readUInt32BE(16);
-      const height = bytes.readUInt32BE(20);
-      const colorType = bytes.readUInt8(25);
-      if (width !== 128 || height !== 128) {
-        throw new Error(
-          `upload_icon: PNG must be 128x128. Got ${width}x${height}. HC3 silently 500s on other dimensions. Resize with e.g. \`magick input.png -resize 128x128 output.png\`.`
-        );
-      }
-      if (colorType !== 3) {
-        throw new Error(
-          `upload_icon: PNG must be palette mode (color type 3 / 8-bit colormap). Got color type ${colorType}. HC3 silently 500s on RGB/RGBA. Convert with e.g. \`magick in.png -dither None -colors 256 -define png:color-type=3 out.png\` or \`pngquant in.png\`.`
-        );
-      }
-    }
-
-    const before: any = await this.hc3.request('/api/icons');
-    const bucketBefore: any[] = (before?.[args.category] as any[]) || [];
-    const userIdsBefore = new Set(bucketBefore.map(i => i.id));
-
-    // Manual multipart so we control the bytes exactly. Node 18's FormData +
-    // Blob is fine in principle, but explicit construction matches what curl
-    // -F sends and avoids any boundary/header surprises.
-    const boundary = '----mcphc3' + Date.now().toString(16);
-    const CRLF = '\r\n';
-    const partHead = (name: string, filename?: string, type?: string) =>
-      `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"` +
-      (filename ? `; filename="${filename}"` : '') + CRLF +
-      (type ? `Content-Type: ${type}${CRLF}` : '') + CRLF;
-    const body = Buffer.concat([
-      Buffer.from(partHead('type') + args.category + CRLF + partHead('icon', `mcp.${ext}`, args.mime)),
-      bytes,
-      Buffer.from(CRLF + partHead('fileExtension') + ext + CRLF + `--${boundary}--${CRLF}`)
-    ]);
-
-    const auth = Buffer.from(`${this.hc3.config.username}:${this.hc3.config.password}`).toString('base64');
-    const response = await fetch(`http://${this.hc3.config.host}:${this.hc3.config.port}/api/icons`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      },
-      body,
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      if (response.status === 500 && ext === 'png') {
-        throw new Error(
-          `upload_icon: HTTP 500 from HC3. The pre-checks (128x128, palette mode) passed at the tool boundary, so HC3 may be in a bad state — try again, or restart HC3 if persistent. Raw response: ${errText}`
-        );
-      }
-      throw new Error(`upload_icon: HTTP ${response.status} - ${errText}`);
-    }
-
-    // HC3 returns {id, iconSetName, fileExtension} on success. Capture from the response;
-    // also re-list as a sanity check.
-    let created: any;
-    try { created = JSON.parse(await response.text()); } catch { created = null; }
-    const after: any = await this.hc3.request('/api/icons');
-    const bucketAfter: any[] = (after?.[args.category] as any[]) || [];
-    const newOnes = bucketAfter.filter(i => !userIdsBefore.has(i.id));
-    if (newOnes.length === 0) {
-      throw new Error(
-        `upload_icon: post-upload verify failed — no new icon appeared in ${args.category} bucket. HC3 silently dropped the upload despite returning 2xx.`
-      );
-    }
-    const fresh = newOnes[0];
-    const newName = fresh.iconName || fresh.iconSetName;
-    return {
-      newName,
-      newId: fresh.id,
-      category: args.category,
-      extension: ext,
-      hint: `Attach with modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "${newName}"}})). Re-fetch later via get_icon({category: "${args.category}", name: "${newName}", extension: "${ext}", userIcon: true}).`
-    };
-  }
-
-  private async deleteIcon(args: {
-    name: string;
-    fileExtension: string;
-    category: 'room' | 'scene' | 'device';
-    id?: number;
-  }): Promise<any> {
-    if (!args?.name) throw new Error('delete_icon requires name.');
-    if (!args?.fileExtension) throw new Error('delete_icon requires fileExtension.');
-    if (!args?.category) throw new Error('delete_icon requires category.');
-
-    const before: any = await this.hc3.request('/api/icons');
-    const bucket: any[] = (before?.[args.category] as any[]) || [];
-    const found = bucket.find(i =>
-      i.iconName === args.name || i.iconSetName === args.name
-    );
-    if (!found) {
-      throw new Error(
-        `delete_icon: '${args.name}' not found in ${args.category} bucket. ` +
-        `Use list_icons to inspect.`
-      );
-    }
-    const id = args.id ?? found.id;
-    if (typeof id !== 'number') {
-      throw new Error(`delete_icon: could not resolve id for '${args.name}'. Pass id explicitly.`);
-    }
-
-    // HC3's DELETE /api/icons uses query params (NOT a JSON body) and requires
-    // type ∈ {device, room, scene} (NOT "custom" as some docs say) plus id,
-    // name, and fileExtension. All four are required.
-    const params = new URLSearchParams({
-      type: args.category,
-      id: String(id),
-      name: args.name,
-      fileExtension: args.fileExtension,
-    });
-    await this.hc3.request(`/api/icons?${params.toString()}`, 'DELETE');
-
-    const after: any = await this.hc3.request('/api/icons');
-    const stillThere = (after?.[args.category] as any[] ?? []).find(i =>
-      i.iconName === args.name || i.iconSetName === args.name
-    );
-    if (stillThere) {
-      throw new Error(
-        `delete_icon: post-delete verify failed — '${args.name}' still in the ${args.category} bucket. ` +
-        `Built-in icons cannot be deleted via the API; only user-uploaded icons (User<N>) can.`
-      );
-    }
-    return { deleted: args.name, id, category: args.category };
   }
 
   private async getDiagnostics(): Promise<any> {
@@ -1768,238 +1453,6 @@ class HC3MCPServer {
     };
   }
 
-
-  // System Context & Intelligence Methods
-  private async getSystemContext(args: any): Promise<any> {
-    try {
-      // Primary fetches (devices/rooms/scenes/variables) propagate errors so
-      // HC3 unreachability surfaces instead of returning empty arrays.
-      // Ancillary (info/weather) tolerated and reported via _fetch_errors.
-      const [infoResult, devices, rooms, scenes, variables, weatherResult] = await Promise.all([
-        this.tolerantFetch('system_info', this.hc3.request('/api/settings/info')),
-        this.hc3.request('/api/devices'),
-        this.hc3.request('/api/rooms'),
-        this.hc3.request('/api/scenes'),
-        this.hc3.request('/api/globalVariables'),
-        this.tolerantFetch('weather', this.hc3.request('/api/weather'))
-      ]);
-
-      const info = infoResult.ok ? infoResult.value : null;
-      const weather = weatherResult.ok ? weatherResult.value : null;
-      const fetchErrors: Record<string, string> = {};
-      if (!infoResult.ok) fetchErrors.system_info = infoResult.error;
-      if (!weatherResult.ok) fetchErrors.weather = weatherResult.error;
-
-      return {
-        system_info: info,
-        device_count: devices.length,
-        room_count: rooms.length,
-        scene_count: scenes.length,
-        variable_count: variables.length,
-        weather_data: weather,
-        devices: devices.slice(0, 10), // First 10 devices as sample
-        rooms: rooms,
-        recent_scenes: scenes.slice(0, 5),
-        key_variables: variables.slice(0, 10),
-        ...(Object.keys(fetchErrors).length > 0 ? { _fetch_errors: fetchErrors } : {})
-      };
-    } catch (error) {
-      throw new Error(`Failed to get system context: ${error}`);
-    }
-  }
-
-  private async getDeviceRelationships(args: any): Promise<any> {
-    try {
-      const deviceId = args.deviceId;
-      const [devices, rooms, scenes] = await Promise.all([
-        this.hc3.request('/api/devices'),
-        this.hc3.request('/api/rooms'),
-        this.hc3.request('/api/scenes')
-      ]);
-
-      if (deviceId) {
-        const device = devices.find((d: any) => d.id === parseInt(deviceId));
-        if (!device) {
-          throw new Error(`Device ${deviceId} not found`);
-        }
-
-        const room = rooms.find((r: any) => r.id === device.roomID);
-        const relatedDevices = devices.filter((d: any) => 
-          d.roomID === device.roomID && d.id !== device.id
-        );
-        const relatedScenes = scenes.filter((s: any) => 
-          s.devices && s.devices.includes(device.id)
-        );
-
-        return {
-          device: device,
-          room: room,
-          related_devices: relatedDevices,
-          related_scenes: relatedScenes,
-          device_type: device.type,
-          capabilities: device.properties || {}
-        };
-      }
-
-      // Return general relationship overview
-      const devicesByRoom = rooms.map((room: any) => ({
-        room: room,
-        devices: devices.filter((d: any) => d.roomID === room.id)
-      }));
-
-      return {
-        devices_by_room: devicesByRoom,
-        total_devices: devices.length,
-        total_rooms: rooms.length,
-        device_types: [...new Set(devices.map((d: any) => d.type))]
-      };
-    } catch (error) {
-      throw new Error(`Failed to get device relationships: ${error}`);
-    }
-  }
-
-  private async getAutomationSuggestions(args: any): Promise<any> {
-    try {
-      const [devices, scenesResult, variablesResult] = await Promise.all([
-        this.hc3.request('/api/devices'),
-        this.tolerantFetch('scenes', this.hc3.request('/api/scenes')),
-        this.tolerantFetch('variables', this.hc3.request('/api/globalVariables'))
-      ]);
-
-      const scenes: any[] = scenesResult.ok ? scenesResult.value : [];
-      const variables: any[] = variablesResult.ok ? variablesResult.value : [];
-      const fetchErrors: Record<string, string> = {};
-      if (!scenesResult.ok) fetchErrors.scenes = scenesResult.error;
-      if (!variablesResult.ok) fetchErrors.variables = variablesResult.error;
-
-      const suggestions: Array<{
-        type: string;
-        description: string;
-        devices: Record<string, any>;
-      }> = [];
-
-      // Motion sensor + light automation suggestions
-      const motionSensors = devices.filter((d: any) => 
-        d.type === 'com.fibaro.motionSensor' || d.name.toLowerCase().includes('motion')
-      );
-      const lights = devices.filter((d: any) => 
-        d.type === 'com.fibaro.binarySwitch' || d.type === 'com.fibaro.dimmer'
-      );
-
-      if (motionSensors.length > 0 && lights.length > 0) {
-        suggestions.push({
-          type: 'motion_lighting',
-          description: 'Automatically turn on lights when motion is detected',
-          devices: { motion_sensors: motionSensors.slice(0, 3), lights: lights.slice(0, 3) }
-        });
-      }
-
-      // Temperature-based automation
-      const thermostats = devices.filter((d: any) => 
-        d.type === 'com.fibaro.thermostat' || d.name.toLowerCase().includes('thermostat')
-      );
-      if (thermostats.length > 0) {
-        suggestions.push({
-          type: 'temperature_control',
-          description: 'Create temperature-based heating/cooling schedules',
-          devices: { thermostats: thermostats }
-        });
-      }
-
-      // Security automation
-      const doorSensors = devices.filter((d: any) => 
-        d.type === 'com.fibaro.doorSensor' || d.name.toLowerCase().includes('door')
-      );
-      const cameras = devices.filter((d: any) => 
-        d.type === 'com.fibaro.ipCamera' || d.name.toLowerCase().includes('camera')
-      );
-
-      if (doorSensors.length > 0 && cameras.length > 0) {
-        suggestions.push({
-          type: 'security_monitoring',
-          description: 'Activate cameras when doors/windows are opened',
-          devices: { door_sensors: doorSensors, cameras: cameras }
-        });
-      }
-
-      return {
-        suggestions: suggestions,
-        available_scenes: scenes.length,
-        available_variables: variables.length,
-        automation_potential: suggestions.length > 0 ? 'High' : 'Medium',
-        ...(Object.keys(fetchErrors).length > 0 ? { _fetch_errors: fetchErrors } : {})
-      };
-    } catch (error) {
-      throw new Error(`Failed to get automation suggestions: ${error}`);
-    }
-  }
-
-  private async explainDeviceCapabilities(args: any): Promise<any> {
-    try {
-      const deviceId = args.deviceId;
-      const devices = await this.hc3.request('/api/devices');
-
-      if (!deviceId) {
-        throw new Error('deviceId is required');
-      }
-
-      const device = devices.find((d: any) => d.id === parseInt(deviceId));
-      if (!device) {
-        throw new Error(`Device ${deviceId} not found`);
-      }
-
-      // Enhanced capability explanation based on device type
-      const capabilities = {
-        basic_info: {
-          name: device.name,
-          type: device.type,
-          manufacturer: device.manufacturer || 'Unknown',
-          room_id: device.roomID,
-          enabled: device.enabled
-        },
-        properties: device.properties || {},
-        actions: device.actions || [],
-        interfaces: device.interfaces || [],
-        parameters: device.parameters || {}
-      };
-
-      // Add type-specific explanations
-      let explanation = '';
-      const deviceType = device.type?.toLowerCase() || '';
-
-      if (deviceType.includes('switch') || deviceType.includes('dimmer')) {
-        explanation = 'This is a lighting control device. You can turn it on/off and possibly adjust brightness.';
-      } else if (deviceType.includes('sensor')) {
-        explanation = 'This is a sensor device that monitors environmental conditions or detects events.';
-      } else if (deviceType.includes('thermostat')) {
-        explanation = 'This is a climate control device for managing temperature and heating/cooling.';
-      } else if (deviceType.includes('camera')) {
-        explanation = 'This is a security camera for monitoring and recording video.';
-      } else if (deviceType.includes('door') || deviceType.includes('window')) {
-        explanation = 'This is a security sensor that detects when doors or windows are opened/closed.';
-      } else {
-        explanation = 'This is a home automation device with various capabilities.';
-      }
-
-      return {
-        device_id: deviceId,
-        explanation: explanation,
-        capabilities: capabilities,
-        current_state: {
-          value: device.properties?.value,
-          battery_level: device.properties?.batteryLevel,
-          last_modified: device.modified
-        },
-        usage_tips: [
-          'Check the properties object for current readings and status',
-          'Use actions array to see what commands this device supports',
-          'Monitor the modified timestamp to see when it last changed'
-        ]
-      };
-    } catch (error) {
-      throw new Error(`Failed to explain device capabilities: ${error}`);
-    }
-  }
 
   // HC3 Documentation & Programming Context Methods
   private async getHC3ConfigurationGuide(args: any): Promise<any> {
