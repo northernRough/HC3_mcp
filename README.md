@@ -130,6 +130,57 @@ Each client uses a similar JSON shape; consult its docs for the config file loca
 }
 ```
 
+## Testing
+
+Six-phase MCP test harness in `scripts/test/`. Read-only phases catch
+schema and protocol regressions; mutating phases verify CRUD round-trips
+on disposable resources.
+
+| Phase | What it catches | Mutating? |
+|---|---|---|
+| 0 | tool count / schema validity / name parity vs golden | no |
+| 1 | every read tool returns expected response shape | no |
+| 2 | create / update / delete round-trips end-to-end | YES — gated |
+| 3 | known-bitten regressions (UTF-8, 501, content shape, validation) | partial |
+| 6 | every `hc3.request(...)` URL is live (catches dead endpoints) | no |
+
+### Run
+
+```bash
+npm run compile
+node scripts/test/phase0-parity.mjs
+node scripts/test/phase1-readonly-sweep.mjs
+```
+
+The harness reads `FIBARO_HOST` / `FIBARO_USERNAME` / `FIBARO_PASSWORD`
+from the environment (same vars the server uses; `.env` is honoured).
+
+### Run mutating phases
+
+Phase 2 creates and deletes globals, custom events, rooms, scenes, and
+QAs on the live HC3. Gated behind an explicit env var so you can't run
+it by accident:
+
+```bash
+MCP_TEST_ALLOW_MUTATIONS=1 node scripts/test/phase2-mutations.mjs
+```
+
+All resources are prefixed `TEST_${runId}_` (or `TEST-${runId}-`) and
+torn down in `finally` even on test failure. A pre-flight orphan sweep
+removes any leftovers from previously-crashed runs (covers globals,
+devices, custom events, and scenes).
+
+### CI / pre-commit
+
+Per `CLAUDE.md` ("Test before commit"): at minimum run phase 0 and
+phase 1 before merging anything that touches MCP protocol or HC3 API
+code. Phase 2 is worth running before any release that touches CRUD
+tools.
+
+See `scripts/test/README.md` for per-phase detail.
+
+---
+
 ## What this does
 
 This server exposes 130+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.
