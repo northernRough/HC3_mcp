@@ -1,0 +1,2752 @@
+[
+  {
+    "name": "activate_profile",
+    "description": "Switch the active profile via POST /api/profiles/activeProfile/{id}. Triggers HC3's profile-activation cascade: scenes listed as \"kill on activate\" are killed, scenes listed as \"run on activate\" are run, etc. Post-activation verifies by refetching /api/profiles and confirming activeProfile has changed. Use this as the agent-level equivalent of tapping a mode button in the HC3 mobile app.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id to activate"
+        }
+      },
+      "required": [
+        "profileId"
+      ]
+    }
+  },
+  {
+    "name": "arm_alarm_partition",
+    "description": "Arm alarm partition",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "partitionId": {
+          "type": "number",
+          "description": "Alarm partition ID"
+        },
+        "armingType": {
+          "type": "string",
+          "description": "Arming type (full, partial, night)",
+          "enum": [
+            "full",
+            "partial",
+            "night"
+          ]
+        }
+      },
+      "required": [
+        "partitionId",
+        "armingType"
+      ]
+    }
+  },
+  {
+    "name": "assign_devices_to_room",
+    "description": "Batch-move devices to a room via POST /api/rooms/{roomId}/groupAssignment. Useful after Z-Wave re-inclusion to quickly re-place the new ids. Body: {deviceIds: [...]}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Target room id"
+        },
+        "deviceIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "Device ids to move"
+        }
+      },
+      "required": [
+        "roomId",
+        "deviceIds"
+      ]
+    }
+  },
+  {
+    "name": "audit_id_references",
+    "description": "Find every place a device id is referenced — across all QuickApp source files, every Lua scene (actions + conditions) and JSON scene (action tree), and every global variable's string value. Universal HC3 question: \"if I delete or replace this device, what breaks?\" Pass deviceId or name (resolves to ids); set includeChildren=true (default) to also audit child devices of a parent. Stateless audit; does not modify HC3 or local files. Cost: fetches every QA file + scene + global on the HC3; expect 30-90s on a typical install. Hard cap of 5 MB total content scanned; beyond that, response has truncated: true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "The device id to audit. Provide either this or name."
+        },
+        "name": {
+          "type": "string",
+          "description": "Audit by current device name. Resolves to one or more ids first via /api/devices?name=<name>. Provide either this or deviceId."
+        },
+        "includeChildren": {
+          "type": "boolean",
+          "description": "If deviceId is a parent, also audit each child id (parentId match). Default true."
+        },
+        "includeComments": {
+          "type": "boolean",
+          "description": "If false (default), skip lines that look like Lua comments (^\\s*--). Set true to include everything; let the human filter."
+        }
+      }
+    }
+  },
+  {
+    "name": "audit_qa_devices",
+    "description": "For a given QuickApp, parse every numeric device id its source files reference and classify each against live HC3 state. Universal HC3 question: \"after that recent Z-Wave re-inclusion (or device deletion), is this QA still pointing at real, alive devices?\" Walks every file in the QA, extracts every \\b\\d{2,5}\\b numeric token (skipping master device 1 and the SceneManager-style noise patterns; see below), and classifies each unique id as ALIVE, DEAD, or DELETED via /api/devices/{id} (checking properties.dead and properties.deleted, not just the top-level fields which are usually null even on confirmed-dead devices). Issues are grouped by id with all source occurrences (file, line, snippet) attached. Stateless audit; does not modify HC3 or local files. Cost: fetches every QA file plus one /api/devices/{id} per unique candidate id; expect 10-30s on a typical QA. False-positive caveats: the heuristic skips ids < 100, lines containing \"triggerId =\", whole-line Lua comments, lines with magic-number field names (pollInterval, maxSeconds, etc.), and lines with arithmetic-on-time patterns (* 1000, + 86400). Residual false-positives in the DELETED bucket are common for SceneManager-style codebases — table-of-trigger-id rows like \"triggers = {901, 902}\" and reserved-trigger constants in function args (manualTrigger(..., 999, ...)) will appear as DELETED issues. Treat the issues list as a starting point for review rather than a definitive list; the DEAD classification is high-confidence (HC3 confirms the device is real and dead).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QA device id to audit. Must be a QuickApp (interfaces includes 'quickApp'); the tool throws otherwise."
+        },
+        "fileNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional: specific files to scan. Default: all files in the QA."
+        },
+        "bindAware": {
+          "type": "boolean",
+          "description": "If true, also parse bind(\"RoleStem\", { ... }) descriptor calls from any file and run the L0-L4 resolver waterfall (cached / endpoint / nameInParent / newParentEndpoint / globalName) on each role entry. Reports which descriptors are still resolving via L0 (cached id valid), which have healed via L1-L3 (parent/endpoint/name re-resolution — descriptor cached id is stale and should be updated), which healed via L4 (allowGlobal-only, global name+type match), and which are missing or ambiguous. Adds a bindAware block to the response. Default false."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "If true (and bindAware is true), treat L4-eligible name-drift conflicts and L4 ambiguities as failures (counted in summary.warnings). Default false — those are informational."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "call_ui_event",
+    "description": "Trigger UI events on plugin interface elements (buttons, sliders, switches, etc.).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "elementName": {
+          "type": "string",
+          "description": "Name of the UI element"
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Type of event to trigger",
+          "enum": [
+            "onToggled",
+            "onReleased",
+            "onChanged",
+            "onLongPressDown",
+            "onLongPressReleased",
+            "onTabChanged",
+            "onToggleOn",
+            "onToggleOff"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "description": "Event value (optional)"
+        }
+      },
+      "required": [
+        "deviceId",
+        "elementName",
+        "eventType"
+      ]
+    }
+  },
+  {
+    "name": "can_create_backup",
+    "description": "Check if backups can be created",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "cancel_delayed_action",
+    "description": "Cancel a delayed device action that was queued via control_device with a delay value. Wraps DELETE /api/devices/action/{timestamp}/{deviceId}. Pass the Unix epoch timestamp (integer seconds — HC3 truncates) at which the action was scheduled to run, plus the target deviceId. Returns 200 on success or 404 if the pairing doesn't match a pending action. Useful for motion-triggered auto-off scenes that need to abort the pending off when new motion re-triggers the light.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device id the action was queued against"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Unix epoch seconds the action was scheduled for (integer only — HC3 truncates fractional)"
+        }
+      },
+      "required": [
+        "deviceId",
+        "timestamp"
+      ]
+    }
+  },
+  {
+    "name": "clear_all_notifications",
+    "description": "Clear all notifications",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "clear_debug_messages",
+    "description": "Clear all debug messages on HC3 via DELETE /api/debugMessages. Useful for test loops — clear before running a scene or QA action, then read get_debug_messages to see only the fresh logs. Read-then-delete: counts messages before deletion so the response reports how many were cleared.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "control_device",
+    "description": "Control a device by calling an action (e.g., turnOn, turnOff, setValue, setColor). The `setVariable` action is rejected here — use `set_quickapp_variable` instead, which preserves declared variable types (setVariable via the action endpoint silently coerces numeric-looking strings to numbers and breaks the HC3 UI).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform (turnOn, turnOff, setValue, setColor, start, stop, etc.)"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "Arguments for the action (if applicable)"
+        },
+        "delay": {
+          "type": "number",
+          "description": "Optional: Delay in seconds before executing the action"
+        }
+      },
+      "required": [
+        "deviceId",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "control_sprinkler_system",
+    "description": "Control sprinkler system (start, stop, pause)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "systemId": {
+          "type": "number",
+          "description": "Sprinkler system ID"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action to perform",
+          "enum": [
+            "start",
+            "stop",
+            "pause",
+            "resume"
+          ]
+        },
+        "zoneId": {
+          "type": "number",
+          "description": "Optional: Specific zone ID for zone-specific actions"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Optional: Duration in minutes for start action"
+        }
+      },
+      "required": [
+        "systemId",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "create_backup",
+    "description": "Create a new backup",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Backup name"
+        },
+        "type": {
+          "type": "string",
+          "description": "Backup type (local, remote)",
+          "enum": [
+            "local",
+            "remote"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "create_child_device",
+    "description": "Create a child device for a plugin (e.g., for multi-channel devices).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "parentId": {
+          "type": "number",
+          "description": "Parent device ID"
+        },
+        "type": {
+          "type": "string",
+          "description": "Device type for the child device"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name for the child device"
+        },
+        "initialProperties": {
+          "type": "object",
+          "description": "Initial properties for the child device"
+        },
+        "initialInterfaces": {
+          "type": "array",
+          "description": "Initial interfaces for the child device",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "parentId",
+        "type",
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "create_custom_event",
+    "description": "Create a new custom event",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Event name"
+        },
+        "userDescription": {
+          "type": "string",
+          "description": "Event description"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "create_global_variable",
+    "description": "Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "varName": {
+          "type": "string",
+          "description": "Variable name. Must match [A-Za-z][A-Za-z0-9_]* (HC3 regex)."
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "Initial value. For isEnum globals must be one of enumValues."
+        },
+        "readOnly": {
+          "type": "boolean",
+          "description": "Mark as read-only system-style variable. Default false."
+        },
+        "isEnum": {
+          "type": "boolean",
+          "description": "Create as enum variable. Default false."
+        },
+        "enumValues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowed enum values. Required when isEnum=true."
+        }
+      },
+      "required": [
+        "varName",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "create_profile",
+    "description": "Create a new HC3 profile via POST /api/profiles. Post-create verify: refetches the profile and confirms the name matches. Returns the HC3-assigned profileId.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the new profile."
+        },
+        "iconId": {
+          "type": "number",
+          "description": "Optional icon id (HC3 profile icon catalogue)."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "create_quickapp",
+    "description": "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the new QuickApp."
+        },
+        "type": {
+          "type": "string",
+          "description": "Fibaro device type, e.g. 'com.fibaro.temperatureSensor', 'com.fibaro.binarySwitch', 'com.fibaro.genericDevice'. Call get_quickapp_available_types for the full firmware-current list."
+        },
+        "roomId": {
+          "type": "number",
+          "description": "Room ID the new QA should belong to (from get_rooms). Defaults to the Default Room if omitted."
+        },
+        "initialProperties": {
+          "type": "object",
+          "description": "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole)."
+        },
+        "initialInterfaces": {
+          "type": "array",
+          "description": "Optional list of Fibaro interface names to attach at creation time.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "initialView": {
+          "type": "object",
+          "description": "Optional initial UI view definition (see HC3 QuickApp view schema)."
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "create_quickapp_file",
+    "description": "Create a new source file for a QuickApp.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the new file"
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of file (typically 'lua')",
+          "default": "lua"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content of the new file",
+          "default": ""
+        },
+        "isOpen": {
+          "type": "boolean",
+          "description": "Whether the file should be open in the editor",
+          "default": false
+        }
+      },
+      "required": [
+        "deviceId",
+        "fileName"
+      ]
+    }
+  },
+  {
+    "name": "create_room",
+    "description": "Create a new room via POST /api/rooms. Returns the room with its HC3-assigned id. Post-create verify by refetch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Room display name"
+        },
+        "sectionID": {
+          "type": "number",
+          "description": "Parent section id"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon name (e.g. \"room_living\"). Defaults to HC3 default if omitted."
+        },
+        "category": {
+          "type": "string",
+          "description": "Room category (e.g. \"livingroom\", \"bedroom\", \"other\")."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Visible in UI. Defaults true."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "create_scene",
+    "description": "Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be \"lua\" or \"scenario\". If content is an object it is JSON.stringify'd before sending (matches update_scene_content semantics).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Scene name (1–50 chars)."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "lua",
+            "scenario"
+          ],
+          "description": "Scene type."
+        },
+        "roomId": {
+          "type": "number",
+          "description": "Room id (required). Use get_rooms to find a valid id — HC3 rejects roomId=0 on creation."
+        },
+        "content": {
+          "description": "Scene body. String or object (object is JSON.stringify'd)."
+        },
+        "maxRunningInstances": {
+          "type": "number",
+          "description": "Default 1."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Default true."
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Default false."
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon id. Default \"scene_icon_icon_scene1\"."
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "Category ids (HC3 rejects empty). Defaults to [1]."
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "roomId"
+      ]
+    }
+  },
+  {
+    "name": "delete_custom_event",
+    "description": "Delete a custom event by name. Wraps DELETE /api/customEvents/{name}. Reads the event first to capture userDescription as a recovery trail. Post-delete verifies by refetch expecting 404.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Custom event name to delete"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "delete_device",
+    "description": "Delete a single device by id via DELETE /api/devices/{id}. Intended for QuickApps and explicitly-installed plugins. Guards: (1) refuses ids < 10 (reserved HC3 system devices); (2) reads the device first to inspect interfaces + children; (3) refuses Z-Wave devices (interfaces includes 'zwave' with no quickApp) unless allow_physical=true — the REST delete does not perform a proper Z-Wave exclusion, leaving the mesh with a ghost node entry; exclude via the HC3 Web UI for Z-Wave hardware; (4) refuses devices with children unless cascade=true, listing them in the rejection so the caller knows the blast radius. Post-delete verifies by refetch (expects HTTP 404).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id to delete. Must be >= 10."
+        },
+        "cascade": {
+          "type": "boolean",
+          "description": "Allow deletion even when the device has children (children are deleted with it). Defaults false."
+        },
+        "allow_physical": {
+          "type": "boolean",
+          "description": "Allow deletion of Z-Wave physical devices via REST. Defaults false — REST delete skips mesh exclusion."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "delete_global_variable",
+    "description": "Delete a global variable by name via DELETE /api/globalVariables/{name}. Reads the variable first to capture the last value (returned in the response as a recovery trail) and to check readOnly. Refuses readOnly globals unless allow_system=true. Post-delete verifies by refetch (expects HTTP 404).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "varName": {
+          "type": "string",
+          "description": "Name of the global variable to delete."
+        },
+        "allow_system": {
+          "type": "boolean",
+          "description": "Required to delete readOnly (system) globals. Defaults false."
+        }
+      },
+      "required": [
+        "varName"
+      ]
+    }
+  },
+  {
+    "name": "delete_icon",
+    "description": "Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon's category (\"room\", \"scene\", or \"device\") — passing \"custom\" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Icon name (typically User<N>)."
+        },
+        "fileExtension": {
+          "type": "string",
+          "description": "File extension matching the stored icon (\"png\" or \"svg\")."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "room",
+            "scene",
+            "device"
+          ],
+          "description": "Icon category. Used both for the existence pre-check and as the type query param."
+        },
+        "id": {
+          "type": "number",
+          "description": "Optional. If omitted, looked up via list_icons."
+        }
+      },
+      "required": [
+        "name",
+        "fileExtension",
+        "category"
+      ]
+    }
+  },
+  {
+    "name": "delete_notification",
+    "description": "Delete a notification via DELETE /api/notificationCenter/{id}. Reads first to capture the data payload as a recovery trail. Refuses if canBeDeleted=false (HC3-system-protected) unless allow_system=true. Post-delete verifies by refetch expecting 404.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "number",
+          "description": "Notification id"
+        },
+        "allow_system": {
+          "type": "boolean",
+          "description": "Required to delete notifications where canBeDeleted=false. Default false."
+        }
+      },
+      "required": [
+        "notificationId"
+      ]
+    }
+  },
+  {
+    "name": "delete_plugin",
+    "description": "BULK uninstall of every device of a given plugin type via DELETE /api/plugins/installed?type={type}. Affects all devices of that type, not just one. For per-device deletion (including individual QuickApps), use delete_device instead. When more than one device of the type exists, this tool refuses unless allow_bulk=true — intended to prevent accidental mass-delete when the caller thinks they're removing a single device.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Plugin type (e.g. 'com.fibaro.yrWeather'). All devices of this type are deleted."
+        },
+        "allow_bulk": {
+          "type": "boolean",
+          "description": "Required when >1 device of the type exists. Defaults false."
+        }
+      },
+      "required": [
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "delete_profile",
+    "description": "Delete a profile via DELETE /api/profiles/{id}. Guards: refuses if the profile is the currently active one (you cannot delete the active profile without switching first). Post-delete verifies by refetch expecting 404.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id to delete"
+        }
+      },
+      "required": [
+        "profileId"
+      ]
+    }
+  },
+  {
+    "name": "delete_quickapp_file",
+    "description": "Delete a QuickApp source file. Note: main files cannot be deleted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the file to delete"
+        }
+      },
+      "required": [
+        "deviceId",
+        "fileName"
+      ]
+    }
+  },
+  {
+    "name": "delete_room",
+    "description": "Delete a room via DELETE /api/rooms/{id}. Safety: reads devices first and refuses if the room has devices unless reassign_to is supplied (a target roomId to batch-move the devices to before deletion). Cannot delete the default room (id of a room with isDefault=true).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Room id to delete"
+        },
+        "reassign_to": {
+          "type": "number",
+          "description": "If the room has devices, batch-move them to this room before deletion. Without this, the tool refuses if the room has devices."
+        }
+      },
+      "required": [
+        "roomId"
+      ]
+    }
+  },
+  {
+    "name": "disarm_alarm_partition",
+    "description": "Disarm alarm partition",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "partitionId": {
+          "type": "number",
+          "description": "Alarm partition ID"
+        }
+      },
+      "required": [
+        "partitionId"
+      ]
+    }
+  },
+  {
+    "name": "explain_device_capabilities",
+    "description": "Get human-readable explanations of what devices can do and how to control them effectively",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID to explain"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "export_quickapp",
+    "description": "Export a QuickApp to .fqa (open source) or .fqax (encrypted) file. Wraps POST /api/quickApp/export/{deviceId}. Encrypted export produces a .fqax locked to a list of HC3 serial numbers — only those controllers can import it. Use encrypted + serialNumbers together when distributing a QA to specific third-party HC3 units without allowing further redistribution; leave encrypted false (default) for ordinary backup or sharing to anyone.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "Whether to export as encrypted .fqax file",
+          "default": false
+        },
+        "serialNumbers": {
+          "type": "array",
+          "description": "List of serial numbers allowed to import (required for encrypted export)",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "filter_devices",
+    "description": "Server-side multi-criteria device filter via POST /api/devices/filter. Richer than get_devices' query-string filters: accepts multiple ANDed filter predicates and projects only requested attributes — much smaller payload than get_devices when you already know which fields you need. Body: {filters: [{filter, value}], attributes: {main: [...]}}. Common filter keys: deviceID (array of ids), enabled, visible, roomID, parentId, deviceState, type, baseType, interface, isPlugin, hasProperty, hasNoProperty. Values are arrays (coerce to string if HC3 expects strings). attributes.main picks which fields to return per device.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filters": {
+          "type": "array",
+          "description": "Array of {filter: string, value: any[]} predicates. All predicates ANDed.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "filter": {
+                "type": "string",
+                "description": "Filter key, e.g. \"deviceID\", \"enabled\", \"roomID\", \"type\""
+              },
+              "value": {
+                "type": "array",
+                "description": "Values to match. Arrays of strings, numbers, or booleans."
+              }
+            },
+            "required": [
+              "filter",
+              "value"
+            ]
+          }
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attribute names to return per device. E.g. [\"id\", \"name\", \"roomID\", \"type\"]. Omit to get all."
+        }
+      },
+      "required": [
+        "filters"
+      ]
+    }
+  },
+  {
+    "name": "find_device_by_endpoint",
+    "description": "Resolve a multi-endpoint child device by its (parentId, endPointId) pair. Stable identity for children that survives Z-Wave re-inclusion: parentId resolves via the parent's (stable) name, endPointId is the Z-Wave endpoint number which never shifts. Pairs with find_devices_by_name (for parents). Returns an ARRAY of matching children — endPointId 0 is commonly ambiguous because multi-endpoint parents expose multiple child roles at endpoint 0 (e.g. a ZEN52 parent has both a binarySwitch and a remoteController at endpoint 0). Non-zero endpoints are usually unique. Examples: (4753, 1) → \"Patio seating\"; (4753, 2) → \"Tub lights\"; (4753, 0) → [\"patio lights\" binarySwitch, \"patio lights remote\" remoteController]. Returns minimal {id, name, type, roomID, visible, enabled, dead, endPointId} records. Fetches /api/devices?parentId={parentId} and filters by properties.endPointId in-process.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "parentId": {
+          "type": "number",
+          "description": "HC3 device id of the multi-endpoint parent (e.g. the ZEN52 wrapper, the FGRGBW442 master)."
+        },
+        "endpointId": {
+          "type": "number",
+          "description": "Z-Wave endpoint number. 0 is the primary/root endpoint (often ambiguous), 1..N are the distinct channels/outputs."
+        }
+      },
+      "required": [
+        "parentId",
+        "endpointId"
+      ]
+    }
+  },
+  {
+    "name": "find_devices_by_name",
+    "description": "Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId in {0, 1}) — i.e. system/root devices (QAs, HC3 controllers, grouping wrappers) and direct Z-Wave nodes (the physical device as a whole). Child endpoints of multi-endpoint parents (FGRGBW channels, ZEN52 endpoints 1/2, AEON MultiSensor's motion/temp/lux children, etc.) are excluded. For children-of-multi-endpoint-devices use find_device_by_endpoint (by endPointId). HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name to search for. Case-insensitive substring match by default."
+        },
+        "roomId": {
+          "type": "number",
+          "description": "Optional: only consider devices in this room. Disambiguates common names (e.g. \"blind\") that recur across rooms."
+        },
+        "exactMatch": {
+          "type": "boolean",
+          "description": "If true, require exact name equality (still case-insensitive). Defaults to false (substring match)."
+        },
+        "visibleOnly": {
+          "type": "boolean",
+          "description": "If true, only return devices where visible === true. Defaults to false."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "get_alarm_devices",
+    "description": "Get alarm system devices",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "partitionId": {
+          "type": "number",
+          "description": "Optional: Filter by partition ID"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_alarm_history",
+    "description": "Get alarm system history",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "partitionId": {
+          "type": "number",
+          "description": "Optional: Filter by partition ID"
+        },
+        "limit": {
+          "type": "number",
+          "description": "Limit number of results (default: 100)"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Offset for pagination (default: 0)"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_alarm_partition",
+    "description": "Get specific alarm partition by ID. The bare-id endpoint /api/alarms/v1/partitions/{id} returns 404 on current HC3 firmware (5.20x); the wrapper fetches the full partition list via /api/alarms/v1/partitions and filters in-process. See KNOWN_DEAD_ENDPOINTS.md for the catalogue of dead endpoints this server routes around.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "partitionId": {
+          "type": "number",
+          "description": "Alarm partition ID"
+        }
+      },
+      "required": [
+        "partitionId"
+      ]
+    }
+  },
+  {
+    "name": "get_alarm_partitions",
+    "description": "Get all alarm partitions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_automation_suggestions",
+    "description": "Get intelligent automation suggestions based on device usage patterns, time of day, and system state",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_backups",
+    "description": "Get list of available backups",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Backup type (local, remote, all)",
+          "enum": [
+            "local",
+            "remote",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_climate_zone",
+    "description": "Get specific climate zone by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "zoneId": {
+          "type": "number",
+          "description": "Climate zone ID"
+        }
+      },
+      "required": [
+        "zoneId"
+      ]
+    }
+  },
+  {
+    "name": "get_climate_zones",
+    "description": "Get all climate zones",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "detailed": {
+          "type": "boolean",
+          "description": "Return detailed climate zone information (default: false)"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_custom_event",
+    "description": "Read a single custom event by name. Wraps GET /api/customEvents/{name}. Returns {name, userDescription}. HTTP 404 if unknown.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Custom event name"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "get_custom_events",
+    "description": "Get all custom events",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_debug_messages",
+    "description": "Read HC3 debug messages with client-side filtering. HC3 returns a fixed page of 30 messages newest-first and ignores query-param filters, so this tool paginates via the \"last\" cursor and applies filters locally. Returns a summary object plus the matching messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tagContains": {
+          "type": "string",
+          "description": "Case-insensitive substring match against the message tag (e.g. \"DAIKIN\" matches \"DAIKIN-4710\")."
+        },
+        "since": {
+          "type": "number",
+          "description": "Epoch seconds. Only messages with timestamp >= this value are returned. Also stops pagination once the oldest fetched page is older than this."
+        },
+        "type": {
+          "type": "string",
+          "description": "Filter by message type.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "debug",
+            "trace"
+          ]
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum number of matching messages to return (default: 100). Applied AFTER filtering."
+        },
+        "maxPages": {
+          "type": "number",
+          "description": "Safety cap on HC3 pages fetched (default: 10, ~300 raw messages). Raise if a filter needs deeper history."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_device_info",
+    "description": "Get detailed information about a specific device including properties, capabilities, and current state",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "get_device_parameters",
+    "description": "Read a Z-Wave device's configuration parameters with human-readable labels, descriptions, defaults, and format. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. PROVENANCE: the `source` field is verbatim from HC3. `\"template\"` does NOT mean \"catalogue default returned as placeholder\" — empirically, parameters with non-default values still carry `source: \"template\"`. It means the value is from HC3's template-backed storage layer: what HC3 recorded the device as being configured to, usually via the HC3 UI's native Z-Wave configuration path (which transmits). In normal operation these values match the physical device. What HC3 5.x cannot do over REST is re-verify the stored value against the physical device on demand (the mesh read-back path — `getParameter`, `reconfigure`, `pollConfigurationParameter` — is not-implemented or silently no-ops). So treat returned values as \"HC3's best knowledge, almost certainly accurate\", not \"guaranteed live readback\". Drift from physical reality only occurs if the device was reset physically, a different controller reached it, or someone used the broken PUT `/api/devices/{id}` `{properties: {parameters: [...]}}` path (see S14 — `modify_device` rejects it for this reason). Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id of a Z-Wave device. Must have a nodeId in its properties."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "get_device_property",
+    "description": "Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). Propagates 404 on unknown deviceId or propertyName. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id"
+        },
+        "propertyName": {
+          "type": "string",
+          "description": "Property name (e.g. \"value\", \"batteryLevel\", \"nodeId\", \"lastBreached\")"
+        }
+      },
+      "required": [
+        "deviceId",
+        "propertyName"
+      ]
+    }
+  },
+  {
+    "name": "get_device_relationships",
+    "description": "Get relationships between devices, including grouped devices, dependencies, and automation connections",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Optional: Get relationships for specific device"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_devices",
+    "description": "Get all devices from Fibaro HC3, with optional filtering by room or device type",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Optional: Filter devices by room ID"
+        },
+        "deviceType": {
+          "type": "string",
+          "description": "Optional: Filter devices by type (e.g., \"light\", \"sensor\", \"dimmer\")"
+        },
+        "interface": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional: Filter devices by interface (e.g., [\"zwave\", \"energy\"])"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_diagnostics",
+    "description": "Get system diagnostic information",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_energy_data",
+    "description": "Energy data. With no args, returns { summary, meterDevices } — system-wide current-billing-period totals and the list of energy-metering devices for follow-up queries. With deviceId, returns the device's energy-meter registration row from /api/energy/devices. Per-device historical energy data is not exposed via REST on current HC3 firmware (the legacy /api/energy/{id}/... 9-segment path is dead, and /api/energy itself returns HTTP 500).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Optional: a device id. If provided, returns its energy-meter registration row from /api/energy/devices, or an explanatory error if the device exists but is not metered."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_event_history",
+    "description": "Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering \"what just happened?\" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Maximum events to return. Default 30, capped at 1000 client-side to prevent hangs (HC3 has no server-side cap and large requests time out)."
+        },
+        "event_type": {
+          "type": "string",
+          "description": "Filter to one event type. Case-sensitive exact match — typos return an empty array silently. Examples: \"SceneStartedEvent\", \"DevicePropertyUpdatedEvent\", \"DeviceActionRanEvent\", \"CentralSceneEvent\"."
+        },
+        "object_id": {
+          "type": "number",
+          "description": "Filter to events for a specific object (usually device or scene id). Requires object_type to narrow correctly."
+        },
+        "object_type": {
+          "type": "string",
+          "description": "Object type for object_id filter (e.g. \"device\", \"scene\")."
+        },
+        "since_timestamp": {
+          "type": "number",
+          "description": "Unix epoch seconds; return only events whose timestamp >= this value. Filtered client-side after fetch (HC3 silently ignores server-side time params on this endpoint). For a time window, fetch with a large limit then rely on this filter."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_global_variables",
+    "description": "Get all global variables from the HC3 system",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_hc3_configuration_guide",
+    "description": "Get comprehensive HC3 configuration documentation including network settings, users, rooms, Z-Wave setup, etc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Specific configuration topic (optional): network, users, rooms, zwave, time, location, voip",
+          "enum": [
+            "network",
+            "users",
+            "rooms",
+            "zwave",
+            "time",
+            "location",
+            "voip",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_hc3_lua_scenes_guide",
+    "description": "Get HC3 Lua Scenes programming documentation including conditions, triggers, actions, and examples",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Specific scenes topic (optional): conditions, triggers, actions, examples, api",
+          "enum": [
+            "conditions",
+            "triggers",
+            "actions",
+            "examples",
+            "api",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_hc3_programming_examples",
+    "description": "Get practical HC3 programming examples and code snippets for common automation scenarios",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "Example category (optional): lighting, security, climate, scenes, devices, mqtt, tcp",
+          "enum": [
+            "lighting",
+            "security",
+            "climate",
+            "scenes",
+            "devices",
+            "mqtt",
+            "tcp",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_hc3_quickapp_programming_guide",
+    "description": "Get HC3 Quick Apps programming documentation including Lua syntax, methods, HTTP/TCP/UDP clients, etc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Specific programming topic (optional): basic, methods, http, tcp, udp, websocket, mqtt, child_devices",
+          "enum": [
+            "basic",
+            "methods",
+            "http",
+            "tcp",
+            "udp",
+            "websocket",
+            "mqtt",
+            "child_devices",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_home_status",
+    "description": "Get current home/away status and location information",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_icon",
+    "description": "Fetch an icon's binary content from HC3, base64-encoded. Built-in icons resolve to /assets/icon/fibaro/{category}/{name}.{ext}; user-uploaded icons resolve to /assets/userIcons/{category}/{name}.{ext} when userIcon=true. Returns {name, mime, base64, sizeBytes}. The MCP itself does not manipulate images — decode, edit (e.g. with ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "room",
+            "scene",
+            "device"
+          ],
+          "description": "Icon category. Maps to URL segment: \"room\"→rooms, \"scene\"→scena, \"device\"→{deviceType}/{iconSetName}."
+        },
+        "name": {
+          "type": "string",
+          "description": "Icon name (e.g. \"room_bedroom\"). For device icons see list_icons → device[].iconSetName."
+        },
+        "extension": {
+          "type": "string",
+          "description": "File extension. Defaults to \"png\" for room/scene, must be supplied accurately for device icons (often \"svg\")."
+        },
+        "userIcon": {
+          "type": "boolean",
+          "description": "If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false."
+        }
+      },
+      "required": [
+        "category",
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "get_installed_plugins",
+    "description": "Get list of installed plugins on the system.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_ios_devices",
+    "description": "Get registered iOS devices",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_ip_cameras",
+    "description": "Get list of available IP camera types for plugin installation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_local_backup_status",
+    "description": "Get local backup status",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_location_info",
+    "description": "Get location and geofencing information",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_network_status",
+    "description": "Get network configuration and status information",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_notification",
+    "description": "Read a single notification by id. Wraps GET /api/notificationCenter/{id}. 404 if unknown.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "number",
+          "description": "Notification id"
+        }
+      },
+      "required": [
+        "notificationId"
+      ]
+    }
+  },
+  {
+    "name": "get_notifications",
+    "description": "Get system notifications",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Limit number of results (default: 50)"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Offset for pagination (default: 0)"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_plugin_types",
+    "description": "Get information about all plugin types available in the system with categories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "Language code for localized responses (e.g., 'en', 'pl')",
+          "default": "en"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_plugin_view",
+    "description": "Get plugin view/configuration interface for a specific plugin or device.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID to get view for"
+        },
+        "pluginName": {
+          "type": "string",
+          "description": "Plugin type name (alternative to deviceId)"
+        },
+        "viewType": {
+          "type": "string",
+          "description": "Type of view: 'config' or 'view'",
+          "enum": [
+            "config",
+            "view"
+          ],
+          "default": "view"
+        },
+        "format": {
+          "type": "string",
+          "description": "Response format: 'json' or 'xml'",
+          "enum": [
+            "json",
+            "xml"
+          ],
+          "default": "json"
+        },
+        "language": {
+          "type": "string",
+          "description": "Language code for localized responses",
+          "default": "en"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_plugins",
+    "description": "Get all available plugins including installed and available plugins.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_profile",
+    "description": "Get a single profile by id. Wraps GET /api/profiles/{id}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id"
+        }
+      },
+      "required": [
+        "profileId"
+      ]
+    }
+  },
+  {
+    "name": "get_profiles",
+    "description": "List all HC3 profiles plus the activeProfile id. Profiles group scenes/climateZones/partitions/devices into mode-based orchestrations (Home/Away/Vacation/Night). Wraps GET /api/profiles.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_quickapp",
+    "description": "Get specific QuickApp by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "quickAppId": {
+          "type": "number",
+          "description": "QuickApp ID"
+        }
+      },
+      "required": [
+        "quickAppId"
+      ]
+    }
+  },
+  {
+    "name": "get_quickapp_available_types",
+    "description": "List the QuickApp device types that the current HC3 firmware knows about. Returns an array of {type, label} pairs — e.g. {type: 'com.fibaro.temperatureSensor', label: 'Temperature sensor'}. Use as the authoritative list when picking a `type` for create_quickapp or when validating plua `--%%type=...` headers. Wraps GET /api/quickApp/availableTypes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_quickapp_file",
+    "description": "Get detailed information about a specific QuickApp file including its content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the file to retrieve"
+        }
+      },
+      "required": [
+        "deviceId",
+        "fileName"
+      ]
+    }
+  },
+  {
+    "name": "get_quickapp_variable",
+    "description": "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Variable name"
+        }
+      },
+      "required": [
+        "deviceId",
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "get_quickapps",
+    "description": "Get all QuickApps",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_refresh_states",
+    "description": "Poll HC3's native event/state-change stream via GET /api/refreshStates?last={cursor}. Returns the `changes` delta (current device state snapshot for first call; only changed devices on subsequent calls) and the `events` list (discrete events since last cursor — scene starts, device actions, central scene button presses, etc.), plus a new `last` cursor to pass to the next call. This is the underlying mechanism HC3 QuickApps use for refreshStates-based event subscriptions. HC3 long-polls with up to ~30s block if no new events — expect a brief wait when everything is quiet. FIRST CALL (last=0 or omitted): returns a full snapshot, potentially hundreds of change entries. SUBSEQUENT CALLS (with prior last): incremental, usually small. Complementary to get_event_history: refreshStates is live poll; event_history is retrospective query.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "last": {
+          "type": "number",
+          "description": "Cursor from a previous call. Omit or 0 for a full snapshot. Use the `last` field from the previous response to continue polling incrementally."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_remote_backup_status",
+    "description": "Get remote backup status",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_room",
+    "description": "Get a single room by id. Wraps GET /api/rooms/{id}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Room id"
+        }
+      },
+      "required": [
+        "roomId"
+      ]
+    }
+  },
+  {
+    "name": "get_rooms",
+    "description": "Get all rooms in the Fibaro HC3 system",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_scenes",
+    "description": "Get all scenes from Fibaro HC3, with optional filtering by room",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Optional: Filter scenes by room ID"
+        },
+        "alexaProhibited": {
+          "type": "boolean",
+          "description": "Optional: Filter scenes by Alexa prohibition status"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_sprinkler_system",
+    "description": "Get specific sprinkler system by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "systemId": {
+          "type": "number",
+          "description": "Sprinkler system ID"
+        }
+      },
+      "required": [
+        "systemId"
+      ]
+    }
+  },
+  {
+    "name": "get_sprinkler_systems",
+    "description": "Get all sprinkler systems",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_system_context",
+    "description": "Get comprehensive system context including device capabilities, room layouts, scene purposes, and system intelligence data",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_system_info",
+    "description": "Get Fibaro HC3 system information including version, serial number, and status",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_users",
+    "description": "Get all users configured in the HC3 system",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_weather",
+    "description": "Get current weather information and forecast",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_zwave_mesh_health",
+    "description": "Summarise Z-wave mesh health: counts of dead/unconfigured devices, dead devices listed with node IDs and reasons, and breakdowns by room and manufacturer to help identify mesh dead zones. Uses /api/devices?interface=zwave (documented) rather than undocumented /api/diagnostics/* subpaths.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "get_zwave_node_diagnostics",
+    "description": "Per-node Z-Wave transmission counters: incoming/outgoing frame totals, outgoing failures, incoming CRC/S0/S2/TransportService/MultiChannel failures, and nonce exchange counts. Enriches each node with device name, room, and a computed outgoingFailedPercent so problem nodes surface immediately. Counters are cumulative since the controller last reset them. Sources the undocumented endpoint /api/zwave/nodes/diagnostics/transmissions (read-only); may break across HC3 firmware updates. Use for identifying which Z-Wave nodes are experiencing retries, CRC errors, or security-layer negotiation problems.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "min_outgoing_failed_percent": {
+          "type": "number",
+          "description": "If set, only return nodes whose outgoingFailedPercent is >= this threshold (0-100). Useful to filter to problem nodes only."
+        },
+        "sort_by": {
+          "type": "string",
+          "enum": [
+            "outgoingFailedPercent",
+            "outgoingFailed",
+            "incomingTotal",
+            "outgoingTotal",
+            "nodeId"
+          ],
+          "description": "Field to sort nodes by, descending (except nodeId which is ascending). Defaults to outgoingFailedPercent."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_zwave_reconfiguration_tasks",
+    "description": "Active Z-Wave reconfiguration tasks: what HC3 is currently reconfiguring over the mesh. Each task surfaces the device being reconfigured, its nodeId, the task status (Completed, Failed, InProgress, Queued, Downloading, Reconfiguring), whether it is a soft or full reconfiguration, and the count/names of affected child devices. Sources the undocumented endpoint /api/zwaveReconfigurationTasks (read-only); may break across HC3 firmware updates. Use when a reconfigure has been initiated and you want to check progress without opening the HC3 UI. Returns empty list if no task is active.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "import_quickapp",
+    "description": "Import a QuickApp from .fqa/.fqax file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Path to the .fqa/.fqax file to import"
+        },
+        "roomId": {
+          "type": "number",
+          "description": "Room ID where the QuickApp should be created"
+        }
+      },
+      "required": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "install_plugin",
+    "description": "Install a plugin by type (mainly for HC2 compatibility).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Plugin type to install"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "introspect_device_group",
+    "description": "Take a numeric Devices.X.Y = { foo = 1234, bar = 5678 } group inside a QA file and return a structured snapshot of the live state behind each id (name, type, parentId, endPointId from /api/devices/{id}). Useful for documenting a group, diffing it against the snapshot tree, or confirming it is still pointing at the right devices after a Z-Wave re-inclusion. Auto-detects whether the group is endpoint-mode (all entries share a common parentId; each entry is a channel of one physical device, ep numbers are captured) or flat (independent devices, no shared parent). v1 supports json and markdown-table outputs; bind-lua and yaml are planned for a follow-up. Stateless; does not modify HC3 or local files.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QA device id whose file will be read. Must be a QuickApp."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "File containing the group definition. Default \"config\".",
+          "default": "config"
+        },
+        "groupPath": {
+          "type": "string",
+          "description": "Dotted path to the group (last segment is the table being introspected). Example: \"Devices.Mae.ensuiteRGBW\". The Lua-source parser navigates the path using brace-balanced search; non-trivial paths with shadowed leaf names may resolve to the first match — disambiguate by passing a more specific path in that case."
+        },
+        "outputFormat": {
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown-table",
+            "bind-lua",
+            "yaml"
+          ],
+          "description": "Output shape. json: canonical machine-readable record (default). markdown-table: H2 heading, parent line (if endpoint mode), and a markdown table — pasteable into a doc. bind-lua: ready-to-paste Lua bind(\"RoleStem\", { ... }) descriptor block matching the SceneManager bind() pattern; the role stem is the groupPath with any leading \"Devices.\" stripped. yaml: a YAML document mirroring the json shape. Default json.",
+          "default": "json"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "flat",
+            "endpoint"
+          ],
+          "description": "Force a particular mode rather than auto-detect. Default auto: endpoint if all entries share a common parentId, flat otherwise.",
+          "default": "auto"
+        },
+        "lockNameForControllers": {
+          "type": "boolean",
+          "description": "Only relevant for bind-lua output. If true (default), set lockName = true on entries whose type matches *FGRGBW442CC (RGBW master controllers — their name must not drift, or downstream channels lose their controller reference). Set false to omit the flag.",
+          "default": true
+        }
+      },
+      "required": [
+        "deviceId",
+        "groupPath"
+      ]
+    }
+  },
+  {
+    "name": "list_icons",
+    "description": "List all icons HC3 knows about, grouped by `device` / `room` / `scene`. Each entry has the icon name, fileExtension (typically \"png\" or \"svg\"), and an internal id. Built-in icons live under /assets/icon/fibaro/{rooms,scena,...}/; user-uploaded icons live under /assets/userIcons/...",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "list_quickapp_files",
+    "description": "Get list of all source files for a QuickApp. Returns file names, types, and metadata without file content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "manage_plugin_interfaces",
+    "description": "Add or remove interfaces from a device.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Action to perform: 'add' or 'delete'",
+          "enum": [
+            "add",
+            "delete"
+          ]
+        },
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "interfaces": {
+          "type": "array",
+          "description": "List of interfaces to add or remove",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "action",
+        "deviceId",
+        "interfaces"
+      ]
+    }
+  },
+  {
+    "name": "mark_notification_read",
+    "description": "Mark notification as read",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "number",
+          "description": "Notification ID"
+        }
+      },
+      "required": [
+        "notificationId"
+      ]
+    }
+  },
+  {
+    "name": "modify_device",
+    "description": "Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. HC3's PUT semantics for nested properties: top-level fields merge, but array-valued properties under `properties.*` (such as `quickAppVariables`, `categories`, `parameters`, `uiCallbacks`) are fully replaced. Submitting a partial array destroys entries not in the submission. `quickAppVariables` is explicitly rejected by this tool — use `set_quickapp_variable` instead. For other array-valued properties, fetch the full current array, modify, and submit the complete modified array.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "topLevel": {
+          "type": "object",
+          "description": "Top-level device fields to modify (e.g., {name: \"New Name\", roomID: 5, enabled: true, visible: true}). Sent at the root of the PUT body."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: \"...\"}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters / associations / multichannelAssociations (HC3 firmware 5.x caches Z-wave mesh-config writes without transmitting — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries)."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "modify_profile",
+    "description": "Modify a profile's configuration (name, iconId, or the devices / scenes / climateZones / partitions arrays that define what the profile orchestrates). Follows the standard read-modify-write + post-write-verify pattern: reads current, deep-merges submitted fields, PUTs, refetches, asserts merge result matches. Wraps PUT /api/profiles/{id}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id to modify"
+        },
+        "fields": {
+          "type": "object",
+          "description": "Partial update. Any of: name (string), iconId (number), devices (array), scenes (array), climateZones (array), partitions (array). Array fields fully replace — HC3 PUT semantics on array-valued properties."
+        }
+      },
+      "required": [
+        "profileId",
+        "fields"
+      ]
+    }
+  },
+  {
+    "name": "modify_room",
+    "description": "Update room fields (name, sectionID, icon, category, visible, defaultSensors, defaultThermostat, sortOrder) via PUT /api/rooms/{id}. Read-modify-write + post-write verify.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "number",
+          "description": "Room id to modify"
+        },
+        "fields": {
+          "type": "object",
+          "description": "Partial update of the room record."
+        }
+      },
+      "required": [
+        "roomId",
+        "fields"
+      ]
+    }
+  },
+  {
+    "name": "modify_scene",
+    "description": "Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Scene fields to update. Any subset of the fields below is accepted; fields not supplied are left unchanged.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRunningInstances": {
+              "type": "number"
+            },
+            "restart": {
+              "type": "boolean"
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "stopOnAlarm": {
+              "type": "boolean"
+            },
+            "protectedByPin": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "manual"
+              ]
+            },
+            "roomId": {
+              "type": "number"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "sceneId",
+        "properties"
+      ]
+    }
+  },
+  {
+    "name": "publish_plugin_event",
+    "description": "Publish various types of events through the plugin system.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "eventType": {
+          "type": "string",
+          "description": "Type of event to publish",
+          "enum": [
+            "centralSceneEvent",
+            "accessControlEvent",
+            "sceneActivationEvent",
+            "deviceFirmwareUpdateEvent",
+            "GeofenceEvent",
+            "ZwaveNodeRemovedEvent",
+            "ZwaveNetworkResetEvent",
+            "VideoGateIncomingCallEvent",
+            "ZwaveDeviceParametersChangedEvent"
+          ]
+        },
+        "source": {
+          "type": "number",
+          "description": "Source device ID (required for most event types)"
+        },
+        "data": {
+          "type": "object",
+          "description": "Event-specific data object"
+        }
+      },
+      "required": [
+        "eventType"
+      ]
+    }
+  },
+  {
+    "name": "register_ios_device",
+    "description": "Register a new iOS device",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceToken": {
+          "type": "string",
+          "description": "iOS device token"
+        },
+        "name": {
+          "type": "string",
+          "description": "Device name"
+        }
+      },
+      "required": [
+        "deviceToken",
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "reset_profiles",
+    "description": "DESTRUCTIVE: reset all profiles to HC3 defaults via POST /api/profiles/reset. Wipes all custom profile configuration (device lists, scene actions, climate-zone actions, partition actions) across every profile. Requires confirm=true. No undo.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean",
+          "description": "Must be true to proceed. Any other value refuses."
+        }
+      },
+      "required": [
+        "confirm"
+      ]
+    }
+  },
+  {
+    "name": "restart_plugin",
+    "description": "Restart a plugin/device.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID to restart"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "name": "restart_quickapp",
+    "description": "Restart a QuickApp",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "quickAppId": {
+          "type": "number",
+          "description": "QuickApp ID"
+        }
+      },
+      "required": [
+        "quickAppId"
+      ]
+    }
+  },
+  {
+    "name": "run_scene",
+    "description": "Execute a scene by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        }
+      },
+      "required": [
+        "sceneId"
+      ]
+    }
+  },
+  {
+    "name": "run_scene_sync",
+    "description": "Run a scene synchronously via POST /api/scenes/{id}/executeSync. Unlike run_scene (fires async and returns immediately), this waits until the scene has finished running before returning. Useful for sequencing dependent automation steps. Returns HC3's response (204 No Content on success — no return payload).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        }
+      },
+      "required": [
+        "sceneId"
+      ]
+    }
+  },
+  {
+    "name": "set_global_variable",
+    "description": "Set the value of a global variable",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "varName": {
+          "type": "string",
+          "description": "Variable name"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "Variable value"
+        }
+      },
+      "required": [
+        "varName",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "set_home_status",
+    "description": "Set home/away status",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "Home status (Home, Away, Night, Vacation)",
+          "enum": [
+            "Home",
+            "Away",
+            "Night",
+            "Vacation"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ]
+    }
+  },
+  {
+    "name": "set_profile_climate_zone_action",
+    "description": "Set how a profile handles a specific climate zone when activated. Wraps PUT /api/profiles/{profileId}/climateZones/{zoneId}. Body: {mode, properties}. Mode values observed: \"Manual\", \"Auto\", others per firmware. Properties vary by mode (e.g. handMode=\"Heat\", handSetPointHeating=21 for Manual).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id"
+        },
+        "zoneId": {
+          "type": "number",
+          "description": "Climate zone id"
+        },
+        "mode": {
+          "type": "string",
+          "description": "Mode (e.g. Manual, Auto)."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Mode-specific properties (e.g. {handMode, handSetPointHeating})."
+        }
+      },
+      "required": [
+        "profileId",
+        "zoneId",
+        "mode"
+      ]
+    }
+  },
+  {
+    "name": "set_profile_partition_action",
+    "description": "Set how a profile handles a specific alarm partition when activated. Wraps PUT /api/profiles/{profileId}/partitions/{partitionId}. Body: {action} where action is typically \"arm\", \"disarm\", or null.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id"
+        },
+        "partitionId": {
+          "type": "number",
+          "description": "Alarm partition id"
+        },
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Partition action (e.g. \"arm\", \"disarm\") or null for no-op."
+        }
+      },
+      "required": [
+        "profileId",
+        "partitionId"
+      ]
+    }
+  },
+  {
+    "name": "set_profile_scene_action",
+    "description": "Set how a profile handles a specific scene when activated. Wraps PUT /api/profiles/{profileId}/scenes/{sceneId}. Body: {actions: [...]} where actions is an array of scene-action strings (e.g. [\"execute\"], [\"kill\"], [\"setToAuto\"]). The scene must already be present in the profile's scenes array (use modify_profile to add first).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "number",
+          "description": "Profile id"
+        },
+        "sceneId": {
+          "type": "number",
+          "description": "Scene id within the profile"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Action strings. Examples: \"execute\", \"kill\", \"setToAuto\"."
+        }
+      },
+      "required": [
+        "profileId",
+        "sceneId",
+        "actions"
+      ]
+    }
+  },
+  {
+    "name": "set_quickapp_variable",
+    "description": "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; create new variables via the HC3 UI. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Variable name. Must already exist on the device."
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "Value to set. Will be coerced to match the variable's declared type. For string-typed variables, numeric inputs are stringified to preserve type."
+        }
+      },
+      "required": [
+        "deviceId",
+        "name",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "snapshot",
+    "description": "Single-call dump of every mutable HC3 configuration surface for backups, drift detection, and baseline regimes. Read-only. Parallel fetches all selected surfaces with per-surface atomicity (Promise.allSettled — one failing surface doesn't abort the others; failures land in surfaceErrors). Default include set: devices, rooms, scenes (with content), quickapps (with files), globals, custom-events, alarm, climate, system, users, hc3-docs. Opt-in only: zwave-parameters (per-device iteration over ~900 devices — adds 90+ seconds to the run). Returns { capturedAt, elapsedMs, surfaces: {...}, surfaceErrors: {...} }. Use for nightly backup scripts and post-incident recovery baselines.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "devices",
+              "rooms",
+              "scenes",
+              "quickapps",
+              "globals",
+              "custom-events",
+              "alarm",
+              "climate",
+              "system",
+              "users",
+              "hc3-docs",
+              "zwave-parameters"
+            ]
+          },
+          "description": "Optional surfaces to include. Defaults to all except zwave-parameters."
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional surfaces to exclude from the default set. Ignored if include is supplied."
+        }
+      }
+    }
+  },
+  {
+    "name": "stop_scene",
+    "description": "Stop a running scene by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        }
+      },
+      "required": [
+        "sceneId"
+      ]
+    }
+  },
+  {
+    "name": "trigger_custom_event",
+    "description": "Trigger a custom event",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "number",
+          "description": "Custom event ID"
+        }
+      },
+      "required": [
+        "eventId"
+      ]
+    }
+  },
+  {
+    "name": "update_climate_zone",
+    "description": "Update climate zone fields in a single atomic PUT. Use `topLevel` for zone-body fields (e.g., `name`, `active`, `mode`) and `properties` for nested zone properties (e.g., `handSetPointHeating`, `vacationMode`, schedule objects like `monday.morning`). At least one must be provided. `properties` is written via read-modify-write: the tool fetches the current zone, deep-merges submitted scalars and nested-object keys into the existing properties, then PUTs the merged result. This preserves unsubmitted sibling keys inside schedule sub-objects. Array-valued properties (`devices`, `incompatibleDevices`, `temperatureSensors`) are fully replaced by whatever is submitted, so submit the complete array if editing them. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "zoneId": {
+          "type": "number",
+          "description": "Climate zone ID"
+        },
+        "topLevel": {
+          "type": "object",
+          "description": "Top-level zone fields to modify (e.g., {name: \"New Name\", active: true, mode: \"Schedule\"}). Sent at the root of the PUT body."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Nested zone properties to modify. Scalars (handSetPointHeating, vacationMode, etc.) and schedule sub-objects (monday.morning, etc.) are deep-merged into the current zone via read-modify-write, so sibling keys are preserved. Array-valued properties (devices, incompatibleDevices, temperatureSensors) are fully replaced — submit the full current array if editing them."
+        }
+      },
+      "required": [
+        "zoneId"
+      ]
+    }
+  },
+  {
+    "name": "update_custom_event",
+    "description": "Update a custom event's userDescription and/or rename it. Wraps PUT /api/customEvents/{name}. Read-modify-write: reads current, merges submitted fields, PUTs. If newName is supplied, verifies by refetching via the new name. Otherwise verifies under the original name. Throws on mismatch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Current custom event name"
+        },
+        "userDescription": {
+          "type": "string",
+          "description": "New description. Omit to leave unchanged."
+        },
+        "newName": {
+          "type": "string",
+          "description": "New name. Omit to leave unchanged."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "update_device_property",
+    "description": "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "propertyName": {
+          "type": "string",
+          "description": "Property name to update"
+        },
+        "value": {
+          "description": "New value for the property"
+        }
+      },
+      "required": [
+        "deviceId",
+        "propertyName",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "update_location_settings",
+    "description": "Update a single location/geofence by ID in a verified PUT. Fetches the current location, deep-merges submitted `fields` into it, and PUTs the full merged object to /api/panels/location/{id}. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. Read-only fields (`id`, `created`, `modified`) are rejected if submitted. Get the full list of configured locations with `get_location_info` first to find the ID you want to edit.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "locationId": {
+          "type": "number",
+          "description": "ID of the location/geofence to update (from get_location_info)"
+        },
+        "fields": {
+          "type": "object",
+          "description": "Fields to update (e.g. {name: \"Home\", latitude: 51.1, longitude: -0.77, radius: 500, address: \"...\"}). Submitted fields are deep-merged into the current location; unspecified fields are preserved. Read-only fields (id, created, modified) will be rejected."
+        }
+      },
+      "required": [
+        "locationId",
+        "fields"
+      ]
+    }
+  },
+  {
+    "name": "update_multiple_quickapp_files",
+    "description": "Update multiple QuickApp source files at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "files": {
+          "type": "array",
+          "description": "Array of files to update",
+          "items": {
+            "type": "object",
+            "properties": {
+              "fileName": {
+                "type": "string",
+                "description": "File name"
+              },
+              "content": {
+                "type": "string",
+                "description": "File content"
+              },
+              "type": {
+                "type": "string",
+                "description": "File type"
+              },
+              "isOpen": {
+                "type": "boolean",
+                "description": "Whether file should be open"
+              }
+            },
+            "required": [
+              "fileName",
+              "content"
+            ]
+          }
+        }
+      },
+      "required": [
+        "deviceId",
+        "files"
+      ]
+    }
+  },
+  {
+    "name": "update_notification",
+    "description": "Update a notification via PUT /api/notificationCenter/{id}. Read-modify-write + post-write verify on submitted fields. Typically used to mark as read or to amend the data payload.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "number",
+          "description": "Notification id"
+        },
+        "fields": {
+          "type": "object",
+          "description": "Partial update (wasRead, priority, data, canBeDeleted, etc.)"
+        }
+      },
+      "required": [
+        "notificationId",
+        "fields"
+      ]
+    }
+  },
+  {
+    "name": "update_plugin_view",
+    "description": "Update plugin view component properties.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Device ID"
+        },
+        "componentName": {
+          "type": "string",
+          "description": "Name of the UI component to update"
+        },
+        "propertyName": {
+          "type": "string",
+          "description": "Property name to update (e.g., 'text', 'value', 'visible')"
+        },
+        "newValue": {
+          "description": "New value for the property (can be string, number, boolean, object, or array)"
+        }
+      },
+      "required": [
+        "deviceId",
+        "componentName",
+        "propertyName",
+        "newValue"
+      ]
+    }
+  },
+  {
+    "name": "update_quickapp_file",
+    "description": "Update an existing QuickApp source file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the file to update"
+        },
+        "content": {
+          "type": "string",
+          "description": "New content for the file"
+        },
+        "isOpen": {
+          "type": "boolean",
+          "description": "Whether the file should be open in the editor"
+        }
+      },
+      "required": [
+        "deviceId",
+        "fileName"
+      ]
+    }
+  },
+  {
+    "name": "update_scene_content",
+    "description": "Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved. Returns both previous and current content so the caller has a last-known-good copy for recovery.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        },
+        "actions": {
+          "type": "string",
+          "description": "Lua source for the scene actions block. If omitted, existing actions are preserved."
+        },
+        "conditions": {
+          "type": "string",
+          "description": "Conditions block source (Lua table as a string). If omitted, existing conditions are preserved. Only valid for Lua-type scenes."
+        }
+      },
+      "required": [
+        "sceneId"
+      ]
+    }
+  },
+  {
+    "name": "update_user_rights",
+    "description": "Update a user's access rights (devices / scenes / climateZones / profiles / alarmPartitions) via PUT /api/users/{id}. Follows the standard read-modify-write + post-write-verify pattern: reads the full user record, deep-merges the submitted rights.* subkeys onto the current, and full-array-replaces the leaf arrays (devices, rooms, sections, scenes, zones, etc.) — same HC3 PUT semantics as other array-valued properties. Verifies every submitted array member is present after the write. SAFETY: rejects writes to rights.advanced.* unless allow_advanced_rights=true (17 sensitive subkeys including zWave, backup, access, update — unauthorised access here is a privilege-escalation footgun). Rejects any rights.*.all=true (mass-grant \"oops I gave everyone access\") unless allow_grant_all=true. Rejects writes targeting superuser-type users (their rights are already all-true by design; any state change there breaks admin access).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "number",
+          "description": "HC3 user id (from get_users). Must be a non-superuser."
+        },
+        "rights": {
+          "type": "object",
+          "description": "Partial rights object. Only submitted subkeys are modified; unsubmitted subkeys (scenes, climateZones, etc.) are preserved untouched. Array-valued leaves (rights.devices.devices, rights.devices.rooms, rights.scenes.scenes, etc.) fully replace the current array."
+        },
+        "allow_advanced_rights": {
+          "type": "boolean",
+          "description": "Required to write rights.advanced.* (admin / zwave / backup / update / access / alarm / climate etc.). Defaults false."
+        },
+        "allow_grant_all": {
+          "type": "boolean",
+          "description": "Required to set rights.<category>.all = true (mass grant). Defaults false."
+        }
+      },
+      "required": [
+        "userId",
+        "rights"
+      ]
+    }
+  },
+  {
+    "name": "upload_icon",
+    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})). HC3 5.x has two undocumented PNG constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png` to produce a compatible palette PNG. Returns `{newName, newId, category, extension, hint}`.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "base64": {
+          "type": "string",
+          "description": "Base64-encoded image bytes (no data URL prefix). For PNG: must be 128×128 in palette mode (8-bit colormap, color type 3). For SVG: as-is."
+        },
+        "mime": {
+          "type": "string",
+          "description": "\"image/png\" or \"image/svg+xml\"."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "room",
+            "scene",
+            "device"
+          ],
+          "description": "Category — records under that bucket in list_icons."
+        }
+      },
+      "required": [
+        "base64",
+        "mime",
+        "category"
+      ]
+    }
+  }
+]
