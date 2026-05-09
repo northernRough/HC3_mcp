@@ -776,6 +776,22 @@
     }
   },
   {
+    "name": "delete_scene",
+    "description": "Delete a scene by id via DELETE /api/scenes/{id}. Reads the scene first to capture name/type/content as a recovery trail in the response. Refuses to delete a scene that is currently running (isRunning=true) — stop_scene first. Post-delete verifies by refetch (expects HTTP 404). Returns {sceneId, deletedScene} where deletedScene is the last-known-good record. The MCP previously had no delete_scene tool, forcing the test harness to use a raw REST DELETE workaround; this fills that gap.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        }
+      },
+      "required": [
+        "sceneId"
+      ]
+    }
+  },
+  {
     "name": "disarm_alarm_partition",
     "description": "Disarm alarm partition",
     "inputSchema": {

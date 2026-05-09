@@ -114,6 +114,20 @@ export const scenes: ToolModule = {
         }
       },
       {
+        name: 'delete_scene',
+        description: 'Delete a scene by id via DELETE /api/scenes/{id}. Reads the scene first to capture name/type/content as a recovery trail in the response. Refuses to delete a scene that is currently running (isRunning=true) — stop_scene first. Post-delete verifies by refetch (expects HTTP 404). Returns {sceneId, deletedScene} where deletedScene is the last-known-good record. The MCP previously had no delete_scene tool, forcing the test harness to use a raw REST DELETE workaround; this fills that gap.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: {
+              type: 'number',
+              description: 'Scene ID',
+            },
+          },
+          required: ['sceneId'],
+        },
+      },
+      {
         name: 'update_scene_content',
         description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved. Returns both previous and current content so the caller has a last-known-good copy for recovery.',
         inputSchema: {
@@ -247,6 +261,39 @@ export const scenes: ToolModule = {
         throw new Error(`create_scene: post-create type mismatch. Submitted ${JSON.stringify(args.type)}, stored ${JSON.stringify(after?.type)}.`);
       }
       return { sceneId: newId, scene: after };
+    },
+
+    async delete_scene(hc3, args: { sceneId: number }): Promise<any> {
+      if (typeof args?.sceneId !== 'number') {
+        throw new Error('delete_scene requires numeric sceneId.');
+      }
+      const scene: any = await hc3.request(`/api/scenes/${args.sceneId}`);
+      if (scene?.isRunning) {
+        throw new Error(
+          `delete_scene refuses scene ${args.sceneId} (${scene.name}): scene is currently running. ` +
+          `Call stop_scene first.`
+        );
+      }
+      await hc3.request(`/api/scenes/${args.sceneId}`, 'DELETE');
+      try {
+        await hc3.request(`/api/scenes/${args.sceneId}`);
+        throw new Error(
+          `delete_scene: post-delete verify failed — scene ${args.sceneId} still exists after DELETE.`
+        );
+      } catch (e: any) {
+        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+      }
+      return {
+        sceneId: args.sceneId,
+        deletedScene: {
+          id: scene.id,
+          name: scene.name,
+          type: scene.type,
+          roomId: scene.roomId,
+          enabled: scene.enabled,
+          content: scene.content,
+        },
+      };
     },
 
     async update_scene_content(hc3, args: { sceneId: number; actions?: string; conditions?: string }): Promise<any> {
