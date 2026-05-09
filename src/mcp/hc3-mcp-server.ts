@@ -146,6 +146,7 @@ class HC3MCPServer {
       systemSchemas.get_refresh_states,
       systemSchemas.get_event_history,
       zwaveSchemas.get_device_parameters,
+      zwaveSchemas.set_device_parameter,
       zwaveSchemas.get_zwave_reconfiguration_tasks,
       zwaveSchemas.get_zwave_node_diagnostics,
 

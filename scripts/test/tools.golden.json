@@ -2229,6 +2229,42 @@
     }
   },
   {
+    "name": "set_device_parameter",
+    "description": "Write a Z-Wave configuration parameter via the `setConfiguration` device action. Wraps `POST /api/devices/{id}/action/setConfiguration` with body `{args:[parameterNumber, size, value]}` — the working REST path for parameter writes on HC3 firmware 5.x. Reads the parameter before and after the write and reports the diff plus an `actionResponse` envelope from HC3.\n\nWHY THIS EXISTS as a dedicated tool: `control_device` actively rejects `setConfiguration` because most Z-Wave devices do not declare it in their `actions` table; that guard is the right default for unknown action names but blocks this specific, well-attested use case. This tool bypasses the actions-array pre-check for `setConfiguration` only.\n\nALTERNATIVE PATHS (not used here): the documented `setParameter` and `reconfigure` actions, and the dedicated `pollConfigurationParameter`, return `{\"error\":{\"code\":-3,\"message\":\"not implemented\"}}` on firmware 5.x. The PUT `/api/devices/{id}` `{properties:{parameters:[...]}}` path silently caches without transmitting (S14 — `modify_device` rejects this). `setConfiguration` is the only working channel.\n\nVERIFICATION: HC3 5.x has no mesh read-back path, so a single REST call cannot prove the value reached the physical device. Empirical evidence is strong — multiple working production scenes (e.g. the Fibaro forum `er` rule pattern from jgab April 2024, and the local `Re-calibrate Qubino Dimmers on power restart` scene 285) treat `setConfiguration` as transmitting; on 2026-05-09 a behavioural test on a Fibaro FGD212 (auto-off param 10) confirmed transmission on firmware 5.203.68 (the device autonomously switched off after the configured delay). The strongest single-call signal this tool can return is `cacheUpdated: true` plus a clean `actionResponse.error: null`; for safety-critical writes, observe the device.\n\nGUARDS: refuses devices with no Z-Wave `nodeId`; refuses `deviceId < 10` (HC3 system devices); validates `parameterNumber` (1-255), `size` (1, 2, or 4), and integer `value`. Some parameters are read-only at the device-firmware level (e.g. FGD212 14, 31, 33; Qubino Mini Dimmer 72) — the cache may appear to update but the device discards the write; this is a device-firmware concern, not a guardrail this tool can enforce.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id of the Z-Wave node (parent or endpoint child). The tool resolves the node's `nodeId.endPointId` address from the device record."
+        },
+        "parameterNumber": {
+          "type": "number",
+          "description": "Z-Wave configuration parameter number (1-255). Look up valid parameters via get_device_parameters."
+        },
+        "size": {
+          "type": "number",
+          "enum": [
+            1,
+            2,
+            4
+          ],
+          "description": "Parameter size in bytes — 1, 2, or 4. Must match the device's declared size for this parameter; mismatched size will be encoded incorrectly. Look up the correct size via get_device_parameters."
+        },
+        "value": {
+          "type": "number",
+          "description": "Integer value to write. Range depends on size and parameter encoding (signed vs unsigned, ranges, enum domains) — consult the parameter's template via get_device_parameters before writing."
+        }
+      },
+      "required": [
+        "deviceId",
+        "parameterNumber",
+        "size",
+        "value"
+      ]
+    }
+  },
+  {
     "name": "set_global_variable",
     "description": "Set the value of a global variable",
     "inputSchema": {

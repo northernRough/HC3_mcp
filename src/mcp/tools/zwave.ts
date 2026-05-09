@@ -45,6 +45,34 @@ export const zwaveSchemas: Record<string, MCPTool> = {
           properties: {},
         },
       },
+  set_device_parameter:
+      {
+        name: 'set_device_parameter',
+        description: 'Write a Z-Wave configuration parameter via the `setConfiguration` device action. Wraps `POST /api/devices/{id}/action/setConfiguration` with body `{args:[parameterNumber, size, value]}` — the working REST path for parameter writes on HC3 firmware 5.x. Reads the parameter before and after the write and reports the diff plus an `actionResponse` envelope from HC3.\n\nWHY THIS EXISTS as a dedicated tool: `control_device` actively rejects `setConfiguration` because most Z-Wave devices do not declare it in their `actions` table; that guard is the right default for unknown action names but blocks this specific, well-attested use case. This tool bypasses the actions-array pre-check for `setConfiguration` only.\n\nALTERNATIVE PATHS (not used here): the documented `setParameter` and `reconfigure` actions, and the dedicated `pollConfigurationParameter`, return `{"error":{"code":-3,"message":"not implemented"}}` on firmware 5.x. The PUT `/api/devices/{id}` `{properties:{parameters:[...]}}` path silently caches without transmitting (S14 — `modify_device` rejects this). `setConfiguration` is the only working channel.\n\nVERIFICATION: HC3 5.x has no mesh read-back path, so a single REST call cannot prove the value reached the physical device. Empirical evidence is strong — multiple working production scenes (e.g. the Fibaro forum `er` rule pattern from jgab April 2024, and the local `Re-calibrate Qubino Dimmers on power restart` scene 285) treat `setConfiguration` as transmitting; on 2026-05-09 a behavioural test on a Fibaro FGD212 (auto-off param 10) confirmed transmission on firmware 5.203.68 (the device autonomously switched off after the configured delay). The strongest single-call signal this tool can return is `cacheUpdated: true` plus a clean `actionResponse.error: null`; for safety-critical writes, observe the device.\n\nGUARDS: refuses devices with no Z-Wave `nodeId`; refuses `deviceId < 10` (HC3 system devices); validates `parameterNumber` (1-255), `size` (1, 2, or 4), and integer `value`. Some parameters are read-only at the device-firmware level (e.g. FGD212 14, 31, 33; Qubino Mini Dimmer 72) — the cache may appear to update but the device discards the write; this is a device-firmware concern, not a guardrail this tool can enforce.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: {
+              type: 'number',
+              description: 'HC3 device id of the Z-Wave node (parent or endpoint child). The tool resolves the node\'s `nodeId.endPointId` address from the device record.'
+            },
+            parameterNumber: {
+              type: 'number',
+              description: 'Z-Wave configuration parameter number (1-255). Look up valid parameters via get_device_parameters.'
+            },
+            size: {
+              type: 'number',
+              enum: [1, 2, 4],
+              description: 'Parameter size in bytes — 1, 2, or 4. Must match the device\'s declared size for this parameter; mismatched size will be encoded incorrectly. Look up the correct size via get_device_parameters.'
+            },
+            value: {
+              type: 'number',
+              description: 'Integer value to write. Range depends on size and parameter encoding (signed vs unsigned, ranges, enum domains) — consult the parameter\'s template via get_device_parameters before writing.'
+            }
+          },
+          required: ['deviceId', 'parameterNumber', 'size', 'value']
+        },
+      },
   get_zwave_node_diagnostics:
       {
         name: 'get_zwave_node_diagnostics',
@@ -266,6 +294,101 @@ export const zwave: ToolModule = {
           'template-backed storage", NOT "this is the catalogue default". Empirically, parameters with ' +
           'non-default values still carry source "template".',
         all_values_are_hc3_stored: storedOnly
+      };
+    },
+
+    async set_device_parameter(hc3, args: {
+      deviceId: number;
+      parameterNumber: number;
+      size: number;
+      value: number;
+    }): Promise<any> {
+      const { deviceId, parameterNumber, size, value } = args ?? {} as any;
+
+      if (typeof deviceId !== 'number' || deviceId < 10) {
+        throw new Error(
+          `set_device_parameter: invalid deviceId ${deviceId} — must be a number >= 10 (HC3 system devices < 10 are reserved).`
+        );
+      }
+      if (!Number.isInteger(parameterNumber) || parameterNumber < 1 || parameterNumber > 255) {
+        throw new Error(
+          `set_device_parameter: parameterNumber must be an integer 1-255 (got ${parameterNumber}).`
+        );
+      }
+      if (size !== 1 && size !== 2 && size !== 4) {
+        throw new Error(
+          `set_device_parameter: size must be 1, 2, or 4 (got ${size}).`
+        );
+      }
+      if (!Number.isInteger(value)) {
+        throw new Error(
+          `set_device_parameter: value must be an integer (got ${value}).`
+        );
+      }
+
+      const device: any = await hc3.request(`/api/devices/${deviceId}`);
+      const nodeId = device?.properties?.nodeId;
+      if (nodeId === undefined || nodeId === null) {
+        throw new Error(
+          `set_device_parameter: device ${deviceId} (${device?.name ?? '?'}) has no Z-Wave nodeId — not a Z-Wave device.`
+        );
+      }
+      const endpoint = device?.properties?.endPointId ?? 0;
+      const addr = `${nodeId}.${endpoint}`;
+      const encodedAddr = encodeURIComponent(addr);
+
+      const readOne = async (): Promise<{ value: number; size: number; source: string | null } | null> => {
+        try {
+          const res: any = await hc3.request(`/api/zwave/configuration_parameters/${encodedAddr}`);
+          const items: any[] = Array.isArray(res?.items) ? res.items : [];
+          const entry = items.find((p: any) => p.parameterNumber === parameterNumber);
+          if (!entry) return null;
+          return {
+            value: entry.configurationValue,
+            size: entry.size,
+            source: entry.source?.type ?? null
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      const before = await readOne();
+
+      const actionResponse: any = await hc3.request(
+        `/api/devices/${deviceId}/action/setConfiguration`,
+        'POST',
+        { args: [parameterNumber, size, value] }
+      );
+
+      // HC3's cache for /api/zwave/configuration_parameters/{addr} can take
+      // a couple of seconds to reflect a setConfiguration write. Poll with
+      // backoff so the happy-path stays fast while slow updates still land
+      // a true cacheUpdated. Cap at ~3.5s total (500 + 1000 + 2000 ms).
+      let after: { value: number; size: number; source: string | null } | null = null;
+      for (const delayMs of [500, 1000, 2000]) {
+        await new Promise(r => setTimeout(r, delayMs));
+        after = await readOne();
+        if (after !== null && after.value === value) break;
+      }
+
+      const cacheUpdated = after !== null && after.value === value;
+
+      return {
+        deviceId,
+        deviceName: device?.name ?? null,
+        nodeId,
+        endpoint,
+        addr,
+        parameterNumber,
+        submittedSize: size,
+        submittedValue: value,
+        before,
+        after,
+        cacheUpdated,
+        actionResponse,
+        transmissionNote:
+          'cacheUpdated=true means HC3 accepted and stored the new value. Whether the value transmitted to the physical Z-Wave device is NOT programmatically verifiable on HC3 5.x firmware (no mesh read-back path). Empirically, setConfiguration does transmit on this firmware (proven on Fibaro FGD212, 2026-05-09). For safety-critical writes, observe device behaviour or read the relevant device property afterwards.'
       };
     },
 
