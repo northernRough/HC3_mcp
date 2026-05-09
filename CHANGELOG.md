@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.3.0] - 2026-05-09
+
+### Added
+- **`delete_scene` tool.** Wraps `DELETE /api/scenes/{id}` with read-first-for-recovery-trail, refusal of `isRunning=true` scenes, and post-delete refetch verify (expects 404). Fills the long-standing gap flagged in `CLAUDE.md` and `scripts/test/README.md` — the test harness's `deleteSceneDirect()` raw-REST workaround can now be migrated to use the proper tool.
+
+- **`set_device_parameter` tool.** The working REST path for Z-Wave configuration parameter writes on HC3 firmware 5.x. Wraps `POST /api/devices/{id}/action/setConfiguration` with body `{args:[parameterNumber, size, value]}`. Bypasses `control_device`'s actions-array pre-check for `setConfiguration` specifically (most Z-Wave devices don't declare it in their actions table — that guard is the right default for unknown action names but blocks this well-attested use case).
+
+  The documented `setParameter` and `reconfigure` action endpoints, and the dedicated `pollConfigurationParameter`, return `{"error":{"code":-3,"message":"not implemented"}}` on firmware 5.x. The PUT `/api/devices/{id}` `{properties:{parameters:[...]}}` path silently caches without transmitting (S14 — `modify_device` rejects this for the same reason). `setConfiguration` is the only working channel.
+
+  The tool reads-before, writes via the action POST, polls with backoff (500/1000/2000 ms cap) for the cache to reflect the new value, and returns `{before, after, cacheUpdated, actionResponse, transmissionNote}`. Mesh transmission to the physical device is not programmatically verifiable on HC3 5.x (no read-back path); the docstring is explicit about this. Empirically, transmission was confirmed on 2026-05-09 against a Fibaro FGD212 (auto-off param 10 — the device autonomously switched off after the configured delay, with no `turnOff` from the controller).
+
+- **`get_server_info` tool.** Returns the server's name, version (read from `package.json` at startup so it stays in sync with the shipped tarball), transport (`stdio` or `http`), and configured `hc3Host`/`hc3Port`. No HC3 round-trip; reports local server state only. Useful for "which version of the MCP am I connected to" and "which HC3 is this MCP wired to" questions without inspecting the initialize handshake.
+
+### Changed
+- **Server version is now read from `package.json` at startup** (`src/mcp/version.ts`) and used in both the MCP `initialize` handshake's `serverInfo.version` and the new `get_server_info` tool. Removes the previously hard-coded `'4.2.2'` literal that drifted out of sync with releases.
+
 ## [4.2.2] - 2026-05-03
 
 ### Changed

@@ -10,8 +10,18 @@
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { deepMerge, verifyWrite } from '../util';
+import { SERVER_NAME, SERVER_VERSION } from '../version';
 
 export const systemSchemas: Record<string, MCPTool> = {
+  get_server_info:
+      {
+        name: 'get_server_info',
+        description: 'Report the MCP server\'s identity: package name, version (read from package.json at startup so it stays in sync with the shipped tarball), transport (stdio or http), and the HC3 host the server is configured to talk to. Useful for "which version of the MCP am I connected to" and "which HC3 is this MCP wired to" questions without needing to inspect the initialize handshake. No HC3 round-trip; reports local server state only.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
   get_system_info:
       {
         name: 'get_system_info',
@@ -172,6 +182,16 @@ export const system: ToolModule = {
   schemas: Object.values(systemSchemas),
 
   handlers: {
+    async get_server_info(hc3): Promise<any> {
+      return {
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+        transport: (process.env.MCP_TRANSPORT ?? 'stdio').toLowerCase(),
+        hc3Host: hc3.config.host ?? null,
+        hc3Port: hc3.config.port ?? null,
+      };
+    },
+
     async get_system_info(hc3): Promise<any> {
       return await hc3.request('/api/settings/info');
     },

@@ -1703,6 +1703,14 @@
     }
   },
   {
+    "name": "get_server_info",
+    "description": "Report the MCP server's identity: package name, version (read from package.json at startup so it stays in sync with the shipped tarball), transport (stdio or http), and the HC3 host the server is configured to talk to. Useful for \"which version of the MCP am I connected to\" and \"which HC3 is this MCP wired to\" questions without needing to inspect the initialize handshake. No HC3 round-trip; reports local server state only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "get_sprinkler_system",
     "description": "Get specific sprinkler system by ID",
     "inputSchema": {

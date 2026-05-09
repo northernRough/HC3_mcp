@@ -39,6 +39,7 @@ import { snapshot } from './tools/snapshot';
 import { docs } from './tools/docs';
 import { plugins } from './tools/plugins';
 import { audit } from './tools/audit';
+import { SERVER_NAME, SERVER_VERSION } from './version';
 
 const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
@@ -109,8 +110,8 @@ class HC3MCPServer {
           tools: {},
         },
         serverInfo: {
-          name: 'hc3-mcp-server',
-          version: '4.2.2',
+          name: SERVER_NAME,
+          version: SERVER_VERSION,
         },
       },
     };
@@ -125,6 +126,7 @@ class HC3MCPServer {
       ...scenes.schemas,
 
       // System Information
+      systemSchemas.get_server_info,
       systemSchemas.get_system_info,
       systemSchemas.get_network_status,
 
