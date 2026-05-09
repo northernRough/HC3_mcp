@@ -6,8 +6,12 @@ export const SANDBOX_HYPHEN = `TEST-${RUN_ID}`;   // QA / scene names: hyphen ok
 export const ORPHAN_PREFIX_VAR = 'TEST_';
 export const ORPHAN_PREFIX_HY = 'TEST-';
 
-// HC3 direct DELETE for scenes (no MCP delete_scene tool exists yet).
-// Reads the same env vars the MCP server uses.
+// HC3 direct DELETE for scenes. The MCP now exposes delete_scene
+// [4.3.0], but this direct path is retained for the orphan sweep,
+// which runs before the MCP server is up — it's the pre-flight
+// cleanup of leftovers from previous crashed runs. Test code running
+// after the harness has spawned the server can call delete_scene via
+// the MCP instead. Reads the same env vars the MCP server uses.
 export async function deleteSceneDirect(sceneId) {
     const host = process.env.FIBARO_HOST;
     const user = process.env.FIBARO_USERNAME;
@@ -83,7 +87,7 @@ export async function sweepOrphans(call, log = () => {}) {
         }
     } catch (e) { log(`orphan-sweep custom events: ${e.message}`); }
 
-    // Scenes (direct REST DELETE — MCP doesn't expose delete_scene)
+    // Scenes (direct REST DELETE — runs pre-MCP, see deleteSceneDirect note)
     try {
         const r = await call('get_scenes', {});
         const list = unwrap(r);

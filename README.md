@@ -216,6 +216,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `modify_scene` - Update scene metadata (name, icon, room, etc.)
 - `create_scene` - Create a new scene (with HC3-required field defaults; post-create verify)
 - `update_scene_content` - Replace scene Lua (actions/conditions) content
+- `delete_scene` - Delete a scene by id with read-first-for-recovery-trail, refusal of currently-running scenes, and post-delete refetch verify
 
 ### Icons
 - `list_icons` - List all icons HC3 knows about, grouped by device/room/scene
@@ -224,6 +225,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `delete_icon` - Delete a user-uploaded icon. Built-in icons return 403
 
 ### System
+- `get_server_info` - Report the MCP server's identity: name, version (read from package.json at startup), transport (stdio/http), and configured HC3 host/port. No HC3 round-trip; useful for "which version am I connected to" questions
 - `get_system_info` - HC3 version, serial, and system details
 - `snapshot` - Single-call dump of every mutable HC3 configuration surface (devices, rooms, scenes, QAs with files, globals, custom events, alarm, climate, system, users, HC3 API docs) for backup regimes and drift detection. Per-surface atomicity; opt-in zwave-parameters surface
 - `get_network_status` - Network connectivity status
@@ -313,6 +315,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `get_zwave_node_diagnostics` - Per-node Z-wave transmission counters (frame totals, outgoing failures, CRC/S0/S2/TransportService/MultiChannel failures, nonce exchanges) enriched with device name, room, and computed outgoing-failed percent. Sources an undocumented endpoint
 - `get_zwave_reconfiguration_tasks` - Active reconfiguration tasks with status, target device and node, child-device summary. Sources an undocumented endpoint
 - `get_device_parameters` - Z-Wave device configuration parameters with human-readable labels, descriptions, defaults, and format. Merges current values with the template catalogue. Flags provenance honestly: on HC3 5.x the mesh read-back path does not work, so most values are template defaults rather than live device readings
+- `set_device_parameter` - Write a Z-Wave configuration parameter via the `setConfiguration` device action. The only working REST path for parameter writes on firmware 5.x — the documented `setParameter` and `reconfigure` actions return "not implemented", and the `properties.parameters` PUT path silently caches without transmitting. Reads-before, polls cache after with backoff, returns `{before, after, cacheUpdated, actionResponse, transmissionNote}`. Mesh transmission is not programmatically verifiable on HC3 5.x but empirically confirmed working
 
 ### QuickApps
 - `get_quickapps` - List QuickApps
@@ -376,7 +379,7 @@ Each tool includes input validation, error handling, and detailed response data 
 [Upstream](https://github.com/jangabrielsson/HC3_mcp) was a starting point, not a maintained product. The original author has moved on to a different QuickApp development workflow (his `plua` repo + skills) and has greenlit independent evolution of this line. Almost no upstream code remains on the runtime path — what's been added since then:
 
 - **Write guardrails on every mutating tool.** Read-modify-write, post-write verify, refetch-and-compare on every destructive endpoint. Catches HC3's known silent-drop classes (e.g. Z-Wave parameter writes that cache without transmitting; QA file writes that need byte-exact verification; user-rights writes that would 403 if the full record is echoed back). See `CHANGELOG.md` for the inventory of caught classes.
-- **Z-Wave diagnostics**: `get_zwave_mesh_health`, `get_zwave_node_diagnostics` (per-node frame/CRC/security counters), `get_zwave_reconfiguration_tasks`, `get_device_parameters` (with honest provenance — values are HC3-stored, not live device readings on this firmware).
+- **Z-Wave diagnostics and writes**: `get_zwave_mesh_health`, `get_zwave_node_diagnostics` (per-node frame/CRC/security counters), `get_zwave_reconfiguration_tasks`, `get_device_parameters` (with honest provenance — values are HC3-stored, not live device readings on this firmware), `set_device_parameter` (4.3.0 — the working REST path for Z-Wave configuration parameter writes on firmware 5.x via `setConfiguration`; the documented `setParameter` and `reconfigure` actions return "not implemented" on this firmware).
 - **Resilient name → id resolution** for manifest-driven sync that survives Z-Wave re-inclusion (`find_devices_by_name`, `find_device_by_endpoint`).
 - **Profile orchestration** end-to-end (read, activate, modify, full CRUD, association PUTs).
 - **Snapshot tool** for nightly backup regimes — single-call dump of every mutable surface with per-surface atomicity.
