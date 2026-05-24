@@ -216,7 +216,7 @@ export const devices: ToolModule = {
             },
             properties: {
               type: 'object',
-              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters / associations / multichannelAssociations (HC3 firmware 5.x caches Z-wave mesh-config writes without transmitting — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
+              description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters (the PUT path caches without transmitting on firmware 5.x — use set_device_parameter, which wraps the working setConfiguration action); associations / multichannelAssociations (precautionary reject, no verified REST path yet — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
             },
           },
           required: ['deviceId'],
@@ -390,13 +390,13 @@ export const devices: ToolModule = {
 
       if (properties && 'parameters' in properties) {
         throw new Error(
-          "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration, but the physical device does not reliably pick up the new value. In direct testing against a Zooz ZEN52 the cache updated and HC3 reported success, but the device's behaviour did not change. HC3 5.x has no working REST path to verify whether a given write transmitted, and the dedicated action endpoints (getParameter / setParameter / reconfigure) return 'not implemented' on this firmware. Treat writes via this path as unreliable. Set Z-wave configuration parameters via the HC3 Web UI (which uses a native protocol) until a verifiable REST path is available. To inspect what HC3 has currently stored for this device's parameters (with labels, descriptions, defaults, and format), call get_device_parameters(deviceId)."
+          "modify_device does not accept properties.parameters — on HC3 firmware 5.x the PUT updates HC3's cached copy of the Z-wave configuration but does not transmit to the device (verified against a Zooz ZEN52: cache updated, HC3 reported success, device behaviour unchanged). Use set_device_parameter, which wraps the `setConfiguration` device action — the working REST path for Z-wave parameter writes on this firmware (the documented `setParameter` and `reconfigure` actions return 'not implemented'). To inspect what HC3 has currently stored for this device's parameters (with labels, descriptions, defaults, and format), call get_device_parameters(deviceId)."
         );
       }
 
       if (properties && ('associations' in properties || 'multichannelAssociations' in properties)) {
         throw new Error(
-          "modify_device does not accept properties.associations or properties.multichannelAssociations — precautionary reject based on the S14 finding (properties.parameters on the same firmware caches without transmitting, and every dedicated Z-wave action endpoint tested returns 'not implemented'). These mesh-management fields are structurally the same 'write-to-HC3, expected-to-push-downstream' pattern and are assumed to share the silent cache trap until proven otherwise. Set associations via the HC3 Web UI until a transmitting REST path is verified."
+          "modify_device does not accept properties.associations or properties.multichannelAssociations — precautionary reject based on the S14 finding (the structurally identical properties.parameters PUT caches without transmitting on this firmware). For parameters specifically, the `setConfiguration` action was later confirmed to transmit and is exposed as set_device_parameter; no equivalent working REST path has been verified for associations. Set associations via the HC3 Web UI until a transmitting path is found."
         );
       }
 
