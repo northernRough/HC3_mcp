@@ -9,7 +9,7 @@ Only the **latest published version** on npm is supported. If you find an issue 
 `hc3-mcp-server` runs locally with your Fibaro HC3 admin credentials and exposes an MCP-protocol surface to whatever client (Claude Code, Claude Desktop, Cursor, Cline, etc.) you connect it to. That client is then able to:
 
 - Read every device, scene, QuickApp, global variable, custom event, profile, room, user, and notification on your HC3.
-- Mutate the same. Tools are write-capable, including `delete_device`, `delete_global_variable`, `delete_room`, `delete_profile`, `delete_custom_event`, `delete_notification`, `update_user_rights`, `modify_device`, `update_quickapp_file`, `set_quickapp_variable`, and many others.
+- Mutate the same. Tools are write-capable, including `delete_device`, `delete_global_variable`, `delete_room`, `delete_profile`, `delete_custom_event`, `delete_notification`, `delete_scene`, `delete_quickapp_variable`, `update_user_rights`, `modify_device`, `update_quickapp_file`, `set_quickapp_variable`, `create_quickapp_variable`, `set_device_parameter`, and many others.
 - Run scenes and execute device actions.
 
 You are giving the agent the same operational power you have over the HC3. Treat the credentials, and the agent's instructions, accordingly.
