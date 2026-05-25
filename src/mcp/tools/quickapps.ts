@@ -218,7 +218,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "set_quickapp_variable",
-        description: "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; create new variables via the HC3 UI. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed).",
+        description: "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed).",
         inputSchema: {
           type: "object",
           properties: {
@@ -236,6 +236,51 @@ export const quickappsExtSchemas: MCPTool[] = [
             }
           },
           required: ["deviceId", "name", "value"]
+        }
+      },
+      {
+        name: "create_quickapp_variable",
+        description: "Create a new QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, appends, writes back). Refuses if the name already exists (use set_quickapp_variable to update). Optional varType lets the caller choose the stored type; if omitted, type is inferred from the JS type of value: boolean → 'bool', number → 'number' (never 'integer' by inference — pass varType:'integer' explicitly), string → 'string'. Post-create verifies by refetching and asserting name, value, and type all match the intended state.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "QuickApp device ID"
+            },
+            name: {
+              type: "string",
+              description: "Variable name. Must not already exist on the device."
+            },
+            value: {
+              type: ["string", "number", "boolean"],
+              description: "Initial value. Coerced to match varType (or the inferred type) before write."
+            },
+            varType: {
+              type: "string",
+              enum: ["string", "number", "integer", "bool"],
+              description: "Optional. Declared HC3 type for the new variable. Defaults to the JS type of value (bool/number/string). Pass 'integer' explicitly if you want integer semantics — never inferred."
+            }
+          },
+          required: ["deviceId", "name", "value"]
+        }
+      },
+      {
+        name: "delete_quickapp_variable",
+        description: "Delete a QuickApp variable by name via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, filters out the named entry, writes back). Refuses if the variable does not exist (typo / already-deleted protection). Returns the deleted entry's previous {type, value} as a recovery trail. Post-delete verifies by refetch (expects the name to be absent).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "QuickApp device ID"
+            },
+            name: {
+              type: "string",
+              description: "Variable name. Must exist on the device."
+            }
+          },
+          required: ["deviceId", "name"]
         }
       },
       {
@@ -553,7 +598,7 @@ export const quickapps: ToolModule = {
         const known = vars.map(v => v.name).join(', ') || '(none)';
         throw new Error(
           `QuickApp variable '${name}' does not exist on device ${deviceId}. ` +
-          `Known variables: ${known}. Create new variables via the HC3 UI.`
+          `Known variables: ${known}. Use create_quickapp_variable to add a new variable.`
         );
       }
 
@@ -616,6 +661,135 @@ export const quickapps: ToolModule = {
         name,
         previous: { type: existing.type, value: existing.value },
         current: { type: afterVar.type, value: afterVar.value }
+      };
+    },
+
+    async create_quickapp_variable(hc3, args: {
+      deviceId: number;
+      name: string;
+      value: string | number | boolean;
+      varType?: 'string' | 'number' | 'integer' | 'bool';
+    }): Promise<any> {
+      const { deviceId, name, value, varType } = args;
+
+      if (!name || typeof name !== 'string') {
+        throw new Error('create_quickapp_variable requires a non-empty name.');
+      }
+
+      const device = await hc3.request(`/api/devices/${deviceId}`);
+      const vars: any[] = device?.properties?.quickAppVariables ?? [];
+      if (vars.find(v => v.name === name)) {
+        throw new Error(
+          `QuickApp variable '${name}' already exists on device ${deviceId}. ` +
+          `Use set_quickapp_variable to update its value.`
+        );
+      }
+
+      let intendedType: string;
+      if (varType) {
+        intendedType = varType;
+      } else if (typeof value === 'boolean') {
+        intendedType = 'bool';
+      } else if (typeof value === 'number') {
+        intendedType = 'number';
+      } else {
+        intendedType = 'string';
+      }
+
+      let coercedValue: any;
+      if (intendedType === 'string') {
+        coercedValue = String(value);
+      } else if (intendedType === 'number' || intendedType === 'integer') {
+        const n = typeof value === 'number' ? value : Number(value);
+        if (!Number.isFinite(n)) {
+          throw new Error(
+            `Cannot create numeric variable '${name}' with non-numeric value ${JSON.stringify(value)}.`
+          );
+        }
+        coercedValue = intendedType === 'integer' ? Math.trunc(n) : n;
+      } else if (intendedType === 'bool' || intendedType === 'boolean') {
+        if (typeof value === 'boolean') coercedValue = value;
+        else if (value === 'true' || value === 1) coercedValue = true;
+        else if (value === 'false' || value === 0) coercedValue = false;
+        else {
+          throw new Error(
+            `Cannot create boolean variable '${name}' with value ${JSON.stringify(value)}.`
+          );
+        }
+      } else {
+        coercedValue = value;
+      }
+
+      const newEntry = { name, value: coercedValue, type: intendedType };
+      const newVars = [...vars, newEntry];
+
+      await hc3.request(`/api/devices/${deviceId}`, 'PUT', {
+        properties: { quickAppVariables: newVars }
+      });
+
+      const after = await hc3.request(`/api/devices/${deviceId}`);
+      const afterVars: any[] = after?.properties?.quickAppVariables ?? [];
+      const afterVar = afterVars.find(v => v.name === name);
+      if (!afterVar) {
+        throw new Error(
+          `Post-create verification failed: variable '${name}' missing after PUT on device ${deviceId}.`
+        );
+      }
+      if (String(afterVar.value) !== String(coercedValue)) {
+        throw new Error(
+          `Post-create value mismatch for '${name}' on device ${deviceId}: ` +
+          `requested ${JSON.stringify(coercedValue)}, HC3 stored ${JSON.stringify(afterVar.value)}.`
+        );
+      }
+      if (afterVar.type !== intendedType) {
+        throw new Error(
+          `Post-create type mismatch for '${name}' on device ${deviceId}: ` +
+          `requested '${intendedType}', HC3 stored '${afterVar.type}'.`
+        );
+      }
+
+      return {
+        deviceId,
+        name,
+        created: { type: afterVar.type, value: afterVar.value }
+      };
+    },
+
+    async delete_quickapp_variable(hc3, args: {
+      deviceId: number;
+      name: string;
+    }): Promise<any> {
+      const { deviceId, name } = args;
+
+      const device = await hc3.request(`/api/devices/${deviceId}`);
+      const vars: any[] = device?.properties?.quickAppVariables ?? [];
+      const existing = vars.find(v => v.name === name);
+      if (!existing) {
+        const known = vars.map(v => v.name).join(', ') || '(none)';
+        throw new Error(
+          `QuickApp variable '${name}' does not exist on device ${deviceId}. ` +
+          `Known variables: ${known}.`
+        );
+      }
+
+      const newVars = vars.filter(v => v.name !== name);
+
+      await hc3.request(`/api/devices/${deviceId}`, 'PUT', {
+        properties: { quickAppVariables: newVars }
+      });
+
+      const after = await hc3.request(`/api/devices/${deviceId}`);
+      const afterVars: any[] = after?.properties?.quickAppVariables ?? [];
+      if (afterVars.find(v => v.name === name)) {
+        throw new Error(
+          `Post-delete verification failed: variable '${name}' still present on device ${deviceId}.`
+        );
+      }
+
+      return {
+        deviceId,
+        name,
+        deleted: { type: existing.type, value: existing.value }
       };
     },
 

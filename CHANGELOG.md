@@ -2,6 +2,21 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.4.0] - 2026-05-25
+
+### Added
+- **`create_quickapp_variable` tool.** Add a new QuickApp variable without a UI round-trip. Read-modify-write against `PUT /api/devices/{id}` with `properties.quickAppVariables`: reads the full array, appends the new entry, writes back, refetches, and verifies name / value / type all match the intended state. Refuses if the name already exists (points caller at `set_quickapp_variable`). Optional `varType` lets the caller declare the stored HC3 type; if omitted, it's inferred from the JS type of `value` — `boolean` → `'bool'`, `number` → `'number'` (never `'integer'` by inference; opt in explicitly), `string` → `'string'`.
+
+- **`delete_quickapp_variable` tool.** Remove a QuickApp variable by name. Same full-array-replace pattern (read, filter out, write back, verify absent). Refuses if the name doesn't exist — typo / already-deleted protection. Returns the deleted entry's previous `{type, value}` as a recovery trail.
+
+  Together with the existing `get_quickapp_variable` / `set_quickapp_variable`, the QA-variable surface now mirrors the established `get / set / create / delete` shape used for global variables.
+
+### Changed
+- **`set_quickapp_variable` error message** on missing variable now points at `create_quickapp_variable` instead of "create new variables via the HC3 UI". Description string updated to match.
+
+### Test harness
+- **Phase 2 section [6]** (QA variable lifecycle) was previously a documented skip — *"no API path to create a QA variable; needs UI-bootstrapped fixture"*. That gap closes with this release. The section is now a real create → set → get → delete cycle on the ephemeral test QA from section [5], plus three negative cases (set-on-missing, create-on-existing, delete-on-missing).
+
 ## [4.3.0] - 2026-05-09
 
 ### Added

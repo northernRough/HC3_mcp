@@ -384,7 +384,7 @@ export const devices: ToolModule = {
 
       if (properties && 'quickAppVariables' in properties) {
         throw new Error(
-          'modify_device does not accept quickAppVariables — use set_quickapp_variable to update a single variable, or create / delete / rename via the HC3 UI.'
+          'modify_device does not accept quickAppVariables — use set_quickapp_variable to update, create_quickapp_variable to add, or delete_quickapp_variable to remove a single variable. Rename via the HC3 UI.'
         );
       }
 

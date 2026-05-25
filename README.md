@@ -324,7 +324,9 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `get_quickapp_available_types` - List the QuickApp device types the current firmware accepts, for picking a `type` when calling create_quickapp
 - `restart_quickapp` - Restart a QuickApp
 - `get_quickapp_variable` - Read a single quickAppVariable
-- `set_quickapp_variable` - Write a single quickAppVariable
+- `set_quickapp_variable` - Update an existing quickAppVariable (preserves declared type, post-write verified)
+- `create_quickapp_variable` - Create a new quickAppVariable on a QA without a UI round-trip; optional `varType` declares the stored HC3 type, otherwise inferred from value's JS type
+- `delete_quickapp_variable` - Remove a quickAppVariable by name; returns the previous {type, value} as a recovery trail
 
 ### QuickApp File Management
 - `list_quickapp_files` - List source files for a QuickApp

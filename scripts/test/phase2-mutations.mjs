@@ -15,7 +15,7 @@
 //      — using the room from step 3
 //   5. QA lifecycle (create / add file / update file / multi-file update / list /
 //                    delete file / restart / delete device)
-//   6. QA variable lifecycle (set / get / set-empty) — using QA from step 5
+//   6. QA variable lifecycle (create / set / get / delete + negative cases) — using QA from step 5
 
 import { MCPClient } from './mcp-client.mjs';
 import { SANDBOX, SANDBOX_HYPHEN, RUN_ID, unwrap, isErr, errMsg, sweepOrphans, deleteSceneDirect } from './sandbox.mjs';
@@ -231,17 +231,87 @@ try {
     // ============================================================
     // [6] QA variable lifecycle (uses QA from [5])
     //
-    // Skipped: there's no API path to *create* a QA variable. The wrapper's
-    // own error message is explicit: "use set_quickapp_variable to update a
-    // single variable, or create / delete / rename via the HC3 UI."
-    // modify_device also explicitly refuses quickAppVariables updates.
-    //
-    // To exercise this lifecycle, a test QA with a pre-existing 'phase2'
-    // variable would need to live permanently as a fixture (created once
-    // via the HC3 UI). Document and skip.
+    // Full create → set → get → delete cycle on the ephemeral QA from [5],
+    // plus three negative cases (set-on-missing, create-on-existing,
+    // delete-on-missing). create_quickapp_variable and
+    // delete_quickapp_variable shipped in 4.4.0, closing the previously
+    // documented "no API path to create a QA variable" gap.
     // ============================================================
     console.log('\n[6] QA variable lifecycle');
-    console.log('  - skipped (no API path to create new QA variables; needs UI-bootstrapped fixture)');
+    if (!testQaId) {
+        console.log('  - skipped (no testQaId from [5])');
+    } else {
+        // Negative: set on missing variable should error.
+        const rSetMissing = await call('set_quickapp_variable', {
+            deviceId: testQaId, name: 'doesNotExist', value: 'x',
+        });
+        check('set_quickapp_variable rejects unknown name',
+            isErr(rSetMissing) && /create_quickapp_variable/.test(errMsg(rSetMissing)),
+            isErr(rSetMissing) ? '' : 'expected an error mentioning create_quickapp_variable');
+
+        // Negative: delete on missing variable should error.
+        const rDelMissing = await call('delete_quickapp_variable', {
+            deviceId: testQaId, name: 'doesNotExist',
+        });
+        check('delete_quickapp_variable rejects unknown name',
+            isErr(rDelMissing), errMsg(rDelMissing).slice(0,160));
+
+        // Create one of each inferred + explicit type.
+        const created = [
+            { name: 'phase2_str',  value: 'hello',  expectType: 'string' },
+            { name: 'phase2_num',  value: 3.14,     expectType: 'number' },
+            { name: 'phase2_int',  value: 42,       varType: 'integer', expectType: 'integer' },
+            { name: 'phase2_bool', value: true,     expectType: 'bool' },
+        ];
+        for (const v of created) {
+            const args = { deviceId: testQaId, name: v.name, value: v.value };
+            if (v.varType) args.varType = v.varType;
+            const r = await call('create_quickapp_variable', args);
+            const u = unwrap(r);
+            check(`create_quickapp_variable ${v.name} (${v.expectType})`,
+                !isErr(r) && u?.created?.type === v.expectType,
+                isErr(r) ? errMsg(r).slice(0,160) : `got type ${u?.created?.type}`);
+        }
+
+        // Negative: create on already-existing variable should error.
+        const rCreateDup = await call('create_quickapp_variable', {
+            deviceId: testQaId, name: 'phase2_str', value: 'again',
+        });
+        check('create_quickapp_variable rejects existing name',
+            isErr(rCreateDup) && /set_quickapp_variable/.test(errMsg(rCreateDup)),
+            isErr(rCreateDup) ? '' : 'expected an error mentioning set_quickapp_variable');
+
+        // Set updates value + preserves type.
+        const rSet = await call('set_quickapp_variable', {
+            deviceId: testQaId, name: 'phase2_str', value: 'updated',
+        });
+        const setRes = unwrap(rSet);
+        check('set_quickapp_variable updates existing',
+            !isErr(rSet) && setRes?.current?.value === 'updated' && setRes?.current?.type === 'string',
+            isErr(rSet) ? errMsg(rSet).slice(0,160) : JSON.stringify(setRes?.current));
+
+        // Readback via get.
+        const rGet = await call('get_quickapp_variable', { deviceId: testQaId, name: 'phase2_int' });
+        const getRes = unwrap(rGet);
+        check('get_quickapp_variable readback',
+            !isErr(rGet) && Number(getRes?.value) === 42 && getRes?.type === 'integer',
+            isErr(rGet) ? errMsg(rGet).slice(0,160) : JSON.stringify(getRes));
+
+        // Delete all four; verify each gone.
+        for (const v of created) {
+            const r = await call('delete_quickapp_variable', { deviceId: testQaId, name: v.name });
+            check(`delete_quickapp_variable ${v.name}`,
+                !isErr(r), errMsg(r).slice(0,160));
+        }
+
+        // Confirm none remain via get_device_info.
+        const rDev = await call('get_device_info', { deviceId: testQaId });
+        const remaining = (unwrap(rDev)?.properties?.quickAppVariables ?? [])
+            .filter(v => v.name.startsWith('phase2_'));
+        check('all phase2_* variables removed after deletes',
+            remaining.length === 0,
+            remaining.length === 0 ? '' : `still present: ${remaining.map(v => v.name).join(', ')}`);
+    }
 
 } catch (e) {
     failures.push({ name: 'fatal', detail: e.message });
