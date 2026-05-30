@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.5.0] - 2026-05-30
+
+### Fixed
+- **`get_event_history` now honours time-window and multi-device filters.** Previously the only time filter was `since_timestamp`, applied *client-side after* HC3 had already returned the most-recent-N events — so a retrospective window ("what fired between 06:00 and 10:00 this morning?") could never reach back past the last N events; you just got the recent handful, then filtered. And device scoping was limited to a single `object_id`; there was no way to query a set of zones. Both gaps are closed:
+  - **`from` / `to` (Unix epoch seconds)** are now forwarded to HC3's `/api/events/history` server-side (`from=` / `to=`), so a bounded window reaches arbitrarily far back rather than only the most recent events. The endpoint honours these natively (verified against the live HC3; the prior "HC3 silently ignores server-side time params" note was incorrect). A client-side time filter is kept as an exact backstop.
+  - **`object_ids` (array)** scopes the query to a set of devices/scenes. HC3's native endpoint filters one `objectId` per call, so a multi-id query fans out one request per id (each still time-bounded by `from`/`to`), then merges + dedupes by event id and re-sorts newest-first. The scalar `object_id` still works and is merged in if both are supplied.
+  - **`since_timestamp`** is retained as a deprecated alias for `from` (lower bound). Existing callers keep working — and, as a side effect, now actually reach back in time, since the bound is forwarded server-side instead of only trimming the recent-N page.
+
+### Test harness
+- **`scripts/test/unit-event-history-filters.mjs`** — a no-HC3 unit test (injects a fake client that records request URLs) asserting `from`/`to`/`object_id`/`object_ids` are actually forwarded onto `/api/events/history`, that the multi-id fan-out dedupes and stays newest-first, and that `since_timestamp` still bounds the lower edge. Wired into `npm test`.
+
 ## [4.4.0] - 2026-05-25
 
 ### Added

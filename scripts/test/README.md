@@ -13,9 +13,13 @@ runnable. All read from environment variables (or the server's own `.env`):
 | `phase6-endpoint-audit.mjs` | 6 | every `hc3.request(...)` URL is live (catches latent dead endpoints) | no |
 | `phase3-edge-cases.mjs` | 3 | known-bitten regressions stay fixed (UTF-8, 501, content shape, validation) | partial |
 | `phase2-mutations.mjs` | 2 | create / update / delete round-trips work end-to-end | YES |
+| `unit-event-history-filters.mjs` | unit | `get_event_history` forwards from/to/object_id(s); fan-out dedupe + ordering | no (no HC3) |
 
 Future phases 4 (concurrency / soak) and 5 (mcp-inspector conformance) — deferred
 to a later session.
+
+The `unit-*.mjs` tests need no live HC3 — they inject a fake client and run
+against the compiled handlers. `npm test` runs them.
 
 ## Run
 

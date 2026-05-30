@@ -87,7 +87,7 @@ export const systemSchemas: Record<string, MCPTool> = {
   get_event_history:
       {
         name: 'get_event_history',
-        description: 'Fetch recent HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what just happened?" on the HC3. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first.',
+        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window and object_id(s) device filters are forwarded to HC3 server-side (and re-applied client-side as an exact backstop), so you can bound a query in time and scope it to a set of devices in one call.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -101,15 +101,28 @@ export const systemSchemas: Record<string, MCPTool> = {
             },
             object_id: {
               type: 'number',
-              description: 'Filter to events for a specific object (usually device or scene id). Requires object_type to narrow correctly.'
+              description: 'Filter to events for a single object (usually a device or scene id). Forwarded server-side as objectId. For several objects use object_ids instead. Pair with object_type to narrow further.'
+            },
+            object_ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'Filter to events for a SET of objects (e.g. several device ids). HC3\'s native endpoint only filters one objectId per call, so this fans out one request per id (each still time-bounded by from/to) and merges the results newest-first. Merged with object_id if both are given.'
             },
             object_type: {
               type: 'string',
-              description: 'Object type for object_id filter (e.g. "device", "scene").'
+              description: 'Object type for the object_id / object_ids filter (e.g. "device", "scene").'
+            },
+            from: {
+              type: 'number',
+              description: 'Unix epoch seconds; lower time bound (inclusive). Forwarded to HC3 server-side so retrospective windows reach arbitrarily far back, not just the most recent N events.'
+            },
+            to: {
+              type: 'number',
+              description: 'Unix epoch seconds; upper time bound (inclusive). Forwarded to HC3 server-side. Combine with from to bound a window, e.g. this morning 06:00–10:00.'
             },
             since_timestamp: {
               type: 'number',
-              description: 'Unix epoch seconds; return only events whose timestamp >= this value. Filtered client-side after fetch (HC3 silently ignores server-side time params on this endpoint). For a time window, fetch with a large limit then rely on this filter.'
+              description: 'Deprecated alias for from (lower bound, Unix epoch seconds). Use from/to instead. If from is also supplied, from wins.'
             }
           },
         },
@@ -241,20 +254,88 @@ export const system: ToolModule = {
       limit?: number;
       event_type?: string;
       object_id?: number;
+      object_ids?: number[];
       object_type?: string;
+      from?: number;
+      to?: number;
       since_timestamp?: number;
     }): Promise<any> {
       const cappedLimit = Math.min(args?.limit ?? 30, 1000);
-      const params = new URLSearchParams();
-      params.set('numberOfRecords', String(cappedLimit));
-      if (args?.event_type) params.set('eventType', args.event_type);
-      if (args?.object_id !== undefined) params.set('objectId', String(args.object_id));
-      if (args?.object_type) params.set('objectType', args.object_type);
-      const events: any[] = await hc3.request(`/api/events/history?${params.toString()}`);
-      if (args?.since_timestamp !== undefined) {
-        return events.filter(e => (e?.timestamp ?? 0) >= args.since_timestamp!);
+
+      // Lower bound: `from` is the canonical name; `since_timestamp` is a
+      // backward-compatible alias. `from` wins if both are given.
+      const lowerBound = args?.from ?? args?.since_timestamp;
+      const upperBound = args?.to;
+
+      // Merge the scalar `object_id` and the `object_ids` array into one set.
+      const idSet = new Set<number>();
+      if (typeof args?.object_id === 'number') idSet.add(args.object_id);
+      if (Array.isArray(args?.object_ids)) {
+        for (const id of args.object_ids) {
+          if (typeof id === 'number') idSet.add(id);
+        }
       }
-      return events;
+      const ids = [...idSet];
+
+      // Build the query string. HC3's /api/events/history honours objectId,
+      // from and to server-side; objectId is singular there, so a multi-device
+      // query fans out one request per id (below) and reuses this builder.
+      const buildQuery = (objectId?: number): string => {
+        const params = new URLSearchParams();
+        params.set('numberOfRecords', String(cappedLimit));
+        if (args?.event_type) params.set('eventType', args.event_type);
+        if (args?.object_type) params.set('objectType', args.object_type);
+        if (lowerBound !== undefined) params.set('from', String(lowerBound));
+        if (upperBound !== undefined) params.set('to', String(upperBound));
+        if (objectId !== undefined) params.set('objectId', String(objectId));
+        return params.toString();
+      };
+
+      // /api/events/history returns a bare array on current firmware; tolerate
+      // an { events: [...] } envelope too in case a build wraps it.
+      const asEvents = (res: any): any[] =>
+        Array.isArray(res) ? res
+          : Array.isArray(res?.events) ? res.events
+            : [];
+
+      let events: any[];
+      if (ids.length > 1) {
+        const batches = await Promise.all(
+          ids.map(id => hc3.request(`/api/events/history?${buildQuery(id)}`)),
+        );
+        // Merge + dedupe by event id: an event referencing two requested
+        // devices would otherwise show up once per matching request.
+        const seen = new Set<unknown>();
+        events = [];
+        for (const batch of batches) {
+          for (const e of asEvents(batch)) {
+            const key = e?.id;
+            if (key !== undefined && key !== null) {
+              if (seen.has(key)) continue;
+              seen.add(key);
+            }
+            events.push(e);
+          }
+        }
+        // Restore a single newest-first ordering across the merged batches.
+        events.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
+      } else {
+        const objectId = ids.length === 1 ? ids[0] : undefined;
+        events = asEvents(await hc3.request(`/api/events/history?${buildQuery(objectId)}`));
+      }
+
+      // Client-side time backstop: keeps the result exact even if a firmware
+      // build is loose about the from/to bounds it was handed.
+      if (lowerBound !== undefined || upperBound !== undefined) {
+        events = events.filter(e => {
+          const ts = e?.timestamp ?? 0;
+          if (lowerBound !== undefined && ts < lowerBound) return false;
+          if (upperBound !== undefined && ts > upperBound) return false;
+          return true;
+        });
+      }
+
+      return events.slice(0, cappedLimit);
     },
 
     async get_weather(hc3): Promise<any> {
