@@ -87,7 +87,7 @@ export const systemSchemas: Record<string, MCPTool> = {
   get_event_history:
       {
         name: 'get_event_history',
-        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window and object_id(s) device filters are forwarded to HC3 server-side (and re-applied client-side as an exact backstop), so you can bound a query in time and scope it to a set of devices in one call.',
+        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event\'s objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -101,16 +101,16 @@ export const systemSchemas: Record<string, MCPTool> = {
             },
             object_id: {
               type: 'number',
-              description: 'Filter to events for a single object (usually a device or scene id). Forwarded server-side as objectId. For several objects use object_ids instead. Pair with object_type to narrow further.'
+              description: 'Filter to events for a single object (a device or scene id), matched client-side against the event\'s objects[].id. For several objects use object_ids instead. Pairing with object_type additionally lets HC3 narrow (and page back through history) server-side — useful for a quiet device over a long span.'
             },
             object_ids: {
               type: 'array',
               items: { type: 'number' },
-              description: 'Filter to events for a SET of objects (e.g. several device ids). HC3\'s native endpoint only filters one objectId per call, so this fans out one request per id (each still time-bounded by from/to) and merges the results newest-first. Merged with object_id if both are given.'
+              description: 'Filter to events for a SET of objects (e.g. several device ids). Enforced client-side against each event\'s objects[].id, so it works regardless of object_type (HC3 has no server-side filter for a set of ids). Merged with object_id if both are given. For a precise set over a long history, also pass from/to to bound the window.'
             },
             object_type: {
               type: 'string',
-              description: 'Object type for the object_id / object_ids filter (e.g. "device", "scene").'
+              description: 'Optional object type ("device", "scene", …). With a single object_id it lets HC3 narrow server-side (its objectId filter is silently ignored without objectType); the client-side id filter does not require it.'
             },
             from: {
               type: 'number',
@@ -275,66 +275,52 @@ export const system: ToolModule = {
           if (typeof id === 'number') idSet.add(id);
         }
       }
-      const ids = [...idSet];
 
-      // Build the query string. HC3's /api/events/history honours objectId,
-      // from and to server-side; objectId is singular there, so a multi-device
-      // query fans out one request per id (below) and reuses this builder.
-      const buildQuery = (objectId?: number): string => {
-        const params = new URLSearchParams();
-        params.set('numberOfRecords', String(cappedLimit));
-        if (args?.event_type) params.set('eventType', args.event_type);
-        if (args?.object_type) params.set('objectType', args.object_type);
-        if (lowerBound !== undefined) params.set('from', String(lowerBound));
-        if (upperBound !== undefined) params.set('to', String(upperBound));
-        if (objectId !== undefined) params.set('objectId', String(objectId));
-        return params.toString();
-      };
+      // What HC3's /api/events/history actually honours server-side (verified
+      // against the live gateway):
+      //   - `from` / `to` (epoch seconds) — yes, reliably; this is what lets a
+      //     retrospective window reach arbitrarily far back.
+      //   - `objectId` — only when `objectType` is ALSO supplied; on its own it
+      //     is silently ignored and you get unfiltered events. There is no
+      //     server-side filter for a *set* of ids.
+      // So the object-id filter is enforced client-side (the source of truth);
+      // objectId/objectType are only handed over as an optional server-side
+      // narrowing when the caller gave an unambiguous single id + its type.
+      const params = new URLSearchParams();
+      // When scoping to a set of objects, pull a generous page so the
+      // client-side id filter has enough in-window events to match against;
+      // otherwise just ask for the number requested.
+      params.set('numberOfRecords', String(idSet.size > 0 ? 1000 : cappedLimit));
+      if (args?.event_type) params.set('eventType', args.event_type);
+      if (lowerBound !== undefined) params.set('from', String(lowerBound));
+      if (upperBound !== undefined) params.set('to', String(upperBound));
+      if (args?.object_type) params.set('objectType', args.object_type);
+      // Single id + type → let HC3 narrow (and page back through history) too.
+      if (idSet.size === 1) params.set('objectId', String([...idSet][0]));
 
+      const res = await hc3.request(`/api/events/history?${params.toString()}`);
       // /api/events/history returns a bare array on current firmware; tolerate
       // an { events: [...] } envelope too in case a build wraps it.
-      const asEvents = (res: any): any[] =>
-        Array.isArray(res) ? res
-          : Array.isArray(res?.events) ? res.events
-            : [];
+      let events: any[] = Array.isArray(res) ? res
+        : Array.isArray(res?.events) ? res.events
+          : [];
 
-      let events: any[];
-      if (ids.length > 1) {
-        const batches = await Promise.all(
-          ids.map(id => hc3.request(`/api/events/history?${buildQuery(id)}`)),
-        );
-        // Merge + dedupe by event id: an event referencing two requested
-        // devices would otherwise show up once per matching request.
-        const seen = new Set<unknown>();
-        events = [];
-        for (const batch of batches) {
-          for (const e of asEvents(batch)) {
-            const key = e?.id;
-            if (key !== undefined && key !== null) {
-              if (seen.has(key)) continue;
-              seen.add(key);
-            }
-            events.push(e);
-          }
+      // Client-side filters — authoritative. Time window backstops the
+      // server-side from/to; the id filter matches each event's objects[].id
+      // (the shape HC3 returns: [{ id, type }, ...]) and is the only reliable
+      // way to scope to a set of devices/scenes.
+      events = events.filter(e => {
+        const ts = e?.timestamp ?? 0;
+        if (lowerBound !== undefined && ts < lowerBound) return false;
+        if (upperBound !== undefined && ts > upperBound) return false;
+        if (idSet.size > 0) {
+          const objs = Array.isArray(e?.objects) ? e.objects : [];
+          if (!objs.some((o: any) => idSet.has(o?.id))) return false;
         }
-        // Restore a single newest-first ordering across the merged batches.
-        events.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
-      } else {
-        const objectId = ids.length === 1 ? ids[0] : undefined;
-        events = asEvents(await hc3.request(`/api/events/history?${buildQuery(objectId)}`));
-      }
+        return true;
+      });
 
-      // Client-side time backstop: keeps the result exact even if a firmware
-      // build is loose about the from/to bounds it was handed.
-      if (lowerBound !== undefined || upperBound !== undefined) {
-        events = events.filter(e => {
-          const ts = e?.timestamp ?? 0;
-          if (lowerBound !== undefined && ts < lowerBound) return false;
-          if (upperBound !== undefined && ts > upperBound) return false;
-          return true;
-        });
-      }
-
+      events.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
       return events.slice(0, cappedLimit);
     },
 
