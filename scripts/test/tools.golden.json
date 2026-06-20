@@ -1287,7 +1287,7 @@
   },
   {
     "name": "get_event_history",
-    "description": "Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering \"what happened?\" on the HC3 — both \"what just happened?\" and retrospective \"did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?\" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window and object_id(s) device filters are forwarded to HC3 server-side (and re-applied client-side as an exact backstop), so you can bound a query in time and scope it to a set of devices in one call.",
+    "description": "Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering \"what happened?\" on the HC3 — both \"what just happened?\" and retrospective \"did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?\" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event's objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1301,18 +1301,18 @@
         },
         "object_id": {
           "type": "number",
-          "description": "Filter to events for a single object (usually a device or scene id). Forwarded server-side as objectId. For several objects use object_ids instead. Pair with object_type to narrow further."
+          "description": "Filter to events for a single object (a device or scene id), matched client-side against the event's objects[].id. For several objects use object_ids instead. Pairing with object_type additionally lets HC3 narrow (and page back through history) server-side — useful for a quiet device over a long span."
         },
         "object_ids": {
           "type": "array",
           "items": {
             "type": "number"
           },
-          "description": "Filter to events for a SET of objects (e.g. several device ids). HC3's native endpoint only filters one objectId per call, so this fans out one request per id (each still time-bounded by from/to) and merges the results newest-first. Merged with object_id if both are given."
+          "description": "Filter to events for a SET of objects (e.g. several device ids). Enforced client-side against each event's objects[].id, so it works regardless of object_type (HC3 has no server-side filter for a set of ids). Merged with object_id if both are given. For a precise set over a long history, also pass from/to to bound the window."
         },
         "object_type": {
           "type": "string",
-          "description": "Object type for the object_id / object_ids filter (e.g. \"device\", \"scene\")."
+          "description": "Optional object type (\"device\", \"scene\", …). With a single object_id it lets HC3 narrow server-side (its objectId filter is silently ignored without objectType); the client-side id filter does not require it."
         },
         "from": {
           "type": "number",

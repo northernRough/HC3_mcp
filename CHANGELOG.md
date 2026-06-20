@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.5.1] - 2026-05-30
+
+### Fixed
+- **`get_event_history` object-id filter now works without `object_type`.** 4.5.0 forwarded `objectId` server-side and fanned out one request per id, but live testing against the gateway showed HC3 **silently ignores `objectId` unless `objectType` is also supplied** — so `object_ids` (or `object_id`) on its own returned the full feed, unfiltered. The object-id filter is now enforced **client-side** against each event's `objects[].id` (the source of truth), so it works regardless of `object_type` and for an arbitrary set of ids. The fan-out is dropped in favour of a single fetch that pulls a generous page (1000) when a set is requested, then filters and trims to `limit`. `from`/`to` remain forwarded server-side (confirmed working on the live gateway). When a single `object_id` **and** `object_type` are given, HC3 is still asked to narrow server-side (lets it page back through history for a quiet device). This was caught by re-running the original repro against the live HC3 after 4.5.0 deployed.
+
 ## [4.5.0] - 2026-05-30
 
 ### Fixed

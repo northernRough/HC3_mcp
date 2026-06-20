@@ -307,7 +307,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `clear_debug_messages` - Clear all debug messages (returns count cleared). Useful for test loops
 
 ### System Events
-- `get_event_history` - HC3 system event feed (scene starts, device property changes, device actions) — the data behind /app/history. Supports event_type, object_id (single) / object_ids (a set, fanned out one request per id) / object_type, a from/to time window (Unix epoch, forwarded server-side so retrospective queries reach arbitrarily far back) and limit (capped at 1000). since_timestamp is kept as a deprecated alias for from.
+- `get_event_history` - HC3 system event feed (scene starts, device property changes, device actions) — the data behind /app/history. Supports a from/to time window (Unix epoch, forwarded server-side so retrospective queries reach arbitrarily far back), object_id (single) / object_ids (a set) filtered client-side against each event's objects[].id (HC3 ignores objectId unless objectType is also given, so the id filter is enforced locally), optional object_type (lets HC3 also narrow server-side for a single id), event_type, and limit (capped at 1000). since_timestamp is kept as a deprecated alias for from.
 - `get_refresh_states` - Live poll of HC3's native event/state-change stream (GET /api/refreshStates?last=cursor). Returns changes (state deltas) + events + new cursor. Complementary to get_event_history — refreshStates is live, event_history is retrospective
 
 ### Z-Wave Diagnostics
