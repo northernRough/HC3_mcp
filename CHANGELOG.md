@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.6.1] - 2026-05-30
+
+### Fixed
+- **`get_event_history` is now complete for busy retrospective windows.** 4.5.1 filtered the object-id set client-side but fetched only a single page; because HC3 caps `/api/events/history` at `numberOfRecords` **newest-first**, a target device's older in-window events were truncated before the filter ran — a query for a device that *did* have events in the window returned `[]` (reproduced live). When scoping to `object_id(s)` over a bounded window (`from` set), the tool now **pages backwards** through the window: it walks `to` down to the oldest event seen and refetches (deduping by event id across the boundary) until the whole window is covered, then applies the client-side id + time filters. A 20-page (~20k event) safety cap prevents runaway paging on pathologically dense windows; hitting it logs a stderr note rather than silently dropping the oldest slice. Unbounded set queries (no `from`) still take a single page — there is no floor to page down to.
+
 ## [4.6.0] - 2026-05-30
 
 ### Added
