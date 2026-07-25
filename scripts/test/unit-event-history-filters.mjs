@@ -134,5 +134,34 @@ await check('no filters issues one unfiltered request sized to limit', async () 
   assert.equal(qs.get('from'), null);
 });
 
+// 8. Busy-window completeness: a target device's in-window event that sits
+//    OLDER than HC3's newest-first page cap must still be found. Without
+//    pagination this returned [] against the live gateway.
+await check('busy window: target event older than one page is still found (pagination)', async () => {
+  // 1200 noise events (device 9999) at ts 2000..3199, all newer than the
+  // single target event (device 4514) at ts 5. HC3's page cap is 1000, so the
+  // target falls outside the first (newest) page.
+  const busy = [];
+  for (let i = 0; i < 1200; i++) busy.push({ id: 100000 + i, timestamp: 2000 + i, type: 'DevicePropertyUpdatedEvent', objects: [{ type: 'device', id: 9999 }] });
+  busy.push({ id: 42, timestamp: 5, type: 'DeviceActionRanEvent', objects: [{ type: 'device', id: 4514 }] });
+
+  const hc3 = makeFakeHc3(busy);
+  const res = await getEventHistory(hc3, { object_ids: [4514], from: 0, limit: 100 });
+  assert.deepEqual(res.map(e => e.id), [42], `target not found: ${JSON.stringify(res.map(e => e.id))}`);
+  assert.ok(hc3.calls.length >= 2, `expected pagination (>=2 requests), got ${hc3.calls.length}`);
+  // Each page must carry from; later pages walk `to` down past the first page's oldest.
+  for (const url of hc3.calls) assert.ok(url.includes('from=0'), `missing from in ${url}`);
+  const secondTo = new URLSearchParams(hc3.calls[1].split('?')[1]).get('to');
+  // Page 2 ends at page 1's oldest (2200), inclusive — dedupe handles the overlap.
+  assert.ok(secondTo !== null && Number(secondTo) <= 2200, `second page should page backwards, to=${secondTo}`);
+});
+
+// 9. Unbounded (no from) set query does NOT paginate — single best-effort page.
+await check('set query without from takes a single page (no unbounded paging)', async () => {
+  const hc3 = makeFakeHc3(fixture);
+  await getEventHistory(hc3, { object_ids: [4514, 4518] });
+  assert.equal(hc3.calls.length, 1, `expected 1 request, got ${hc3.calls.length}`);
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll event-history filter checks passed');
 process.exit(failures ? 1 : 0);

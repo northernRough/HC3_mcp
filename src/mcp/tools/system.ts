@@ -96,7 +96,7 @@ export const systemSchemas: Record<string, MCPTool> = {
   get_event_history:
       {
         name: 'get_event_history',
-        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event\'s objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call.',
+        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event\'s objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call. When scoping to object_id(s) over a bounded window (from set), the window is paged through in full so a device\'s older in-window events are not truncated by HC3\'s newest-first response cap.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -365,38 +365,79 @@ export const system: ToolModule = {
 
       // What HC3's /api/events/history actually honours server-side (verified
       // against the live gateway):
-      //   - `from` / `to` (epoch seconds) — yes, reliably; this is what lets a
-      //     retrospective window reach arbitrarily far back.
+      //   - `from` / `to` (epoch seconds) — yes, reliably; `to` also lets us
+      //     page backwards through history.
       //   - `objectId` — only when `objectType` is ALSO supplied; on its own it
       //     is silently ignored and you get unfiltered events. There is no
       //     server-side filter for a *set* of ids.
       // So the object-id filter is enforced client-side (the source of truth);
       // objectId/objectType are only handed over as an optional server-side
       // narrowing when the caller gave an unambiguous single id + its type.
-      const params = new URLSearchParams();
-      // When scoping to a set of objects, pull a generous page so the
-      // client-side id filter has enough in-window events to match against;
-      // otherwise just ask for the number requested.
-      params.set('numberOfRecords', String(idSet.size > 0 ? 1000 : cappedLimit));
-      if (args?.event_type) params.set('eventType', args.event_type);
-      if (lowerBound !== undefined) params.set('from', String(lowerBound));
-      if (upperBound !== undefined) params.set('to', String(upperBound));
-      if (args?.object_type) params.set('objectType', args.object_type);
-      // Single id + type → let HC3 narrow (and page back through history) too.
-      if (idSet.size === 1) params.set('objectId', String([...idSet][0]));
+      const PAGE = 1000;
+      const buildQuery = (to?: number): string => {
+        const params = new URLSearchParams();
+        // When scoping to a set of objects, pull a full page so the client-side
+        // id filter has enough in-window events to match against; otherwise
+        // just ask for the number requested.
+        params.set('numberOfRecords', String(idSet.size > 0 ? PAGE : cappedLimit));
+        if (args?.event_type) params.set('eventType', args.event_type);
+        if (lowerBound !== undefined) params.set('from', String(lowerBound));
+        if (to !== undefined) params.set('to', String(to));
+        if (args?.object_type) params.set('objectType', args.object_type);
+        // Single id + type → let HC3 narrow (and page back through history) too.
+        if (idSet.size === 1) params.set('objectId', String([...idSet][0]));
+        return params.toString();
+      };
 
-      const res = await hc3.request(`/api/events/history?${params.toString()}`);
       // /api/events/history returns a bare array on current firmware; tolerate
       // an { events: [...] } envelope too in case a build wraps it.
-      let events: any[] = Array.isArray(res) ? res
-        : Array.isArray(res?.events) ? res.events
-          : [];
+      const asEvents = (res: any): any[] =>
+        Array.isArray(res) ? res
+          : Array.isArray(res?.events) ? res.events
+            : [];
+
+      // Collect events. Scoping to a set of objects within a bounded window
+      // ([from, …]) needs more than one page: HC3 caps the response at
+      // numberOfRecords NEWEST-first, so in a busy window the target objects'
+      // older in-window events are truncated before the client-side id filter
+      // ever runs (observed live: a device with events in the window returned
+      // []). Page backwards by walking `to` down to the oldest event seen until
+      // the whole window is covered — or a safety cap is hit. Without a lower
+      // bound there is no floor to page down to, so we take a single page.
+      const paginate = idSet.size > 0 && lowerBound !== undefined;
+      const MAX_PAGES = 20; // 20k events — far beyond any realistic window
+      const collected: any[] = [];
+      const seen = new Set<unknown>();
+      let cursorTo = upperBound;
+      let truncated = false;
+
+      for (let page = 0; ; page++) {
+        const batch = asEvents(await hc3.request(`/api/events/history?${buildQuery(cursorTo)}`));
+        let oldest = Infinity;
+        for (const e of batch) {
+          const ts = e?.timestamp ?? 0;
+          if (ts < oldest) oldest = ts;
+          const key = e?.id;
+          if (key !== undefined && key !== null) {
+            if (seen.has(key)) continue; // dedupe across the paged `to` boundary
+            seen.add(key);
+          }
+          collected.push(e);
+        }
+        if (!paginate) break;
+        if (batch.length < PAGE) break;                 // window fully covered
+        if (oldest <= (lowerBound as number)) break;    // paged down to `from`
+        if (page + 1 >= MAX_PAGES) { truncated = true; break; }
+        // No progress (>PAGE events share one timestamp): stop rather than loop.
+        if (cursorTo !== undefined && oldest >= cursorTo) { truncated = true; break; }
+        cursorTo = oldest; // next page ends at the oldest seen; dedupe handles overlap
+      }
 
       // Client-side filters — authoritative. Time window backstops the
       // server-side from/to; the id filter matches each event's objects[].id
       // (the shape HC3 returns: [{ id, type }, ...]) and is the only reliable
       // way to scope to a set of devices/scenes.
-      events = events.filter(e => {
+      const events = collected.filter(e => {
         const ts = e?.timestamp ?? 0;
         if (lowerBound !== undefined && ts < lowerBound) return false;
         if (upperBound !== undefined && ts > upperBound) return false;
@@ -408,6 +449,15 @@ export const system: ToolModule = {
       });
 
       events.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
+      if (truncated) {
+        // Return contract is a bare array, so surface the cap on stderr rather
+        // than silently dropping the oldest slice of the window.
+        console.error(
+          `get_event_history: hit ${MAX_PAGES}-page safety cap (~${MAX_PAGES * PAGE} events) ` +
+          `before covering [${lowerBound}, ${upperBound ?? 'now'}]; ` +
+          'oldest part of the window may be incomplete — narrow the range.',
+        );
+      }
       return events.slice(0, cappedLimit);
     },
 
