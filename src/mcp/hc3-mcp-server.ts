@@ -128,6 +128,7 @@ class HC3MCPServer {
       // System Information
       systemSchemas.get_server_info,
       systemSchemas.get_system_info,
+      systemSchemas.get_hc3_time,
       systemSchemas.get_network_status,
 
       // Energy Management

@@ -31,6 +31,15 @@ export const systemSchemas: Record<string, MCPTool> = {
           properties: {},
         },
       },
+  get_hc3_time:
+      {
+        name: 'get_hc3_time',
+        description: 'Return HC3\'s current wall-clock time (NTP-sourced), as epoch plus human-readable local and UTC forms, including an explicit weekday. Use this to establish "now" rather than inferring it from event timestamps or the (sometimes stale) MCP host clock. The weekday is computed server-side from the authoritative epoch and returned as a string — read it directly, never recompute the day-of-week yourself. Keywords: time, now, clock, date, current time.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
   get_network_status:
       {
         name: 'get_network_status',
@@ -202,6 +211,84 @@ export const system: ToolModule = {
         transport: (process.env.MCP_TRANSPORT ?? 'stdio').toLowerCase(),
         hc3Host: hc3.config.host ?? null,
         hc3Port: hc3.config.port ?? null,
+      };
+    },
+
+    async get_hc3_time(hc3): Promise<any> {
+      const info = await hc3.request('/api/settings/info');
+
+      // Authoritative "now": HC3 keeps its clock NTP-synced, so `timestamp`
+      // (epoch seconds) is fresh and correct in practice.
+      //
+      // DO NOT use `serverStatus` here. It looks like a current-time field but
+      // is a heartbeat / last-check timestamp and can read days stale (observed
+      // ~16 days behind `timestamp`). Wiring it in as "now" is silently wrong.
+      const epoch = Number(info?.timestamp);
+      if (!Number.isFinite(epoch)) {
+        throw new Error('get_hc3_time: /api/settings/info returned no usable `timestamp` field.');
+      }
+      // Seconds east of UTC. DST is baked in (3600 during BST, 0 during GMT),
+      // so applying it to the epoch yields the correct local wall clock.
+      const offset = Number.isFinite(Number(info?.timezoneOffset)) ? Number(info.timezoneOffset) : 0;
+
+      const warnings: string[] = [];
+      if (!Number.isFinite(Number(info?.timezoneOffset))) {
+        warnings.push('HC3 returned no timezoneOffset; assuming UTC (offset 0).');
+      }
+      // Skew check: compare against the MCP host's own clock. A large gap means
+      // either HC3 or the host is wrong — surface it rather than let one win
+      // silently. We still answer using HC3's timestamp.
+      const hostEpoch = Math.floor(Date.now() / 1000);
+      const skew = Math.abs(hostEpoch - epoch);
+      if (skew > 120) {
+        warnings.push(`HC3 clock and MCP host differ by ${skew}s`);
+      }
+
+      const pad = (n: number): string => String(n).padStart(2, '0');
+      const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      // All human output is derived from epoch + offset, never scraped from the
+      // locale-formatted `date` string. Shift the epoch by the offset and read
+      // it with UTC getters so the "UTC" fields actually show local wall time.
+      const utc = new Date(epoch * 1000);
+      const local = new Date((epoch + offset) * 1000);
+
+      const dow = local.getUTCDay();
+      const weekday = WEEKDAYS[dow];
+      const weekday_short = WEEKDAYS_SHORT[dow];
+
+      const iso_utc = utc.toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+      const offSign = offset >= 0 ? '+' : '-';
+      const offAbs = Math.abs(offset);
+      const offHH = pad(Math.floor(offAbs / 3600));
+      const offMM = pad(Math.floor((offAbs % 3600) / 60));
+      const iso_local =
+        `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+        `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}` +
+        `${offSign}${offHH}:${offMM}`;
+
+      // Zone label from the offset (source of truth). UK zones get friendly
+      // names; anything else falls back to a UTC±HH:MM label.
+      const zoneName = offset === 3600 ? 'BST' : offset === 0 ? 'GMT' : `UTC${offSign}${offHH}:${offMM}`;
+      // Reuse the computed `weekday` — do not recompute the day name here.
+      const local_pretty =
+        `${weekday} ${local.getUTCDate()} ${MONTHS_SHORT[local.getUTCMonth()]} ${local.getUTCFullYear()} ` +
+        `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())} ${zoneName}`;
+
+      return {
+        epoch,
+        iso_utc,
+        iso_local,
+        weekday,
+        weekday_short,
+        local_pretty,
+        timezone_offset_s: offset,
+        date_field_raw: info?.date ?? null,
+        source: 'hc3:/api/settings/info:timestamp',
+        warnings,
       };
     },
 

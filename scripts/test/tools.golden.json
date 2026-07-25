@@ -1429,6 +1429,14 @@
     }
   },
   {
+    "name": "get_hc3_time",
+    "description": "Return HC3's current wall-clock time (NTP-sourced), as epoch plus human-readable local and UTC forms, including an explicit weekday. Use this to establish \"now\" rather than inferring it from event timestamps or the (sometimes stale) MCP host clock. The weekday is computed server-side from the authoritative epoch and returned as a string — read it directly, never recompute the day-of-week yourself. Keywords: time, now, clock, date, current time.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "get_home_status",
     "description": "Get current home/away status and location information",
     "inputSchema": {

@@ -227,6 +227,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 ### System
 - `get_server_info` - Report the MCP server's identity: name, version (read from package.json at startup), transport (stdio/http), and configured HC3 host/port. No HC3 round-trip; useful for "which version am I connected to" questions
 - `get_system_info` - HC3 version, serial, and system details
+- `get_hc3_time` - HC3's current wall-clock time (NTP-sourced) from /api/settings/info: epoch plus human-readable UTC/local forms and an explicit server-computed weekday. Use to establish "now" rather than inferring it from event timestamps or a stale host clock. Uses `timestamp` (never `serverStatus`); warns on >120s host-clock skew
 - `snapshot` - Single-call dump of every mutable HC3 configuration surface (devices, rooms, scenes, QAs with files, globals, custom events, alarm, climate, system, users, HC3 API docs) for backup regimes and drift detection. Per-surface atomicity; opt-in zwave-parameters surface
 - `get_network_status` - Network connectivity status
 - `get_energy_data` - Energy consumption data
