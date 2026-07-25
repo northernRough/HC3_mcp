@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.6.0] - 2026-05-30
+
+### Added
+- **`get_hc3_time` tool.** Returns HC3's current wall-clock time (NTP-sourced) so the assistant can establish "now" instead of inferring it from event timestamps or the sometimes-stale MCP host clock. Sourced from `GET /api/settings/info` — uses `timestamp` (fresh epoch seconds) and `timezoneOffset` (seconds east of UTC, DST-aware); **never** `serverStatus`, which is a heartbeat that can read days stale (a code comment guards against re-wiring it). Returns `{ epoch, iso_utc, iso_local, weekday, weekday_short, local_pretty, timezone_offset_s, date_field_raw, source, warnings }`. The **weekday is computed once server-side** from `epoch + offset` and returned as an explicit string (`local_pretty` reuses it) — the consumer reads the day name directly rather than deriving it, which removes a recurring wrong-weekday error. A skew guard compares HC3's `timestamp` against the host's `Date.now()` and pushes a `warnings` entry (without failing) when they differ by more than ~120s. Unit test in `scripts/test/unit-hc3-time.mjs` covers the derived fields, the 25 Jul 2026 = Saturday spot-check, the skew warning, and that `serverStatus` is never used.
+
 ## [4.5.1] - 2026-05-30
 
 ### Fixed

@@ -13,7 +13,8 @@ runnable. All read from environment variables (or the server's own `.env`):
 | `phase6-endpoint-audit.mjs` | 6 | every `hc3.request(...)` URL is live (catches latent dead endpoints) | no |
 | `phase3-edge-cases.mjs` | 3 | known-bitten regressions stay fixed (UTF-8, 501, content shape, validation) | partial |
 | `phase2-mutations.mjs` | 2 | create / update / delete round-trips work end-to-end | YES |
-| `unit-event-history-filters.mjs` | unit | `get_event_history` forwards from/to/object_id(s); fan-out dedupe + ordering | no (no HC3) |
+| `unit-event-history-filters.mjs` | unit | `get_event_history` forwards from/to and filters object_id(s) client-side | no (no HC3) |
+| `unit-hc3-time.mjs` | unit | `get_hc3_time` derived fields, weekday, skew warning, no serverStatus | no (no HC3) |
 
 Future phases 4 (concurrency / soak) and 5 (mcp-inspector conformance) — deferred
 to a later session.
