@@ -209,7 +209,8 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `assign_devices_to_room` - Batch-move devices to a room (groupAssignment), with per-device post-move verify
 
 ### Scenes
-- `get_scenes` - List scenes with filters
+- `get_scenes` - List scenes with filters (returns every scene with full content — can be very large)
+- `get_scene` - Fetch a single scene by id (full record incl. Lua/scenario content); `includeContent=false` returns metadata only with `contentLength`
 - `run_scene` - Start a scene (async, returns immediately)
 - `run_scene_sync` - Run a scene synchronously, waiting for completion. Useful for sequenced automation steps
 - `stop_scene` - Stop a running scene

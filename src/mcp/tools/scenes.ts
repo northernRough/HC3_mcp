@@ -23,6 +23,24 @@ export const scenes: ToolModule = {
         },
       },
       {
+        name: 'get_scene',
+        description: 'Fetch a single scene by id via GET /api/scenes/{id}. Returns the full scene record — metadata (name, type, roomId, mode, enabled, isRunning, created/updated, …) plus the complete `content` (the Lua source for lua scenes, or the block/scenario JSON for scenario scenes). Use this to inspect ONE scene: get_scenes returns every scene with its full content and can be very large (easily >1MB), so it is impractical for looking at a single scene. Set includeContent=false to get metadata only (content bodies can be 100KB+) — the response then reports contentLength so you know how big it was.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: {
+              type: 'number',
+              description: 'The scene id to fetch (from get_scenes).',
+            },
+            includeContent: {
+              type: 'boolean',
+              description: 'Include the full `content` body (Lua/scenario). Default true. Set false to strip a potentially large content body and return metadata only.',
+            },
+          },
+          required: ['sceneId'],
+        },
+      },
+      {
         name: 'run_scene',
         description: 'Execute a scene by ID',
         inputSchema: {
@@ -171,6 +189,24 @@ export const scenes: ToolModule = {
       }
 
       return scenes;
+    },
+
+    async get_scene(hc3, args: { sceneId: number; includeContent?: boolean }): Promise<any> {
+      if (typeof args?.sceneId !== 'number') {
+        throw new Error('get_scene requires a numeric sceneId.');
+      }
+      const scene = await hc3.request(`/api/scenes/${args.sceneId}`);
+      // Content bodies can be 100KB+; let callers opt out to keep the response
+      // small when they only need metadata. Report the size that was dropped.
+      if (args?.includeContent === false && scene && typeof scene === 'object' && !Array.isArray(scene)) {
+        const { content, ...rest } = scene as Record<string, any>;
+        return {
+          ...rest,
+          contentOmitted: true,
+          contentLength: typeof content === 'string' ? content.length : undefined,
+        };
+      }
+      return scene;
     },
 
     async run_scene(hc3, args: { sceneId: number }): Promise<any> {

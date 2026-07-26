@@ -15,6 +15,7 @@ runnable. All read from environment variables (or the server's own `.env`):
 | `phase2-mutations.mjs` | 2 | create / update / delete round-trips work end-to-end | YES |
 | `unit-event-history-filters.mjs` | unit | `get_event_history` forwards from/to and filters object_id(s) client-side | no (no HC3) |
 | `unit-hc3-time.mjs` | unit | `get_hc3_time` derived fields, weekday, skew warning, no serverStatus | no (no HC3) |
+| `unit-get-scene.mjs` | unit | `get_scene` full record, includeContent=false stripping, validation | no (no HC3) |
 
 Future phases 4 (concurrency / soak) and 5 (mcp-inspector conformance) — deferred
 to a later session.
