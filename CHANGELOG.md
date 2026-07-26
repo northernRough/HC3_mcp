@@ -2,6 +2,11 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.7.0] - 2026-05-30
+
+### Added
+- **`get_scene` tool.** Read a single scene by id via `GET /api/scenes/{id}`, returning the full record — metadata plus the complete `content` (Lua source or scenario JSON). Scenes were the only major domain with a plural lister (`get_scenes`) but no singular getter (every other domain already has one: `get_device_info`, `get_room`, `get_quickapp`, `get_profile`, `get_climate_zone`, `get_sprinkler_system`, `get_custom_event`, `get_notification`, `get_icon`, `get_alarm_partition`). This mattered in practice: `get_scenes` returns *every* scene with its full content — observed at ~1.9 MB across 59 scenes (individual content bodies 100–143 KB) — which overflows response limits, so there was no workable way to inspect one scene. `get_scene` takes `sceneId` and an optional `includeContent` (default true); `includeContent=false` strips the large body and instead reports `contentOmitted: true` + `contentLength` for metadata-only queries. Unit test in `scripts/test/unit-get-scene.mjs`.
+
 ## [4.6.1] - 2026-05-30
 
 ### Fixed
