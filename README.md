@@ -197,6 +197,34 @@ See `scripts/test/README.md` for per-phase detail.
 
 ---
 
+## Resources (at-a-glance views)
+
+Beyond tools, the server exposes four read-only **MCP Resources**. They take no
+arguments and need no tool call — a client lists them and you read one. Each
+renders Markdown, so it is legible to you and to an agent.
+
+| URI | What it answers |
+|---|---|
+| `hc3://health` | Is anything broken? Firmware, fleet size, dead devices named, battery outliers, disabled devices |
+| `hc3://watchdog` | Is the automation machinery alive? Every `*Heartbeat` global aged against HC3's own clock, with a stale verdict |
+| `hc3://binder` | Did the bindings resolve? Roles by resolution method, everything not at `L0_cached`, heal history, parameter drift |
+| `hc3://globals` | What is the automation state? Scalar globals, structured globals summarised, dead-device watcher decoded |
+
+Heartbeats are discovered by name pattern rather than hard-coded, so a
+QuickApp added later shows up without a code change.
+
+To render all four as one self-contained HTML page (no external requests,
+light and dark):
+
+```bash
+npm run dashboard
+```
+
+The resources are the source of truth and the page is a view over them, so it
+cannot drift from what the server reports. It is a snapshot — re-run to refresh.
+
+---
+
 ## What this does
 
 This server exposes 130+ tools spanning the full HC3 read and write surface, with write guardrails on every destructive operation. Every mutating tool reads the target first, deep-merges the submitted change, writes, refetches, and asserts the change took effect. If HC3 silently dropped or normalised a field, the tool throws rather than reporting a misleading success.

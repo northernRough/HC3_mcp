@@ -2,6 +2,25 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.10.0] - 2026-08-11
+
+### Added
+- **MCP Resources — four read-only, at-a-glance views.** `resources/list` previously returned `[]` and the server declared only `tools: {}` in its capabilities, so the whole Resources surface was unbuilt. It now declares `resources: {}`, implements `resources/list` and `resources/read`, and serves four Markdown documents. Resources need no tool call and no arguments: a client lists them and the user reads one.
+
+  - **`hc3://health`** — firmware and serial, fleet size, every dead/unreachable device named with room and type, battery outliers below 30%, disabled devices. The "is anything broken right now" view.
+  - **`hc3://watchdog`** — every `*Heartbeat` global with its age against **HC3's own clock** and a fresh/stale verdict (stale after 10 minutes), plus the matching watchdog push markers. Heartbeats are discovered by name pattern, not hard-coded, so a QuickApp added later appears without a code change. A heartbeat whose value is not an epoch is reported as such rather than silently treated as fresh.
+  - **`hc3://binder`** — the published `BinderBindings` map summarised, plus the resolver cache decoded: roles counted by resolution method, every role *not* at `L0_cached` listed with its id, recent heal history, and `BinderParamDrift` status. The cache is ~160 KB of JSON on a real system and was not readable without parsing it by hand.
+  - **`hc3://globals`** — scalar globals with last-changed times, structured globals summarised by size and shape rather than dumped, and a real decode of `DeadDeviceWatch_State` (devices watched, currently flagged dead, failure counts). Heartbeats are excluded here since they have their own resource.
+
+  **Security note:** QuickApp variable arrays can carry credentials — `deviceBinder` 4826 holds `HC3_USER` and `HC3_PASS` in the same array as its binding cache. The binder resource reads that one variable **by name** and never emits a `quickAppVariables` array. A unit test asserts no credential value or name reaches the rendered output; it is the check most worth keeping if this file is ever refactored.
+
+  Every resource degrades honestly: a missing global, an unreadable cache or an empty gateway produces a document that says so, rather than a partial view that reads as "nothing wrong".
+
+- **`scripts/dashboard.mjs` + `npm run dashboard`** — renders the four resources into one self-contained HTML page (inlined CSS, no external requests, light and dark). The resources are the source of truth and the page is a view over them, so it cannot drift from what the server reports; re-run to refresh, and the header stamps which snapshot you are looking at.
+
+### Test harness
+- **`scripts/test/unit-resources.mjs`** — no-HC3 unit test (faked client) covering the list shape, unknown-URI handling, dead/battery/disabled classification, the stale-heartbeat verdict and the not-an-epoch case, binder method counting and non-L0 listing, graceful degradation when the cache is unreadable, the globals scalar/structured split and dead-device decode, that every resource renders on an empty gateway, and the credential-leak assertions. Wired into `npm test`.
+
 ## [4.9.0] - 2026-08-11
 
 ### Added

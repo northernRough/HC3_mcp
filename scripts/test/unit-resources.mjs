@@ -1,0 +1,186 @@
+#!/usr/bin/env node
+// Unit test — MCP Resources. No live HC3: the client is faked.
+//
+// resources/list previously returned [] and the server declared only
+// tools:{} in its capabilities. These four read-only views are the first
+// resources on the surface.
+//
+// The security check matters most: deviceBinder 4826 carries HC3_USER /
+// HC3_PASS in the same quickAppVariables array as its binding cache, so a
+// resource that dumped the array would publish credentials into a document
+// the client renders. The binder resource must read one named variable.
+//
+//   node scripts/test/unit-resources.mjs
+
+import { listResources, readResource, RESOURCES } from '../../out/mcp/resources.js';
+import { strict as assert } from 'node:assert';
+
+const NOW = 1786482227;
+
+function fakeHc3({ devices, globals, binderVars } = {}) {
+  const asked = [];
+  return {
+    asked,
+    config: { host: '10.0.1.3', port: 80, username: 'u', password: 'p' },
+    async request(endpoint) {
+      asked.push(endpoint);
+      if (endpoint === '/api/settings/info') return { timestamp: NOW, softVersion: '5.210.12', serialNumber: 'HC3-1', hcName: 'HC3-Test' };
+      if (endpoint === '/api/devices') return devices ?? [];
+      if (endpoint === '/api/globalVariables') return globals ?? [];
+      if (endpoint === '/api/devices/4826') {
+        return { id: 4826, properties: { quickAppVariables: binderVars ?? [] } };
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+  };
+}
+
+const DEVICES = [
+  { id: 9, name: 'KNX Engine', roomID: 0, type: 'com.fibaro.knxEngine', enabled: true, properties: { dead: true } },
+  { id: 100, name: 'Live light', roomID: 5, type: 'com.fibaro.binarySwitch', enabled: true, properties: { dead: false } },
+  { id: 200, name: 'Flat sensor', roomID: 5, type: 'com.fibaro.doorSensor', enabled: true, properties: { dead: false, batteryLevel: 12 } },
+  { id: 201, name: 'Fine sensor', roomID: 5, type: 'com.fibaro.doorSensor', enabled: true, properties: { dead: false, batteryLevel: 90 } },
+  { id: 300, name: 'Retired', roomID: 5, type: 'com.fibaro.binarySwitch', enabled: false, properties: { dead: false } },
+];
+
+const GLOBALS = [
+  { name: 'RoomMgrHeartbeat', value: String(NOW - 30), modified: NOW - 30 },
+  { name: 'WateringHeartbeat', value: String(NOW - 4000), modified: NOW - 4000 },
+  { name: 'RoomMgrWatchdogLastPush', value: '0', modified: NOW - 86400 },
+  { name: 'isDark', value: 'true', modified: NOW - 7200 },
+  { name: 'BinderBindings', value: JSON.stringify({ 'Garden.irrigation': { a: 1, b: 2 }, 'Hall.lights': { c: 3 } }), modified: NOW },
+  { name: 'DeadDeviceWatch_State', value: JSON.stringify({
+    lastRun: NOW - 600,
+    devices: { 3581: { lastSeenDead: true, failCount: 3, okCount: 1, lastAction: 'reconfigure', lastTriedAt: NOW - 900 },
+               3582: { lastSeenDead: false, failCount: 0, okCount: 14, lastAction: 'none', lastTriedAt: NOW - 100 } },
+  }), modified: NOW - 600 },
+];
+
+const BINDER_VARS = [
+  { name: 'HC3_USER', value: 'admin' },
+  { name: 'HC3_PASS', value: 'sup3rs3cret-do-not-leak' },
+  { name: 'deviceBindings', value: JSON.stringify({
+    savedAt: NOW - 300,
+    cache: {
+      'Hall.lights.main': { id: 1, name: 'main', lastMethod: 'L0_cached' },
+      'Hall.lights.spare': { id: 2, name: 'spare', lastMethod: 'L0_cached' },
+      'Garden.irrigation.south': { id: 3, name: 'south', lastMethod: 'L5_missing' },
+    },
+    history: [{ at: NOW - 90000, role: 'Den.x', kind: 'HEALED', method: 'L1_endpoint', old: 10, new: 11 }],
+  }) },
+];
+
+let failures = 0;
+async function check(name, fn) {
+  try { await fn(); console.log(`  ok  ${name}`); }
+  catch (e) { failures++; console.log(`FAIL  ${name}\n      ${e.message}`); }
+}
+const read = (hc3, uri) => readResource(hc3, uri).then(r => r.contents[0].text);
+
+await check('list exposes four resources with uri/name/description/mimeType', async () => {
+  const list = listResources();
+  assert.equal(list.length, 4);
+  assert.deepEqual(list.map(r => r.uri).sort(),
+    ['hc3://binder', 'hc3://globals', 'hc3://health', 'hc3://watchdog']);
+  for (const r of list) {
+    for (const f of ['uri', 'name', 'description', 'mimeType']) {
+      assert.ok(r[f], `${r.uri} missing ${f}`);
+    }
+    assert.equal(r.mimeType, 'text/markdown');
+    assert.ok(!('read' in r), 'list must not leak the read handler');
+  }
+});
+
+await check('an unknown uri throws and names the valid ones', async () => {
+  await assert.rejects(() => readResource(fakeHc3(), 'hc3://nope'), /Unknown resource/);
+  await assert.rejects(() => readResource(fakeHc3(), 'hc3://nope'), /hc3:\/\/health/);
+});
+
+await check('health names dead devices and flags low batteries', async () => {
+  const text = await read(fakeHc3({ devices: DEVICES }), 'hc3://health');
+  assert.match(text, /Dead \/ unreachable — 1/);
+  assert.match(text, /KNX Engine/);
+  assert.ok(!/Live light/.test(text), 'a healthy device must not appear in the dead table');
+  assert.match(text, /1 battery-powered.*below 30%|2 battery-powered, 1 below 30%/s);
+  assert.match(text, /12%/);
+  assert.ok(!/90%/.test(text), 'a healthy battery must not be listed as an outlier');
+  assert.match(text, /Disabled — 1/);
+  assert.match(text, /5\.210\.12/);
+});
+
+await check('health reports cleanly when nothing is wrong', async () => {
+  const text = await read(fakeHc3({ devices: [DEVICES[1]] }), 'hc3://health');
+  assert.match(text, /Dead \/ unreachable — 0/);
+  assert.match(text, /Nothing reporting dead/);
+  assert.match(text, /No device below 30%/);
+});
+
+await check('watchdog computes age and flags the stale beat', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS }), 'hc3://watchdog');
+  assert.match(text, /2 found, 1 stale/);
+  assert.match(text, /\| RoomMgr \|.*fresh/);
+  assert.match(text, /\| Watering \|.*\*\*STALE\*\*/);
+  assert.match(text, /owning QuickApp has stopped ticking/);
+});
+
+await check('watchdog says so when no heartbeats exist at all', async () => {
+  const text = await read(fakeHc3({ globals: [] }), 'hc3://watchdog');
+  assert.match(text, /0 found, 0 stale/);
+  assert.match(text, /that is itself the finding/);
+});
+
+await check('watchdog tolerates a heartbeat that is not an epoch', async () => {
+  const text = await read(fakeHc3({ globals: [{ name: 'BadHeartbeat', value: 'yes', modified: NOW }] }), 'hc3://watchdog');
+  assert.match(text, /not an epoch/);
+  assert.match(text, /\*\*STALE\*\*/);
+});
+
+await check('binder counts resolution methods and lists non-L0 roles', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: BINDER_VARS }), 'hc3://binder');
+  assert.match(text, /2 groups, 3 fields/);
+  assert.match(text, /Resolver cache — 3 roles/);
+  assert.match(text, /L0_cached.*\| 2 \|/);
+  assert.match(text, /Roles not resolving at L0 — 1/);
+  assert.match(text, /Garden\.irrigation\.south/);
+  assert.match(text, /Heal history — 1 events/);
+  assert.match(text, /10 → 11/);
+  assert.match(text, /BinderParamDrift` is not set/);
+});
+
+await check('SECURITY: the binder resource never emits QA credentials', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: BINDER_VARS }), 'hc3://binder');
+  assert.ok(!/sup3rs3cret/.test(text), 'HC3_PASS value leaked into the resource');
+  assert.ok(!/HC3_PASS/.test(text), 'HC3_PASS name leaked into the resource');
+  assert.ok(!/HC3_USER/.test(text), 'HC3_USER leaked into the resource');
+  assert.ok(!/admin/.test(text), 'HC3_USER value leaked into the resource');
+});
+
+await check('binder degrades honestly when its cache is unreadable', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: [] }), 'hc3://binder');
+  assert.match(text, /Could not read `deviceBindings`/);
+  assert.ok(!/Resolver cache — \d+ roles/.test(text), 'must not claim a role count it does not have');
+});
+
+await check('globals splits scalars from structured and decodes the dead-device watcher', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS }), 'hc3://globals');
+  assert.match(text, /`isDark` \| true/);
+  assert.match(text, /Structured globals — 2/);
+  assert.match(text, /Watching 2 devices/);
+  assert.match(text, /Currently flagged dead: \*\*1\*\*/);
+  assert.match(text, /3581/);
+  // Heartbeats have their own resource; excluding them keeps this one legible.
+  assert.ok(!/RoomMgrHeartbeat/.test(text), 'heartbeats should not be duplicated here');
+  // Large JSON is summarised, not dumped.
+  assert.ok(!/lastSeenDead/.test(text), 'raw JSON should be summarised, not pasted');
+});
+
+await check('every resource renders without throwing on empty gateway data', async () => {
+  for (const r of RESOURCES) {
+    const text = await read(fakeHc3({ devices: [], globals: [], binderVars: [] }), r.uri);
+    assert.ok(typeof text === 'string' && text.length > 0, `${r.uri} produced nothing`);
+    assert.match(text, /^# /, `${r.uri} should open with a markdown heading`);
+  }
+});
+
+console.log(failures ? `\n${failures} failure(s)` : '\nAll resource checks passed');
+process.exit(failures ? 1 : 0);
