@@ -35,6 +35,21 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      # Fail here rather than after two minutes of tests with npm's
+      # ENEEDAUTH, which does not mention the secret and reads like a
+      # credential problem on the runner.
+      - name: NPM_TOKEN must be configured
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::NPM_TOKEN secret is not set, so the publish would fail at the last step."
+            echo "Set it once: npmjs.com -> Access Tokens -> Generate New Token -> Automation,"
+            echo "then: gh secret set NPM_TOKEN"
+            echo "An automation token is required specifically because it bypasses the 2FA"
+            echo "one-time password that an interactive publish would prompt for."
+            exit 1
+          fi
+          echo "NPM_TOKEN is present"
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
