@@ -220,16 +220,26 @@ await check('an empty error body is reported as such, not as silence', async () 
   );
 });
 
-await check('PNG shape pre-checks still bite (wrong size, wrong colour type)', async () => {
+await check('the 128x128 pre-check still bites', async () => {
   stubFetch();
   await assert.rejects(
     () => uploadIcon(fakeHc3(), { base64: makePng({ width: 64, height: 64 }), mime: 'image/png', category: 'room' }),
     /must be 128x128/,
   );
-  await assert.rejects(
-    () => uploadIcon(fakeHc3(), { base64: makePng({ colorType: 6 }), mime: 'image/png', category: 'room' }),
-    /must be palette mode/,
-  );
+});
+
+await check('RGBA is accepted — HC3 does NOT require palette mode', async () => {
+  // The inherited claim that HC3 silent-500s on RGB/RGBA is false. An RGBA
+  // PNG uploads with HTTP 201, is stored byte-identical and renders, and
+  // every user icon already on a live gateway is colour type 6. Refusing it
+  // rejected exactly the format the gateway itself uses.
+  stubFetch();
+  const r = await uploadIcon(fakeHc3(), { base64: makePng({ colorType: 6 }), mime: 'image/png', category: 'room' });
+  assert.equal(r.newName, 'User1026');
+
+  stubFetch();
+  const grey = await uploadIcon(fakeHc3(), { base64: makePng({ colorType: 0 }), mime: 'image/png', category: 'room' });
+  assert.equal(grey.newName, 'User1026');
 });
 
 await check('SVG skips the PNG pre-checks and uploads as-is', async () => {
