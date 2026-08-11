@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.13.1] - 2026-08-11
+
+### Fixed
+- **`upload_icon` no longer rejects RGBA PNGs.** It refused any PNG whose colour type was not 3 (palette), on an inherited claim that HC3 "silently 500s on RGB/RGBA". That claim is false, and the check rejected exactly the format the gateway itself uses: **every one of the 90+ user icons on a live HC3 is colour type 6 (RGBA)**. Verified by uploading one — HTTP 201, stored byte-identical, renders correctly.
+
+  Found while trying to restore four room icons the user supplied: all three source files were 128×128 RGBA, and the tool would have refused all of them.
+
+  The **128×128 check stays**, because that constraint is real and now quoted accurately: HC3 answers `400 INVALID_ICON_SIZE` for 64×64 and 256×256, rather than the silent-500 the old message described. Both were tested rather than assumed this time.
+
 ## [4.13.0] - 2026-08-11
 
 ### Fixed
