@@ -27,14 +27,15 @@ export const icons: ToolModule = {
       },
       {
         name: 'get_icon',
-        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Built-in icons resolve to /assets/icon/fibaro/{category}/{name}.{ext}; user-uploaded icons resolve to /assets/userIcons/{category}/{name}.{ext} when userIcon=true. Returns {name, mime, base64, sizeBytes}. The MCP itself does not manipulate images — decode, edit (e.g. with ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
+        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Returns {name, extension, mime, sizeBytes, path, base64}.\n\nPath layouts (verified against firmware 5.210.12): room → `rooms/{name}.{ext}`; scene → `scena/{name}.{ext}` built-in, `scenes/{name}.{ext}` user; **device → `{iconSetName}/{iconSetName}[state].{ext}`** — each device icon set is its own directory holding one file per state, and `deviceType` is NOT part of the path despite what list_icons might suggest. Built-in icons sit under /assets/icon/fibaro, user icons under /assets/userIcons.\n\nHC3 answers **200 with a placeholder** for missing icons rather than 404 (a 1888-byte "unknown icon" SVG, or its web UI index.html), so this tool inspects the content and raises rather than handing back a plausible-looking wrong image. Known gap: user-uploaded *device* icons are not served under any known /assets path on 5.210.12 — they work as `deviceIcon` ids but cannot be fetched back as files.\n\nThe MCP itself does not manipulate images — decode, edit (e.g. ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
         inputSchema: {
           type: 'object',
           properties: {
-            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Maps to URL segment: "room"→rooms, "scene"→scena, "device"→{deviceType}/{iconSetName}.' },
-            name: { type: 'string', description: 'Icon name (e.g. "room_bedroom"). For device icons see list_icons → device[].iconSetName.' },
-            extension: { type: 'string', description: 'File extension. Defaults to "png" for room/scene, must be supplied accurately for device icons (often "svg").' },
-            userIcon: { type: 'boolean', description: 'If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false.' }
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category — selects the path layout (see description).' },
+            name: { type: 'string', description: 'Icon name. For room/scene use list_icons → {room,scene}[].iconName; for device use device[].iconSetName (NOT deviceType).' },
+            extension: { type: 'string', description: 'File extension, "png" or "svg". Defaults to "png". Take it from the matching list_icons entry\'s fileExtension — guessing produces a placeholder, which this tool rejects.' },
+            userIcon: { type: 'boolean', description: 'If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false.' },
+            state: { type: 'number', description: 'Optional state index for device icon sets that hold one file per state (e.g. zraszacz/zraszacz0.png). Omit to try the unsuffixed file then state 0.' }
           },
           required: ['category', 'name']
         }
@@ -55,14 +56,15 @@ export const icons: ToolModule = {
       },
       {
         name: 'delete_icon',
-        description: 'Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon\'s category ("room", "scene", or "device") — passing "custom" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.',
+        description: 'Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon\'s category ("room", "scene", or "device") — passing "custom" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.\n\n**In-use guard:** before deleting, the tool scans for objects still referencing the icon (devices via properties.deviceIcon, rooms/scenes via their icon field) and refuses if any are found, since the delete is immediate and the image bytes are unrecoverable. Pass `force: true` to override. A scan that cannot complete also refuses rather than assuming the icon is unused.',
         inputSchema: {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Icon name (typically User<N>).' },
             fileExtension: { type: 'string', description: 'File extension matching the stored icon ("png" or "svg").' },
             category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Icon category. Used both for the existence pre-check and as the type query param.' },
-            id: { type: 'number', description: 'Optional. If omitted, looked up via list_icons.' }
+            id: { type: 'number', description: 'Optional. If omitted, looked up via list_icons.' },
+            force: { type: 'boolean', description: 'Delete even if the icon is still referenced, or if the in-use scan failed. Default false.' }
           },
           required: ['name', 'fileExtension', 'category']
         }
@@ -79,41 +81,85 @@ export const icons: ToolModule = {
       name: string;
       extension?: string;
       userIcon?: boolean;
+      state?: number;
     }): Promise<any> {
       if (!args?.category) throw new Error('get_icon requires category.');
       if (!args?.name) throw new Error('get_icon requires name.');
       const ext = args.extension ?? 'png';
-      const segment = args.category === 'room' ? 'rooms'
-        : args.category === 'scene' ? 'scena'
-        : args.category;
+      const name = encodeURIComponent(args.name);
       const base = args.userIcon ? '/assets/userIcons' : '/assets/icon/fibaro';
-      const path = `${base}/${segment}/${encodeURIComponent(args.name)}.${ext}`;
-      const url = `http://${hc3.config.host}:${hc3.config.port}${path}`;
+
+      // Path layouts, all established by probing the live gateway (5.210.12).
+      // Device icons are NOT under a "device" or {deviceType} segment: each
+      // icon set is its own directory holding one file per state, e.g.
+      // /assets/icon/fibaro/zraszacz/zraszacz0.png. Some sets also carry an
+      // unsuffixed file, so both are tried. Room/scene user icons live under
+      // different segment names than their built-in counterparts ("scenes"
+      // vs "scena"), which is why a user scene icon never resolved before.
+      const candidates: string[] = [];
+      if (args.category === 'device') {
+        if (typeof args.state === 'number') {
+          candidates.push(`${base}/${name}/${name}${args.state}.${ext}`);
+        } else {
+          candidates.push(`${base}/${name}/${name}.${ext}`);
+          candidates.push(`${base}/${name}/${name}0.${ext}`);
+        }
+      } else if (args.category === 'room') {
+        candidates.push(`${base}/rooms/${name}.${ext}`);
+      } else {
+        // Built-in scene icons sit under "scena"; user scene icons under
+        // "scenes". Try the likely one first, then the other.
+        candidates.push(`${base}/${args.userIcon ? 'scenes' : 'scena'}/${name}.${ext}`);
+        candidates.push(`${base}/${args.userIcon ? 'scena' : 'scenes'}/${name}.${ext}`);
+      }
+
       const auth = Buffer.from(`${hc3.config.username}:${hc3.config.password}`).toString('base64');
-      const response = await fetch(url, {
-        headers: { 'Authorization': `Basic ${auth}` },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!response.ok) {
-        throw new Error(`get_icon: HTTP ${response.status} fetching ${path}`);
+      const tried: string[] = [];
+      for (const path of candidates) {
+        const response = await fetch(`http://${hc3.config.host}:${hc3.config.port}${path}`, {
+          headers: { 'Authorization': `Basic ${auth}` },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) { tried.push(`${path} → HTTP ${response.status}`); continue; }
+        const mime = response.headers.get('content-type') ?? 'application/octet-stream';
+        const buf = Buffer.from(await response.arrayBuffer());
+
+        // HC3 answers 200 for missing assets, in two shapes, so status alone
+        // proves nothing. Both must be rejected or the caller gets a
+        // plausible-looking icon that is not the one asked for.
+        //   - under /assets/icon/fibaro: a 1888-byte "unknown icon" SVG
+        //   - anywhere else: the ~13 KB SPA index.html
+        if (mime.includes('html')) {
+          tried.push(`${path} → HC3 served its web UI index (path not routed)`);
+          continue;
+        }
+        if (mime.startsWith('image/svg') && buf.length === 1888) {
+          tried.push(`${path} → HC3's "unknown icon" SVG placeholder`);
+          continue;
+        }
+        // A png request answered with svg is the same placeholder wearing a
+        // different size; keep the original guard as a backstop.
+        if (ext === 'png' && mime.startsWith('image/svg')) {
+          tried.push(`${path} → SVG returned for a .png request (placeholder)`);
+          continue;
+        }
+        return {
+          name: args.name,
+          extension: ext,
+          mime,
+          sizeBytes: buf.length,
+          path,
+          base64: buf.toString('base64')
+        };
       }
-      const mime = response.headers.get('content-type') ?? 'application/octet-stream';
-      const buf = Buffer.from(await response.arrayBuffer());
-      // Detect HC3's silent-fallback for missing icons: when a .png path is
-      // requested but the server returns image/svg+xml, HC3 has substituted its
-      // 1888-byte "unknown icon" SVG fallback rather than 404'ing.
-      if (ext === 'png' && mime.startsWith('image/svg')) {
-        throw new Error(
-          `get_icon: ${path} not found — HC3 silently returned its SVG "unknown icon" fallback (1.9 KB) instead of 404. Check name/extension via list_icons.`
-        );
-      }
-      return {
-        name: args.name,
-        extension: ext,
-        mime,
-        sizeBytes: buf.length,
-        base64: buf.toString('base64')
-      };
+
+      const userDeviceNote = args.category === 'device' && args.userIcon
+        ? ' NOTE: user-uploaded *device* icons are not served under any known /assets path on 5.210.12 — they are addressable by numeric id via a device\'s deviceIcon property, but not fetchable as a file. Built-in device icons work.'
+        : '';
+      throw new Error(
+        `get_icon: could not fetch '${args.name}' (${args.category}, .${ext}). HC3 returns 200 with a placeholder for missing icons rather than 404, so each candidate was checked for content and rejected:\n  ${tried.join('\n  ')}\n` +
+        `Confirm the name and fileExtension via list_icons — for device icons use device[].iconSetName (NOT deviceType, which is not part of the path).${userDeviceNote}`
+      );
     },
 
     async upload_icon(hc3, args: {
@@ -262,6 +308,7 @@ export const icons: ToolModule = {
       fileExtension: string;
       category: 'room' | 'scene' | 'device';
       id?: number;
+      force?: boolean;
     }): Promise<any> {
       if (!args?.name) throw new Error('delete_icon requires name.');
       if (!args?.fileExtension) throw new Error('delete_icon requires fileExtension.');
@@ -281,6 +328,44 @@ export const icons: ToolModule = {
       const id = args.id ?? found.id;
       if (typeof id !== 'number') {
         throw new Error(`delete_icon: could not resolve id for '${args.name}'. Pass id explicitly.`);
+      }
+
+      // In-use check. Devices reference an icon by numeric id in
+      // properties.deviceIcon; rooms and scenes by their icon field. Deleting
+      // one that is still referenced leaves the owner showing a broken or
+      // default icon, with nothing to say why — and there is no undo, since
+      // the image bytes are gone. Refuse unless the caller opts in.
+      const inUse: string[] = [];
+      try {
+        if (args.category === 'device') {
+          const devices: any[] = await hc3.request('/api/devices') as any[];
+          for (const d of devices ?? []) {
+            if (d?.properties?.deviceIcon === id) inUse.push(`device ${d.id} (${d.name})`);
+          }
+        } else {
+          const owners: any[] = await hc3.request(
+            args.category === 'room' ? '/api/rooms' : '/api/scenes'
+          ) as any[];
+          for (const o of owners ?? []) {
+            if (o?.icon === args.name || o?.icon === id || o?.iconId === id) {
+              inUse.push(`${args.category} ${o.id} (${o.name})`);
+            }
+          }
+        }
+      } catch (e: any) {
+        // A failed scan must not read as "nothing is using it".
+        if (!args.force) {
+          throw new Error(
+            `delete_icon: could not verify whether '${args.name}' is still in use (${e.message}). ` +
+            'Re-run with force: true to delete anyway.'
+          );
+        }
+      }
+      if (inUse.length > 0 && !args.force) {
+        throw new Error(
+          `delete_icon: '${args.name}' (id ${id}) is still referenced by ${inUse.length} object(s): ${inUse.slice(0, 10).join(', ')}${inUse.length > 10 ? `, and ${inUse.length - 10} more` : ''}. ` +
+          'Deleting it would leave them without an icon and the image cannot be recovered. Repoint them first, or re-run with force: true.'
+        );
       }
 
       // HC3's DELETE /api/icons uses query params (NOT a JSON body) and requires

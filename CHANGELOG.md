@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.8.0] - 2026-08-11
+
+### Fixed
+- **`get_icon` can fetch device icons.** Device icons resolved to `/assets/icon/fibaro/device/{name}.{ext}`, which does not exist. Probing the live gateway shows each device icon set is **its own directory holding one file per state** — `/assets/icon/fibaro/zraszacz/zraszacz0.png` — and that **`deviceType` is not part of the path at all**, contradicting the tool's own description. The path is now `{iconSetName}/{iconSetName}[state].{ext}`, with an optional `state` parameter; when omitted the unsuffixed file is tried first, then state 0 (both shapes exist in the wild — `light/light.png` and `light/light0.png` are different images).
+
+- **`get_icon` no longer returns placeholders as success.** HC3 answers **HTTP 200 for missing assets**, in two shapes: a 1888-byte "unknown icon" SVG under `/assets/icon/fibaro`, and its ~13 KB web-UI `index.html` anywhere else. A deliberately bogus path returns 200 just like a real one, so status proves nothing. The previous placeholder guard only fired when the requested extension was `png`, so **every device SVG fetch appeared to succeed while returning the placeholder** — which is why a report of this bug listed device SVG as working. Both shapes are now rejected for any extension, and the error lists each candidate path with the reason it was rejected.
+
+  Also corrects the user scene segment: built-in scene icons live under `scena`, user scene icons under `scenes`. A user scene icon never resolved before.
+
+  Known gap, stated in the tool description rather than papered over: user-uploaded **device** icons are not served under any discoverable `/assets` path on 5.210.12. They work as `deviceIcon` ids but cannot be fetched back as files.
+
+### Changed
+- **`delete_icon` refuses to delete an icon that is still in use.** It previously deleted on the first call with no check; a user removed a live icon with it. The tool now scans for referencing objects (devices via `properties.deviceIcon`, rooms and scenes via their `icon` field) and refuses if any are found, naming them. The delete is immediate and the image bytes are unrecoverable, so this is a refusal rather than a warning. `force: true` overrides. A scan that **fails** also refuses rather than treating "could not check" as "not in use".
+
+### Test harness
+- **`scripts/test/unit-icon-paths.mjs`** — no-HC3 unit test (stubs `fetch` with a gateway that serves only known paths and returns the appropriate placeholder for everything else) covering device path construction, the unsuffixed-vs-state-0 order, explicit `state`, that `deviceType` and a bare `device` segment never appear in a URL, rejection of both placeholder shapes, the room/scene layouts including `scenes` vs `scena`, and all four `delete_icon` guard paths. Wired into `npm test`.
+
 ## [4.7.1] - 2026-08-11
 
 ### Fixed
