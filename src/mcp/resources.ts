@@ -15,6 +15,7 @@
 // array. See redactedVarLookup().
 
 import { HC3Client } from './hc3-client';
+import { parseBindBlocks } from './tools/audit';
 
 export interface ResourceDef {
   uri: string;
@@ -227,15 +228,44 @@ const binder: ResourceDef = {
       return out.join('');
     }
 
+    // Cross-check the cache against what config.lua actually declares. A role
+    // sitting at L5_missing means two entirely different things depending on
+    // whether a descriptor still exists, and they need opposite responses:
+    //   - descriptor present  -> the hardware is gone; re-include the device
+    //   - descriptor absent   -> nothing asks for this any more; it is a
+    //                            stale cache entry to be pruned
+    // Reporting them in one undifferentiated list hides the real fault.
+    const declared = new Set<string>();
+    let descriptorsRead = false;
+    try {
+      const files: any[] = await hc3.request(`/api/quickApp/${BINDER_DEVICE_ID}/files`) as any[];
+      for (const f of files ?? []) {
+        const full: any = await hc3.request(
+          `/api/quickApp/${BINDER_DEVICE_ID}/files/${encodeURIComponent(f.name)}`
+        );
+        for (const d of parseBindBlocks(f.name, full?.content ?? '')) {
+          for (const e of d.entries) declared.add(`${d.role}.${e.field}`);
+        }
+      }
+      descriptorsRead = declared.size > 0;
+    } catch { /* fall through — reported below */ }
+
     const cache: Record<string, any> = cacheDoc.cache ?? {};
     const roles = Object.keys(cache);
     const byMethod = new Map<string, number>();
     const notCached: string[][] = [];
+    const orphaned: string[][] = [];
+    const hardwareMissing: string[][] = [];
     for (const role of roles) {
       const entry = cache[role] ?? {};
       const method = String(entry.lastMethod ?? 'unknown');
       byMethod.set(method, (byMethod.get(method) ?? 0) + 1);
-      if (method !== 'L0_cached') {
+      const isDeclared = declared.has(role);
+      if (descriptorsRead && !isDeclared) {
+        orphaned.push([role, method, String(entry.id ?? '—'), String(entry.name ?? '')]);
+      } else if (method === 'L5_missing') {
+        hardwareMissing.push([role, String(entry.id ?? '—'), String(entry.name ?? ''), String(entry.type ?? '')]);
+      } else if (method !== 'L0_cached') {
         notCached.push([role, method, String(entry.id ?? '—'), String(entry.name ?? '')]);
       }
     }
@@ -249,10 +279,29 @@ const binder: ResourceDef = {
       .sort((a, b) => b[1] - a[1])
       .map(([m, n]) => [m === 'L0_cached' ? '`L0_cached` (healthy)' : `\`${m}\``, String(n)])));
 
-    out.push(`\n### Roles not resolving at L0 — ${notCached.length}\n`);
+    out.push('\n### Descriptor cross-check\n');
+    out.push(descriptorsRead
+      ? `\nRead ${declared.size} declared roles from QuickApp ${BINDER_DEVICE_ID}'s \`bind()\` blocks.\n`
+      : `\n_Could not read descriptors from QuickApp ${BINDER_DEVICE_ID}, so orphans cannot be told apart from genuinely missing hardware below._\n`);
+
+    out.push(`\n### Hardware missing — ${hardwareMissing.length}\n`);
+    out.push(hardwareMissing.length === 0
+      ? '\nNone. Every declared role found its device.\n'
+      : '\n**Action: re-include the device.** A descriptor still declares these, but nothing on the gateway matches at any level of the waterfall — so the physical device is gone and consumers fall through to their static defaults.\n\n'
+        + table(['Role', 'Last id', 'Expected name', 'Expected type'], hardwareMissing.slice(0, 30)));
+
+    if (descriptorsRead) {
+      out.push(`\n### Orphaned cache entries — ${orphaned.length}\n`);
+      out.push(orphaned.length === 0
+        ? '\nNone. Every cached role is still declared by a descriptor.\n'
+        : '\n**Action: prune.** No `bind()` descriptor declares these any more, so the binder will never revisit them — they are leftovers from a retired device. Harmless (publish() skips them) but they mask real faults in any report that walks the cache.\n\n'
+          + table(['Role', 'Last method', 'Last id', 'Name'], orphaned.slice(0, 30)));
+    }
+
+    out.push(`\n### Healed away from L0 — ${notCached.length}\n`);
     out.push(notCached.length === 0
-      ? '\nEvery role resolved straight from cache. Nothing has moved.\n'
-      : '\nThese were resolved by the healing waterfall rather than straight from cache, which means a device id moved under them.\n\n'
+      ? '\nEvery remaining role resolved straight from cache. Nothing has moved.\n'
+      : '\nResolved by the healing waterfall rather than straight from cache, which means a device id moved under them.\n\n'
         + table(['Role', 'Method', 'id', 'Name'], notCached.slice(0, 30)));
 
     const history: any[] = Array.isArray(cacheDoc.history) ? cacheDoc.history : [];

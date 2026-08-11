@@ -17,8 +17,21 @@ import { strict as assert } from 'node:assert';
 
 const NOW = 1786482227;
 
-function fakeHc3({ devices, globals, binderVars } = {}) {
+// Descriptors as they appear in the binder QA's config.lua. The resource
+// parses these to tell an orphaned cache entry apart from missing hardware.
+const BINDER_CONFIG = `
+bind("Hall.lights", {
+    main  = { id = 1, name = "main",  type = "com.fibaro.binarySwitch" },
+    spare = { id = 2, name = "spare", type = "com.fibaro.binarySwitch" },
+})
+bind("Guest.blinds", {
+    bedroom = { id = 2640, name = "blind (Gu-bed)", type = "com.fibaro.FGR223" },
+})
+`;
+
+function fakeHc3({ devices, globals, binderVars, binderFiles } = {}) {
   const asked = [];
+  const files = binderFiles ?? { config: BINDER_CONFIG };
   return {
     asked,
     config: { host: '10.0.1.3', port: 80, username: 'u', password: 'p' },
@@ -30,6 +43,12 @@ function fakeHc3({ devices, globals, binderVars } = {}) {
       if (endpoint === '/api/devices/4826') {
         return { id: 4826, properties: { quickAppVariables: binderVars ?? [] } };
       }
+      if (endpoint === '/api/quickApp/4826/files') {
+        if (files === 'unreadable') throw new Error('files endpoint down');
+        return Object.keys(files).map(name => ({ name }));
+      }
+      const m = endpoint.match(/^\/api\/quickApp\/4826\/files\/(.+)$/);
+      if (m) return { name: m[1], content: files[decodeURIComponent(m[1])] ?? '' };
       throw new Error(`unexpected endpoint ${endpoint}`);
     },
   };
@@ -140,11 +159,72 @@ await check('binder counts resolution methods and lists non-L0 roles', async () 
   assert.match(text, /2 groups, 3 fields/);
   assert.match(text, /Resolver cache — 3 roles/);
   assert.match(text, /L0_cached.*\| 2 \|/);
-  assert.match(text, /Roles not resolving at L0 — 1/);
+  // Garden.irrigation.south has no descriptor in BINDER_CONFIG, so it is
+  // reported as an orphan rather than as missing hardware. The dedicated
+  // cross-check test below covers the distinction in full.
+  assert.match(text, /Orphaned cache entries — 1/);
   assert.match(text, /Garden\.irrigation\.south/);
   assert.match(text, /Heal history — 1 events/);
   assert.match(text, /10 → 11/);
   assert.match(text, /BinderParamDrift` is not set/);
+});
+
+await check('cross-check separates missing hardware from an orphaned entry', async () => {
+  // Hall.lights.main/spare are declared; Guest.blinds.bedroom is declared but
+  // its device is gone (re-include it); Garden.irrigation.south is NOT
+  // declared, so it is a leftover to prune. The old code lumped the last two
+  // together as "not resolving at L0".
+  const vars = [{ name: 'deviceBindings', value: JSON.stringify({
+    savedAt: NOW - 300,
+    cache: {
+      'Hall.lights.main': { id: 1, name: 'main', lastMethod: 'L0_cached' },
+      'Guest.blinds.bedroom': { id: 2640, name: 'blind (Gu-bed)', type: 'com.fibaro.FGR223', lastMethod: 'L5_missing' },
+      'Garden.irrigation.south': { id: 4627, name: 'South face sprinklers', lastMethod: 'L5_missing' },
+    },
+    history: [],
+  }) }];
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: vars }), 'hc3://binder');
+
+  assert.match(text, /Read 3 declared roles/);
+  assert.match(text, /Hardware missing — 1/);
+  assert.match(text, /Orphaned cache entries — 1/);
+
+  // Each must appear under its own heading, not the other's.
+  const hw = text.slice(text.indexOf('Hardware missing'), text.indexOf('Orphaned cache entries'));
+  const orph = text.slice(text.indexOf('Orphaned cache entries'), text.indexOf('Healed away from L0'));
+  assert.match(hw, /Guest\.blinds\.bedroom/);
+  assert.ok(!/Garden\.irrigation\.south/.test(hw), 'an orphan must not be listed as missing hardware');
+  assert.match(orph, /Garden\.irrigation\.south/);
+  assert.ok(!/Guest\.blinds\.bedroom/.test(orph), 'missing hardware must not be listed as an orphan');
+
+  // The two need opposite responses, so each carries its own instruction.
+  assert.match(hw, /re-include the device/);
+  assert.match(orph, /prune/i);
+});
+
+await check('cross-check says so when descriptors cannot be read', async () => {
+  const vars = [{ name: 'deviceBindings', value: JSON.stringify({
+    cache: { 'A.b': { id: 1, lastMethod: 'L5_missing' } }, history: [],
+  }) }];
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: vars, binderFiles: 'unreadable' }), 'hc3://binder');
+  assert.match(text, /Could not read descriptors/);
+  // Without descriptors it must not guess: no orphan section at all, and the
+  // entry falls back to the missing-hardware list rather than being dropped.
+  assert.ok(!/Orphaned cache entries/.test(text), 'must not claim an orphan count it cannot compute');
+  assert.match(text, /Hardware missing — 1/);
+});
+
+await check('a fully healthy binder reports zero in every category', async () => {
+  const vars = [{ name: 'deviceBindings', value: JSON.stringify({
+    cache: { 'Hall.lights.main': { id: 1, lastMethod: 'L0_cached' },
+             'Hall.lights.spare': { id: 2, lastMethod: 'L0_cached' } },
+    history: [],
+  }) }];
+  const text = await read(fakeHc3({ globals: GLOBALS, binderVars: vars }), 'hc3://binder');
+  assert.match(text, /Hardware missing — 0/);
+  assert.match(text, /Orphaned cache entries — 0/);
+  assert.match(text, /Healed away from L0 — 0/);
+  assert.match(text, /Every cached role is still declared/);
 });
 
 await check('SECURITY: the binder resource never emits QA credentials', async () => {

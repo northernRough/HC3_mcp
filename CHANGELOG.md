@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.11.0] - 2026-08-11
+
+### Changed
+- **`hc3://binder` cross-checks the cache against the declared descriptors.** A role sitting at `L5_missing` meant two entirely different things and the resource reported them in one undifferentiated list, which hid the real fault:
+  - **descriptor present, nothing matched** — the physical device is gone and consumers have fallen through to their static defaults. *Action: re-include the device.*
+  - **no descriptor at all** — nothing declares this role any more, so the binder will never revisit it. A leftover from a retired device. *Action: prune.*
+
+  The resource now parses every `bind("RoleStem", { ... })` block from the binder QuickApp's own source and splits the two, each with its own instruction. It reuses `parseBindBlocks` from `audit.ts` (now exported) rather than growing a second Lua parser that could drift from the first. When the descriptors cannot be read it says so and declines to guess — no orphan count is shown at all, rather than a wrong one.
+
+  Found in practice: of two `L5_missing` roles on a live gateway, one was a blind awaiting re-inclusion and the other was a cache entry orphaned three weeks earlier by a deliberate device deletion. Opposite responses, previously indistinguishable.
+
 ## [4.10.0] - 2026-08-11
 
 ### Added
