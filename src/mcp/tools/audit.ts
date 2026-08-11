@@ -993,14 +993,14 @@ export const audit: ToolModule = {
 // Bind-aware audit helpers — used by audit_qa_devices when bindAware=true.
 // ---------------------------------------------------------------
 
-interface BindEntry {
+export interface BindEntry {
   field: string;     // e.g. "controller", "wallGraze"
   id?: number;
   ep?: number;
   name?: string;
   type?: string;
 }
-interface BindDescriptor {
+export interface BindDescriptor {
   fileName: string;
   role: string;                // the first arg to bind("...", ...)
   parent?: BindEntry;          // the special "parent" entry
@@ -1030,7 +1030,7 @@ function parseBindEntryFields(body: string): Partial<BindEntry & { allowGlobal: 
 // Parse all bind("RoleStem", { ... }) blocks from a piece of source content.
 // Tolerant regex parser; brace-balanced inner-block extraction so nested
 // commas don't confuse the boundary.
-function parseBindBlocks(fileName: string, content: string): BindDescriptor[] {
+export function parseBindBlocks(fileName: string, content: string): BindDescriptor[] {
   const out: BindDescriptor[] = [];
   const headRe = /\bbind\s*\(\s*["']([^"']+)["']\s*,\s*\{/g;
   let m: RegExpExecArray | null;
