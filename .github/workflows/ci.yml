@@ -1,0 +1,79 @@
+name: CI
+
+# Every check here is hermetic: no HC3 gateway, no credentials, no network
+# beyond the npm registry. The unit suites inject fake clients or stub fetch,
+# and the tools/list parity check runs the server on stdio with stub env.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the floor declared in package.json engines; 24 is what the
+        # maintainer develops on. The Pi runs 20.
+        node: ['18', '20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+  hygiene:
+    name: release hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # package.json, CHANGELOG.md and version.ts must agree on the version.
+      - name: Version consistency
+        run: node scripts/check-release-hygiene.mjs
+
+      # tools.golden.json is the committed snapshot of tools/list. Regenerate
+      # it and fail if it moved, so a schema edit cannot land without the
+      # snapshot that documents it.
+      - name: Tool schemas match the committed golden snapshot
+        run: |
+          npm run compile
+          node scripts/test/phase0-parity.mjs --update
+          if ! git diff --quiet -- scripts/test/tools.golden.json; then
+            echo "::error::tools.golden.json is stale. Run 'node scripts/test/phase0-parity.mjs --update' and commit the result."
+            git --no-pager diff -- scripts/test/tools.golden.json
+            exit 1
+          fi
+          echo "golden snapshot is current"
+
+      # Catches a broken 'files' list or a missing build before publish time,
+      # rather than after a bad tarball is already on the registry.
+      - name: Publishable tarball
+        run: npm pack --dry-run
