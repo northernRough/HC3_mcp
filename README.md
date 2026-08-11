@@ -197,6 +197,40 @@ See `scripts/test/README.md` for per-phase detail.
 
 ---
 
+## Feedback loop
+
+The server records where it wastes people's time, locally and with nothing
+transmitted.
+
+**Automatic.** Every tool failure is recorded (redacted, size-capped) and
+grouped by tool and normalised message. A tool failing the same way repeatedly
+is usually a missing or wrong description rather than user error. Read it via
+the `hc3://friction` resource.
+
+**Opt-in.** `report_finding` lets an agent or operator record a surprise while
+they still have the context. It **requires a reproduction that varies one
+thing** — of the claims in the last field report received here, two were wrong
+and one blamed the wrong cause, because two variables had changed at once.
+
+**Writing a reproduction cheaply.** `scripts/probe.mjs` provides throwaway
+QuickApps, icons and globals with guaranteed teardown, plus a `single()` helper
+that runs both arms of a one-variable test and prints a verdict. Use it rather
+than probing live objects — a `delete_icon` used as a reachability probe
+destroyed a live user icon on this gateway.
+
+**Triage.** `npm run triage` writes `FRICTION.md`: every item a *candidate*
+with a verdict of confirmed / refuted / untested. Nothing there is a fact until
+re-tested against a gateway, and refuted items stay in the file so they are not
+re-adopted from the original report later.
+
+Storage is `MCP_FRICTION_LOG`, else the first writable candidate;
+`MCP_FRICTION_DISABLE=true` turns it off. Under a hardened systemd unit
+(`ProtectSystem=strict`) the service may have nowhere persistent to write — add
+`StateDirectory=hc3-mcp` to the unit, or the log lives in a private `/tmp` and
+is wiped on every restart. `hc3://friction` says which applies.
+
+---
+
 ## Resources (at-a-glance views)
 
 Beyond tools, the server exposes four read-only **MCP Resources**. They take no
@@ -209,6 +243,7 @@ renders Markdown, so it is legible to you and to an agent.
 | `hc3://watchdog` | Is the automation machinery alive? Every `*Heartbeat` global aged against HC3's own clock, with a stale verdict |
 | `hc3://binder` | Did the bindings resolve? Roles by resolution method, everything not at `L0_cached`, heal history, parameter drift |
 | `hc3://globals` | What is the automation state? Scalar globals, structured globals summarised, dead-device watcher decoded |
+| `hc3://friction` | Where is this server wasting time? Recurring failures grouped, plus submitted findings |
 
 Heartbeats are discovered by name pattern rather than hard-coded, so a
 QuickApp added later shows up without a code change.

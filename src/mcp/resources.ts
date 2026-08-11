@@ -16,6 +16,7 @@
 
 import { HC3Client } from './hc3-client';
 import { parseBindBlocks } from './tools/audit';
+import { readEntries, groupFailures, frictionPath } from './friction';
 
 export interface ResourceDef {
   uri: string;
@@ -411,9 +412,66 @@ const globalsResource: ResourceDef = {
   },
 };
 
+
+// --- hc3://friction ---------------------------------------------------
+
+const friction: ResourceDef = {
+  uri: 'hc3://friction',
+  name: 'Friction log',
+  description: 'Where this server has wasted people\'s time: recurring tool failures, grouped, plus any findings submitted with report_finding. Local only, redacted, nothing transmitted.',
+  mimeType: 'text/markdown',
+  async read(hc3) {
+    const now = await hc3Now(hc3);
+    const path = frictionPath();
+    const entries = readEntries();
+    const out: string[] = [];
+    out.push('# Friction log\n');
+
+    if (!path) {
+      out.push('\nTelemetry is **not recording**: no writable location, or `MCP_FRICTION_DISABLE=true`.\n');
+      out.push('\nUnder a hardened systemd unit (`ProtectSystem=strict`) the service cannot write to `/var/lib` unless the unit grants it. Add `StateDirectory=hc3-mcp` to the unit, or set `MCP_FRICTION_LOG` to a writable path.\n');
+      return out.join('');
+    }
+    out.push(`\n_${entries.length} entries at \`${path}\`. Local only — nothing is transmitted._\n`);
+    if (path.includes('/tmp')) {
+      out.push('\n**This path is a private /tmp and is wiped whenever the service restarts** — i.e. on every deploy. For history that survives, add `StateDirectory=hc3-mcp` to the systemd unit or set `MCP_FRICTION_LOG`.\n');
+    }
+
+    const failures = groupFailures(entries);
+    out.push(`\n## Recurring failures — ${failures.length} distinct\n`);
+    if (failures.length === 0) {
+      out.push('\nNothing recorded. Either nothing has failed, or telemetry started recently.\n');
+    } else {
+      out.push('\nGrouped by tool and normalised message, most frequent first. A tool failing the same way repeatedly is usually a description gap rather than a user error.\n\n');
+      out.push(table(['Count', 'Tool', 'Last seen', 'Message'], failures.slice(0, 25).map(g => [
+        String(g.count), `\`${g.tool}\``, ago(now - g.lastSeen),
+        g.example.replace(/\|/g, '\\|').slice(0, 120),
+      ])));
+    }
+
+    const findings = entries.filter(e => e.kind === 'finding').reverse();
+    out.push(`\n## Submitted findings — ${findings.length}\n`);
+    if (findings.length === 0) {
+      out.push('\nNone. Agents and operators can add one with the `report_finding` tool; it requires a single-variable reproduction.\n');
+    } else {
+      for (const f of findings.slice(0, 15)) {
+        out.push(`\n### \`${f.tool}\` — ${ago(now - f.at)}\n`);
+        out.push(`\n**Expected:** ${f.finding?.expected}\n`);
+        out.push(`\n**Actual:** ${f.finding?.actual}\n`);
+        out.push(`\n**Reproduction:**\n\n${f.finding?.reproduction}\n`);
+        if (f.finding?.impact) out.push(`\n**Cost:** ${f.finding.impact}\n`);
+      }
+    }
+
+    out.push('\n## Triage\n');
+    out.push('\nNothing here is a verified fact. Every item needs re-testing against the gateway before it changes code or documentation — three claims adopted from plausible reports had to be reversed in a single week. Record a verdict of **confirmed**, **refuted** or **untested** for each, and keep the refutations written down so they are not re-adopted later.\n');
+    return out.join('');
+  },
+};
+
 // --- registry ----------------------------------------------------------
 
-export const RESOURCES: ResourceDef[] = [health, watchdog, binder, globalsResource];
+export const RESOURCES: ResourceDef[] = [health, watchdog, binder, globalsResource, friction];
 
 /** Shape expected by MCP `resources/list` — no handlers, no reads performed. */
 export function listResources() {

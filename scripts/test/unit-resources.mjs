@@ -96,11 +96,11 @@ async function check(name, fn) {
 }
 const read = (hc3, uri) => readResource(hc3, uri).then(r => r.contents[0].text);
 
-await check('list exposes four resources with uri/name/description/mimeType', async () => {
+await check('list exposes every resource with uri/name/description/mimeType', async () => {
   const list = listResources();
-  assert.equal(list.length, 4);
+  assert.equal(list.length, 5);
   assert.deepEqual(list.map(r => r.uri).sort(),
-    ['hc3://binder', 'hc3://globals', 'hc3://health', 'hc3://watchdog']);
+    ['hc3://binder', 'hc3://friction', 'hc3://globals', 'hc3://health', 'hc3://watchdog']);
   for (const r of list) {
     for (const f of ['uri', 'name', 'description', 'mimeType']) {
       assert.ok(r[f], `${r.uri} missing ${f}`);

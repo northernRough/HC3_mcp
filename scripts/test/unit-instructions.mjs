@@ -101,6 +101,11 @@ check('does NOT claim a QuickApp must install its own view', () => {
   assert.ok(!/install its own view|must install.*viewLayout/i.test(text));
 });
 
+check('invites findings, with the one-variable bar stated', () => {
+  assert.match(text, /report_finding/);
+  assert.match(text, /one-variable reproduction/);
+});
+
 check('makes no claim this session did not verify', () => {
   // uiCallbacks and Z-Wave transmission are reported/inherited, not tested
   // here. They belong in a tool description, not in every session's context.
