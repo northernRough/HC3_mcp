@@ -685,7 +685,7 @@
   },
   {
     "name": "delete_icon",
-    "description": "Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon's category (\"room\", \"scene\", or \"device\") — passing \"custom\" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.",
+    "description": "Delete a user-uploaded icon via DELETE /api/icons. Uses query params (type, id, name, fileExtension) — NOT a JSON body. type must be the icon's category (\"room\", \"scene\", or \"device\") — passing \"custom\" returns 400 WRONG_TYPE. The tool resolves `id` automatically from list_icons unless you pass it explicitly. Built-in icons cannot be deleted; only user-uploaded User<N> icons. Post-delete verifies by re-listing.\n\n**In-use guard:** before deleting, the tool scans for objects still referencing the icon (devices via properties.deviceIcon, rooms/scenes via their icon field) and refuses if any are found, since the delete is immediate and the image bytes are unrecoverable. Pass `force: true` to override. A scan that cannot complete also refuses rather than assuming the icon is unused.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -709,6 +709,10 @@
         "id": {
           "type": "number",
           "description": "Optional. If omitted, looked up via list_icons."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Delete even if the icon is still referenced, or if the in-use scan failed. Default false."
         }
       },
       "required": [
@@ -1446,7 +1450,7 @@
   },
   {
     "name": "get_icon",
-    "description": "Fetch an icon's binary content from HC3, base64-encoded. Built-in icons resolve to /assets/icon/fibaro/{category}/{name}.{ext}; user-uploaded icons resolve to /assets/userIcons/{category}/{name}.{ext} when userIcon=true. Returns {name, mime, base64, sizeBytes}. The MCP itself does not manipulate images — decode, edit (e.g. with ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.",
+    "description": "Fetch an icon's binary content from HC3, base64-encoded. Returns {name, extension, mime, sizeBytes, path, base64}.\n\nPath layouts (verified against firmware 5.210.12): room → `rooms/{name}.{ext}`; scene → `scena/{name}.{ext}` built-in, `scenes/{name}.{ext}` user; **device → `{iconSetName}/{iconSetName}[state].{ext}`** — each device icon set is its own directory holding one file per state, and `deviceType` is NOT part of the path despite what list_icons might suggest. Built-in icons sit under /assets/icon/fibaro, user icons under /assets/userIcons.\n\nHC3 answers **200 with a placeholder** for missing icons rather than 404 (a 1888-byte \"unknown icon\" SVG, or its web UI index.html), so this tool inspects the content and raises rather than handing back a plausible-looking wrong image. Known gap: user-uploaded *device* icons are not served under any known /assets path on 5.210.12 — they work as `deviceIcon` ids but cannot be fetched back as files.\n\nThe MCP itself does not manipulate images — decode, edit (e.g. ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1457,19 +1461,23 @@
             "scene",
             "device"
           ],
-          "description": "Icon category. Maps to URL segment: \"room\"→rooms, \"scene\"→scena, \"device\"→{deviceType}/{iconSetName}."
+          "description": "Icon category — selects the path layout (see description)."
         },
         "name": {
           "type": "string",
-          "description": "Icon name (e.g. \"room_bedroom\"). For device icons see list_icons → device[].iconSetName."
+          "description": "Icon name. For room/scene use list_icons → {room,scene}[].iconName; for device use device[].iconSetName (NOT deviceType)."
         },
         "extension": {
           "type": "string",
-          "description": "File extension. Defaults to \"png\" for room/scene, must be supplied accurately for device icons (often \"svg\")."
+          "description": "File extension, \"png\" or \"svg\". Defaults to \"png\". Take it from the matching list_icons entry's fileExtension — guessing produces a placeholder, which this tool rejects."
         },
         "userIcon": {
           "type": "boolean",
           "description": "If true, fetch from /assets/userIcons instead of /assets/icon/fibaro. Default false."
+        },
+        "state": {
+          "type": "number",
+          "description": "Optional state index for device icon sets that hold one file per state (e.g. zraszacz/zraszacz0.png). Omit to try the unsuffixed file then state 0."
         }
       },
       "required": [
