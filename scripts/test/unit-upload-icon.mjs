@@ -30,6 +30,11 @@ function makePng({ width = 128, height = 128, bitDepth = 8, colorType = 3 } = {}
 
 const PNG = makePng();
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64');
+// Device icons are state sets: HC3 stores User<N>0.png / User<N>100.png and
+// picks by device value. A single unsuffixed image renders blank, so the tool
+// refuses it — hence every device case here supplies states.
+const STATES = { '0': PNG, '100': PNG };
+const SVG_STATES = { '0': SVG, '100': SVG };
 
 // Fake client: first /api/icons call is "before", second is "after" with the
 // freshly-assigned icon appended.
@@ -91,7 +96,7 @@ async function check(name, fn) {
 await check('device upload sends a deviceTemplate part (the reported bug)', async () => {
   const seen = stubFetch();
   const r = await uploadIcon(fakeHc3(), {
-    base64: PNG, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    states: STATES, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
   });
   const p = parts(seen.body);
   assert.equal(p.deviceTemplate, 'com.fibaro.binarySwitch', 'deviceTemplate part missing or wrong');
@@ -99,6 +104,46 @@ await check('device upload sends a deviceTemplate part (the reported bug)', asyn
   assert.equal(p.fileExtension, 'png');
   assert.equal(r.newName, 'User1026');
   assert.equal(r.deviceTemplate, 'com.fibaro.binarySwitch');
+  assert.deepEqual(r.states, ['0', '100']);
+});
+
+await check('device states become icon0 / icon100 parts, ascending', async () => {
+  const seen = stubFetch();
+  await uploadIcon(fakeHc3(), {
+    states: { '100': PNG, '0': PNG, '50': PNG },   // deliberately out of order
+    // A type with no entry in DEVICE_STATE_MODEL, so an arbitrary set is
+    // accepted and this test stays about part naming, not the state model.
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.FGRGBW442CC',
+  });
+  assert.match(seen.body, /name="icon0"/);
+  assert.match(seen.body, /name="icon50"/);
+  assert.match(seen.body, /name="icon100"/);
+  assert.ok(!/name="icon"[^0-9]/.test(seen.body), 'must not send a bare "icon" part for a device set');
+  const order = [...seen.body.matchAll(/name="icon(\d+)"/g)].map(m => Number(m[1]));
+  assert.deepEqual(order, [0, 50, 100], 'state parts should be ascending');
+});
+
+await check('a device upload with a single image is refused', async () => {
+  let posted = false;
+  globalThis.fetch = async () => { posted = true; throw new Error('unreachable'); };
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { base64: PNG, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch' }),
+    /renders BLANK/,
+  );
+  assert.equal(posted, false, 'must not POST an icon that cannot render');
+});
+
+await check('every state image is validated before any upload', async () => {
+  let posted = false;
+  globalThis.fetch = async () => { posted = true; throw new Error('unreachable'); };
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), {
+      states: { '0': PNG, '100': makePng({ width: 64, height: 64 }) },
+      mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    }),
+    /state '100' must be 128x128/,
+  );
+  assert.equal(posted, false, 'one bad frame must fail the whole set before writing');
 });
 
 await check('device upload without deviceTemplate is refused before any HC3 contact', async () => {
@@ -151,7 +196,7 @@ await check("HC3's reason and message surface in the thrown error", async () => 
   });
   await assert.rejects(
     () => uploadIcon(fakeHc3(), {
-      base64: PNG, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+      states: STATES, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
     }),
     (e) => /HTTP 400/.test(e.message)
       && /MISSING_PARAMETER/.test(e.message)
@@ -190,17 +235,17 @@ await check('PNG shape pre-checks still bite (wrong size, wrong colour type)', a
 await check('SVG skips the PNG pre-checks and uploads as-is', async () => {
   const seen = stubFetch();
   const r = await uploadIcon(fakeHc3(), {
-    base64: SVG, mime: 'image/svg+xml', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    states: SVG_STATES, mime: 'image/svg+xml', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
   });
   assert.equal(r.extension, 'svg');
   assert.equal(parts(seen.body).fileExtension, 'svg');
-  assert.match(seen.body, /filename="mcp\.svg"/);
+  assert.match(seen.body, /filename="mcp0\.svg"/);
 });
 
 await check('hint is category-aware (device attaches by numeric id)', async () => {
   stubFetch();
   const dev = await uploadIcon(fakeHc3(), {
-    base64: PNG, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    states: STATES, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
   });
   assert.match(dev.hint, /modify_device/);
   assert.match(dev.hint, /deviceIcon: 1026/);

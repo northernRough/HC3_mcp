@@ -2,6 +2,28 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.13.0] - 2026-08-11
+
+### Fixed
+- **Device icon sets, correctly modelled by device type.** 4.12.0 claimed device icons were single-image sets and that HC3 had no multi-state upload. **Both were wrong.** `POST /api/icons` accepts parts named `icon0` / `icon10` / … / `icon100`, which create `/assets/userIcons/devices/User<N>/User<N><state>.png` — one file per state, each carrying its own image. That form appears nowhere in HC3's spec (which lists only `icon`) but is what its own Web UI sends. The 4.12.0 conclusion came from reading the spec instead of testing the alternative.
+
+  How many images a set holds is a property of the **device type**, verified by listing the files HC3 actually wrote and confirmed against what its UI offers:
+
+  | deviceTemplate | Images | Pass |
+  |---|---|---|
+  | `com.fibaro.genericDevice` (QuickApp tile) | 1, stored bare | `base64` |
+  | `com.fibaro.binarySwitch` (relay) | 2 — states 0, 100 | `states` |
+  | `com.fibaro.multilevelSwitch` (dimmer) | 11 — states 0,10,…,100 | `states` |
+
+  Where a set applies, **HC3 switches between the images itself from the device value** — on/off comes free with no code, which reverses 4.12.0's advice that every transition had to be driven from Lua.
+
+  Getting the shape wrong is silent: a single bare image on a relay registers, attaches, reports no error, and renders **blank**, because the lookup asks for `User<N>0.png`. `upload_icon` now refuses the mismatches it can recognise — single image for a set type, states for a single-image type, and an incomplete set (a dimmer missing state 40) — and accepts unlisted types as given. Every state image is validated before any of them are written, so one bad frame fails the set rather than leaving it half-populated.
+
+- **`get_icon` gains `state`**, and `upload_icons` carries the same per-variant `states` shape so a batch of variants stays one call.
+
+### Test harness
+- `unit-upload-icon.mjs` and `unit-upload-icons.mjs` extended for the state model: part naming and ascending order, the type-aware refusals, per-frame validation before any write, and that a QuickApp tile still takes a single image.
+
 ## [4.12.0] - 2026-08-11
 
 ### Added
