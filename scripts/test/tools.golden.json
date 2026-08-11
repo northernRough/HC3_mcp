@@ -2274,6 +2274,45 @@
     }
   },
   {
+    "name": "report_finding",
+    "description": "Record a finding about this MCP server — a tool that surprised you, a description that was wrong or missing, or a case where a call reported success and the gateway disagreed. Stored **locally only** (nothing is transmitted), redacted, and surfaced in the hc3://friction resource for triage.\n\n**A reproduction is required, and it must vary ONE thing.** That is not bureaucracy: in the last field report received here, two claims were wrong and one was right about the symptom but wrong about the cause, because two variables had been changed at once and the wrong one was credited. A finding with a single-variable reproduction can be re-tested in minutes; one without cannot be told apart from a coincidence, and adopting it risks shipping a regression.\n\nIf you cannot isolate it, say so in `reproduction`. \"Tile was blank; the layout contained a select AND was installed externally; I have not isolated which mattered\" is honest, useful, and costs nothing — far more valuable than a confident wrong claim.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "The tool the finding concerns, or \"general\" if it cuts across tools."
+        },
+        "expected": {
+          "type": "string",
+          "description": "What you expected to happen."
+        },
+        "actual": {
+          "type": "string",
+          "description": "What actually happened. Quote the error verbatim if there was one."
+        },
+        "reproduction": {
+          "type": "string",
+          "description": "How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it."
+        },
+        "impact": {
+          "type": "string",
+          "description": "Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged."
+        },
+        "reporter": {
+          "type": "string",
+          "description": "Optional: who or what is reporting, for follow-up."
+        }
+      },
+      "required": [
+        "tool",
+        "expected",
+        "actual",
+        "reproduction"
+      ]
+    }
+  },
+  {
     "name": "reset_profiles",
     "description": "DESTRUCTIVE: reset all profiles to HC3 defaults via POST /api/profiles/reset. Wipes all custom profile configuration (device lists, scene actions, climate-zone actions, partition actions) across every profile. Requires confirm=true. No undo.",
     "inputSchema": {

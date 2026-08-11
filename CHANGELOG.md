@@ -2,6 +2,26 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.17.0] - 2026-08-12
+
+### Added
+A feedback loop, so the next person's hard-won lesson does not depend on them choosing to write a document — and so nothing gets adopted from one without being re-tested.
+
+- **Friction telemetry + `hc3://friction`.** Every tool failure is recorded locally (redacted, size-capped, oldest-first truncation) and grouped by tool and normalised message, so the same fault about different ids lands in one bucket. Nobody opts in and nothing is transmitted. A tool failing the same way repeatedly is usually a description gap rather than user error — this would have shown `upload_icon` failing five times with `MISSING_PARAMETER` weeks before anyone wrote it up.
+
+  Three rules, in order: it must **never break a tool call** (every write wrapped, every failure swallowed — a telemetry bug must not become an outage on a live home controller); it is **local only**, since HC3 error bodies carry device and room names; and it **redacts before writing**, because a secret that never reaches the file cannot leak from it later. Tests cover all three, including that it stays silent when handed an unwritable directory.
+
+- **`report_finding` tool.** Lets an agent record a surprise while it still has the context. It **requires a reproduction, and refuses one under 40 characters** — in the last field report received here, two claims were wrong and one blamed the wrong cause, because two variables had been changed at once. The description says plainly that an unisolated finding which admits it is more valuable than a confident wrong one.
+
+- **`scripts/probe.mjs`.** Throwaway QuickApps, icons and globals with teardown guaranteed in `finally`, plus a `single()` helper that runs both arms of a one-variable test and prints a verdict. Writing the reproduction was the expensive part; this makes it minutes. It exists partly because a `delete_icon` used as a reachability probe destroyed a live user icon on this gateway.
+
+- **`npm run triage` → `FRICTION.md`.** Deliberately **not** a list of fixes: every row is a candidate with a verdict of confirmed / refuted / untested. **Refuted items stay in the file**, because a refutation that is not written down gets re-adopted by whoever reads the original report next — which is exactly how three claims were adopted and reversed here in one week.
+
+- Server instructions gain one line inviting findings and stating the one-variable bar, funded within the existing character budget.
+
+### Storage
+`MCP_FRICTION_LOG`, else the first writable candidate; `MCP_FRICTION_DISABLE=true` disables it. Under a hardened systemd unit (`ProtectSystem=strict`, no `ReadWritePaths`) there may be nowhere persistent, in which case the log lives in a private `/tmp` and is wiped on every restart. The resource says which applies rather than pretending to have history.
+
 ## [4.16.0] - 2026-08-12
 
 The reporting project re-tested its own document after the 4.15.0 response, withdrew two claims, and supplied a properly isolated reproduction for a third. That reproduction was **re-run here** before adoption — the same standard applied to their corrections as to their original report.

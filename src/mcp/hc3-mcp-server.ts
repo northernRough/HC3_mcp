@@ -16,6 +16,7 @@ import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
 import { listResources, readResource } from './resources';
+import { recordFailure } from './friction';
 import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
 import { alarm } from './tools/alarm';
 import { sprinklers } from './tools/sprinklers';
@@ -81,6 +82,7 @@ const SERVER_INSTRUCTIONS = [
   '- **A call that does not throw has not necessarily worked.** HC3 stores requests it will not act on, and reports success. Verified: fibaro.setGlobalVariable writes an EXISTING global fine but **silently does nothing** for one that does not exist — a QuickApp heartbeat went into a void for a day with a watchdog watching. Likewise a QuickApp `select` missing `selectionType`, or with `values` as `{}` rather than `[]`, is stored and reported verified, then blanks the **entire** tile — check /plugins/getView. After any write, read back what you care about, not the return code.',
   '- Writing a QuickApp variable from outside **restarts that QuickApp** (verified: bounced within 4s), once per call — creating eight variables restarts it eight times. Use update_multiple_quickapp_files for several files (one restart), and order variable writes before anything else that restarts.',
   '- Mutating tools read back and verify. Errors are specific — read them rather than retrying blind.',
+  '- Surprised by a tool, or saw a success the gateway disagreed with? Record it with report_finding (local only; needs a one-variable reproduction).',
   '- Tool schemas are cached by the client at connect. After this server is redeployed, reconnect the session or you will be calling yesterday\'s API against today\'s expectations.',
   '',
   'Read-only at-a-glance views are available as resources: hc3://health (is anything broken), hc3://watchdog (is the automation alive), hc3://binder (did device bindings resolve), hc3://globals (automation state).',
@@ -194,6 +196,7 @@ class HC3MCPServer {
 
       // System Information
       systemSchemas.get_server_info,
+      systemSchemas.report_finding,
       systemSchemas.get_system_info,
       systemSchemas.get_hc3_time,
       systemSchemas.get_network_status,
@@ -305,6 +308,8 @@ class HC3MCPServer {
       // HC3's response body all along. As isError content the message
       // reaches the model and the user verbatim.
       const errorMessage = error instanceof Error ? error.message : String(error);
+      // Local, redacted, best-effort. Never allowed to affect the response.
+      recordFailure((request.params as any)?.name ?? 'unknown', errorMessage);
       return {
         jsonrpc: '2.0',
         id: request.id,

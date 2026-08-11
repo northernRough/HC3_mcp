@@ -11,8 +11,26 @@ import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { deepMerge, verifyWrite } from '../util';
 import { SERVER_NAME, SERVER_VERSION } from '../version';
+import { recordFinding, readEntries, frictionPath } from '../friction';
 
 export const systemSchemas: Record<string, MCPTool> = {
+  report_finding:
+      {
+        name: 'report_finding',
+        description: 'Record a finding about this MCP server — a tool that surprised you, a description that was wrong or missing, or a case where a call reported success and the gateway disagreed. Stored **locally only** (nothing is transmitted), redacted, and surfaced in the hc3://friction resource for triage.\n\n**A reproduction is required, and it must vary ONE thing.** That is not bureaucracy: in the last field report received here, two claims were wrong and one was right about the symptom but wrong about the cause, because two variables had been changed at once and the wrong one was credited. A finding with a single-variable reproduction can be re-tested in minutes; one without cannot be told apart from a coincidence, and adopting it risks shipping a regression.\n\nIf you cannot isolate it, say so in `reproduction`. "Tile was blank; the layout contained a select AND was installed externally; I have not isolated which mattered" is honest, useful, and costs nothing — far more valuable than a confident wrong claim.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            tool: { type: 'string', description: 'The tool the finding concerns, or "general" if it cuts across tools.' },
+            expected: { type: 'string', description: 'What you expected to happen.' },
+            actual: { type: 'string', description: 'What actually happened. Quote the error verbatim if there was one.' },
+            reproduction: { type: 'string', description: 'How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it.' },
+            impact: { type: 'string', description: 'Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged.' },
+            reporter: { type: 'string', description: 'Optional: who or what is reporting, for follow-up.' },
+          },
+          required: ['tool', 'expected', 'actual', 'reproduction'],
+        },
+      },
   get_server_info:
       {
         name: 'get_server_info',
@@ -204,6 +222,38 @@ export const system: ToolModule = {
   schemas: Object.values(systemSchemas),
 
   handlers: {
+    async report_finding(_hc3, args: {
+      tool: string; expected: string; actual: string;
+      reproduction: string; impact?: string; reporter?: string;
+    }): Promise<any> {
+      for (const f of ['tool', 'expected', 'actual', 'reproduction'] as const) {
+        if (!args?.[f] || String(args[f]).trim().length === 0) {
+          throw new Error(`report_finding requires ${f}.`);
+        }
+      }
+      // A one-line "it broke" cannot be re-tested, and an untestable finding
+      // is indistinguishable from a coincidence.
+      if (String(args.reproduction).trim().length < 40) {
+        throw new Error(
+          'report_finding: reproduction is too short to act on. Describe how to reproduce it, varying ONE thing between the working and failing case. ' +
+          'If you have not isolated it, say so explicitly — an unisolated finding that admits it is far more useful than a confident wrong one.'
+        );
+      }
+      recordFinding(args.tool, {
+        expected: args.expected, actual: args.actual,
+        reproduction: args.reproduction, impact: args.impact, reporter: args.reporter,
+      });
+      const path = frictionPath();
+      return {
+        recorded: !!path,
+        storedAt: path ?? null,
+        totalEntries: readEntries().length,
+        note: path
+          ? 'Recorded locally. Nothing was transmitted. Review via the hc3://friction resource.'
+          : 'NOT PERSISTED — no writable location for the friction log. Set MCP_FRICTION_LOG, or on a hardened systemd unit add StateDirectory=hc3-mcp. The finding was accepted but is lost when this process exits.',
+      };
+    },
+
     async get_server_info(hc3): Promise<any> {
       return {
         name: SERVER_NAME,
