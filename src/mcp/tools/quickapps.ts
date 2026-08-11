@@ -329,13 +329,13 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "import_quickapp",
-        description: "Import a QuickApp from .fqa/.fqax file.",
+        description: "Import a QuickApp from a .fqa/.fqax file. **`filePath` is resolved on the machine running this MCP server, not on the machine running the MCP client.** When the server is remote (e.g. reached over a tunnel), the file must already exist on the server's filesystem — a path to a local file on the client machine will not resolve. Copy the .fqa to the server first, or build the QA with create_quickapp + create_quickapp_file instead.",
         inputSchema: {
           type: "object",
           properties: {
             filePath: {
               type: "string",
-              description: "Path to the .fqa/.fqax file to import"
+              description: "Path to the .fqa/.fqax file, resolved SERVER-SIDE (on the host running this MCP server, not the client)."
             },
             roomId: {
               type: "number",
@@ -365,7 +365,7 @@ export const quickappsExtSchemas: MCPTool[] = [
             },
             initialProperties: {
               type: "object",
-              description: "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole)."
+              description: "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole). CAVEAT (observed on firmware 5.210.12): `uiCallbacks` supplied here is not preserved — HC3 regenerates the callback table from the view at creation time, replacing named callbacks with auto-generated onReleased handlers. The layout renders correctly, so the loss is easy to miss. Write the intended callbacks back with a follow-up modify_device after creation."
             },
             initialInterfaces: {
               type: "array",

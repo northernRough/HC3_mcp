@@ -2,6 +2,26 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.7.1] - 2026-08-11
+
+### Fixed
+- **`upload_icon` works for device icons.** Every `category: "device"` upload failed, whatever the payload — reported 11 Aug 2026 after four attempts (two SVG, two PNG, one of them meeting every documented constraint: 128×128, palette, colour type 3). The cause was not the image. HC3 files device icons **per device type**, so `POST /api/icons` requires a `deviceTemplate` part alongside `type` / `icon` / `fileExtension`; the tool never sent one and HC3 answered `400 MISSING_PARAMETER — deviceTemplate: missing required parameter`. Room and scene icons are not filed per type and must not carry the part, which is why only device uploads were affected.
+
+  `upload_icon` now takes a **`deviceTemplate`** parameter (the Fibaro device type the icon is filed under, e.g. `com.fibaro.binarySwitch`). It is required for `category: "device"` and rejected for room/scene, both checked at the tool boundary before any HC3 contact so the caller gets an actionable message naming a concrete example rather than a bare gateway rejection. The room/scene multipart body is unchanged byte-for-byte — the new part is appended only when supplied.
+
+  Verified live against HC3 5.210.12 with the exact 419-byte PNG from the report, and with SVG: both upload cleanly under `device` once `deviceTemplate` is supplied.
+
+- **Upload failures are now diagnosable.** HC3 returns errors as `{type, reason, message}`. `upload_icon` parsed none of it, so a gateway rejection and a crash inside the handler were indistinguishable from the client side. The thrown error now leads with HC3's `reason` and `message` when the body is JSON, falls back to the raw body when it is not, and says `(empty body)` rather than trailing off into nothing.
+
+### Changed
+- **`upload_icon` returns a category-aware `hint`.** Device icons attach by **numeric id** via `modify_device({deviceId, properties:{deviceIcon: <newId>}})`, not by name — the old hint suggested the room/scene `fields:{icon: "User<N>"}` form for every category, which does not work for devices. The device result also echoes back `deviceTemplate`.
+- **`upload_icon` description**: documents the `deviceTemplate` requirement, and confirms **SVG is genuinely supported** with no size or colour constraints. The two SVG attempts in the report failed for the deviceTemplate reason, not because SVG was unwired — worth stating, since the report reasonably suspected the latter.
+- **`import_quickapp` description**: `filePath` is resolved **server-side**, on the host running the MCP server rather than the machine driving the client. This matters when the server is remote (a .fqa on the client's disk will not resolve); the description previously did not say which side the path belonged to.
+- **`create_quickapp` `initialProperties` description**: notes that `uiCallbacks` passed at creation is not preserved — HC3 5.210.12 regenerates the callback table from the view, discarding named callbacks in favour of auto-generated `onReleased` handlers. The layout renders correctly and only the callbacks are wrong, so the loss is easy to miss; write them back with a follow-up `modify_device`.
+
+### Test harness
+- **`scripts/test/unit-upload-icon.mjs`** — a no-HC3 unit test (stubs `fetch` to capture the multipart body, injects a fake client for the before/after listings) covering: the `deviceTemplate` part is actually sent for device uploads and absent for room uploads; both guard rails refuse before any POST; the file part keeps its filename and content type and the body ends with a proper closing boundary; HC3's `reason`/`message`, a non-JSON body, and an empty body all reach the caller; the 128×128 and palette pre-checks still bite; SVG skips them; and the hint is category-aware. Wired into `npm test`.
+
 ## [4.7.0] - 2026-05-30
 
 ### Added

@@ -439,7 +439,7 @@
         },
         "initialProperties": {
           "type": "object",
-          "description": "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole)."
+          "description": "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole). CAVEAT (observed on firmware 5.210.12): `uiCallbacks` supplied here is not preserved — HC3 regenerates the callback table from the view at creation time, replacing named callbacks with auto-generated onReleased handlers. The layout renders correctly, so the loss is easy to miss. Write the intended callbacks back with a follow-up modify_device after creation."
         },
         "initialInterfaces": {
           "type": "array",
@@ -1912,13 +1912,13 @@
   },
   {
     "name": "import_quickapp",
-    "description": "Import a QuickApp from .fqa/.fqax file.",
+    "description": "Import a QuickApp from a .fqa/.fqax file. **`filePath` is resolved on the machine running this MCP server, not on the machine running the MCP client.** When the server is remote (e.g. reached over a tunnel), the file must already exist on the server's filesystem — a path to a local file on the client machine will not resolve. Copy the .fqa to the server first, or build the QA with create_quickapp + create_quickapp_file instead.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "filePath": {
           "type": "string",
-          "description": "Path to the .fqa/.fqax file to import"
+          "description": "Path to the .fqa/.fqax file, resolved SERVER-SIDE (on the host running this MCP server, not the client)."
         },
         "roomId": {
           "type": "number",
@@ -2884,7 +2884,7 @@
   },
   {
     "name": "upload_icon",
-    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})). HC3 5.x has two undocumented PNG constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png` to produce a compatible palette PNG. Returns `{newName, newId, category, extension, hint}`.",
+    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\n**category \"device\" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints. Returns `{newName, newId, category, extension, hint}`.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2904,6 +2904,10 @@
             "device"
           ],
           "description": "Category — records under that bucket in list_icons."
+        },
+        "deviceTemplate": {
+          "type": "string",
+          "description": "Required when category is \"device\", rejected otherwise. The Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". See list_icons → device[].deviceType for values already in use on this HC3."
         }
       },
       "required": [
