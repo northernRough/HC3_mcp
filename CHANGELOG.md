@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.16.0] - 2026-08-12
+
+The reporting project re-tested its own document after the 4.15.0 response, withdrew two claims, and supplied a properly isolated reproduction for a third. That reproduction was **re-run here** before adoption — the same standard applied to their corrections as to their original report.
+
+### Added
+- **The `select` trap.** A QuickApp `select` element missing `selectionType`, or carrying `values` as a JSON object rather than an array, causes HC3 to **store the layout, report the write as verified, and then return an empty view** from `/plugins/getView` — the entire tile, with every other component gone, not just the offending element.
+
+  Confirmed here with a single-variable test: one device, external `modify_device` PUT only, one field varying. Without `selectionType`, `getView` returned **0** components — the plain label alongside it vanished too. Adding `selectionType` as the sole change, both components rendered. Setting `values` to `{}` blanked it again; restoring the good layout brought it back.
+
+  In Lua `values = {}` encodes as `{}` rather than `[]`, so `json.array()` is required — the same applies to `selectedItems` when clearing a multi-select. Recorded in the server instructions (within the existing budget, funded by tightening other lines rather than raising the cap) and in full on `modify_device`.
+
+### Changed
+- **`modify_device` records that an externally-PUT `viewLayout` DOES render.** The original report claimed a QuickApp must install its own view from Lua; the reporter withdrew that after testing, and this session's runs confirm it independently — every render above used an external PUT and nothing else. The claim was never adopted here, and `unit-instructions.mjs` now guards against it being added later from the original document.
+
+### Not adopted (still untested)
+Named `uiCallbacks` dispatching as `method(self, event)`, and `style.color` being ignored by the mobile app. The reporter explicitly declined to press either without an isolation test, having been caught once by a two-variable change. The second is app-side rendering rather than gateway or MCP behaviour and probably does not belong here at all.
+
 ## [4.15.0] - 2026-08-12
 
 Acts on a field report from a project that built a ~1,300-line irrigation QuickApp against this server. Every claim was re-tested against the live gateway before being acted on; two did not survive, and are recorded here so they are not "fixed" later on the strength of the report alone.

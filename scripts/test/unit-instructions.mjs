@@ -85,6 +85,22 @@ check('advertises the resources by uri', () => {
   }
 });
 
+check('carries the select trap, which reports verified then blanks the tile', () => {
+  // Confirmed here on 2026-08-12 by running the reporter's reproduction:
+  // one device, external modify_device PUT only, one field varying.
+  // No selectionType -> getView returned 0 components (the label vanished
+  // too); adding selectionType alone -> both components rendered.
+  assert.match(text, /selectionType/);
+  assert.match(text, /entire\*\* tile|entire tile/);
+});
+
+check('does NOT claim a QuickApp must install its own view', () => {
+  // The reporter withdrew this after testing: an externally-PUT viewLayout
+  // renders fine. It was never adopted here; this guards against it being
+  // added later from the original report.
+  assert.ok(!/install its own view|must install.*viewLayout/i.test(text));
+});
+
 check('makes no claim this session did not verify', () => {
   // uiCallbacks and Z-Wave transmission are reported/inherited, not tested
   // here. They belong in a tool description, not in every session's context.
