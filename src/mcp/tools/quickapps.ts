@@ -20,12 +20,15 @@
 //   the submitted value to match, full-array-replaces the
 //   quickAppVariables array, then verifies value AND type after
 //   write.
-// - import_quickapp is currently a stub that throws — file upload
-//   over MCP needs FormData multipart support that hasn't been wired
-//   up.
+// - import_quickapp posts multipart/form-data to /api/quickApp/import
+//   (parts: file, roomId). It accepts the .fqa as base64 so a remote
+//   client can import without shell access to the server, and still
+//   accepts a server-side filePath. Hand-rolled multipart, same as
+//   upload_icon, because it needs raw bytes.
 
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
+import { readFile } from 'node:fs/promises';
 
 export const quickappsCoreSchemas: MCPTool[] = [
       {
@@ -329,20 +332,27 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "import_quickapp",
-        description: "Import a QuickApp from a .fqa/.fqax file. **`filePath` is resolved on the machine running this MCP server, not on the machine running the MCP client.** When the server is remote (e.g. reached over a tunnel), the file must already exist on the server's filesystem — a path to a local file on the client machine will not resolve. Copy the .fqa to the server first, or build the QA with create_quickapp + create_quickapp_file instead.",
+        description: "Import a QuickApp from a .fqa file via POST /api/quickApp/import (multipart/form-data with file + roomId). Returns the created device, verified by refetching it.\n\nSupply the file **either** as `base64` (the .fqa bytes, no data URL prefix) **or** as `filePath` — exactly one. Prefer `base64`: `filePath` is resolved on the machine running this MCP **server**, not the machine running the client, so when the server is remote (e.g. reached over a tunnel) a path to a local file on your own machine will not resolve.\n\nThe .fqa is JSON; it is parsed and checked for the expected `name`/`type` keys before posting, so a truncated or mis-encoded payload is caught here rather than surfacing as HC3's bare \"Cannot import quick app file\". HC3 returns 403 for a .fqa that was encrypted for a different gateway — those cannot be imported anywhere but their origin controller.",
         inputSchema: {
           type: "object",
           properties: {
+            base64: {
+              type: "string",
+              description: "The .fqa file content, base64-encoded (no data URL prefix). Use this when driving a remote server. Mutually exclusive with filePath."
+            },
             filePath: {
               type: "string",
-              description: "Path to the .fqa/.fqax file, resolved SERVER-SIDE (on the host running this MCP server, not the client)."
+              description: "Path to the .fqa file, resolved SERVER-SIDE (on the host running this MCP server, not the client). Mutually exclusive with base64."
+            },
+            fileName: {
+              type: "string",
+              description: "Optional filename to send in the multipart part. Defaults to the filePath basename, or \"import.fqa\" for base64 uploads. HC3 takes the QuickApp name from the file content, not this."
             },
             roomId: {
               type: "number",
-              description: "Room ID where the QuickApp should be created"
+              description: "Room ID where the QuickApp should be created. Defaults to the Default Room if omitted."
             }
-          },
-          required: ["filePath"]
+          }
         }
       },
       {
@@ -867,13 +877,129 @@ export const quickapps: ToolModule = {
       return await hc3.request('/api/quickApp/availableTypes');
     },
 
-    async import_quickapp(_hc3, _args: { filePath: string; roomId?: number }): Promise<any> {
-      // Note: This is a simplified implementation. In a real scenario, you would need to:
-      // 1. Read the file from the filesystem
-      // 2. Create a FormData object with the file
-      // 3. Send it as multipart/form-data
+    async import_quickapp(hc3, args: {
+      base64?: string;
+      filePath?: string;
+      fileName?: string;
+      roomId?: number;
+    }): Promise<any> {
+      const hasB64 = typeof args?.base64 === 'string' && args.base64.length > 0;
+      const hasPath = typeof args?.filePath === 'string' && args.filePath.length > 0;
+      if (hasB64 === hasPath) {
+        throw new Error(
+          'import_quickapp requires exactly one of base64 or filePath. ' +
+          'Prefer base64 when driving a remote server — filePath is resolved on the host running this MCP server, not on your machine.'
+        );
+      }
+      if (!hc3.config.host || !hc3.config.username || !hc3.config.password) {
+        throw new Error('Fibaro HC3 not configured.');
+      }
 
-      throw new Error('QuickApp import requires file upload functionality that is not yet implemented. Use the Fibaro web interface for imports.');
+      let bytes: Buffer;
+      if (hasB64) {
+        bytes = Buffer.from(args.base64 as string, 'base64');
+      } else {
+        try {
+          bytes = await readFile(args.filePath as string);
+        } catch (e: any) {
+          throw new Error(
+            `import_quickapp: could not read '${args.filePath}' on the MCP server host (${e.code ?? e.message}). ` +
+            'This path is resolved server-side; if the file lives on your own machine, pass it as base64 instead.'
+          );
+        }
+      }
+      if (bytes.length === 0) throw new Error('import_quickapp: the .fqa payload is empty.');
+
+      // A .fqa is JSON. Validating here turns a truncated or wrongly-encoded
+      // payload into a precise error instead of HC3's bare "Cannot import
+      // quick app file", which says nothing about what was wrong.
+      let fqa: any;
+      try {
+        fqa = JSON.parse(bytes.toString('utf8'));
+      } catch {
+        throw new Error(
+          `import_quickapp: payload is not valid JSON (${bytes.length} bytes). A .fqa is a JSON document — check the base64 round-trip, and that the file is not a .fqax or an archive.`
+        );
+      }
+      if (!fqa || typeof fqa !== 'object' || (!fqa.name && !fqa.type)) {
+        throw new Error(
+          'import_quickapp: payload parsed as JSON but has neither a "name" nor a "type" key, so it does not look like a .fqa export.'
+        );
+      }
+
+      const fileName = args.fileName
+        ?? (hasPath ? (args.filePath as string).split('/').pop() || 'import.fqa' : 'import.fqa');
+
+      const boundary = '----mcphc3' + Date.now().toString(16);
+      const CRLF = '\r\n';
+      const partHead = (name: string, filename?: string, type?: string) =>
+        `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"` +
+        (filename ? `; filename="${filename}"` : '') + CRLF +
+        (type ? `Content-Type: ${type}${CRLF}` : '') + CRLF;
+
+      const tail = (typeof args.roomId === 'number'
+        ? partHead('roomId') + String(args.roomId) + CRLF
+        : '') + `--${boundary}--${CRLF}`;
+      const body = Buffer.concat([
+        Buffer.from(partHead('file', fileName, 'application/json')),
+        bytes,
+        Buffer.from(CRLF + tail)
+      ]);
+
+      const auth = Buffer.from(`${hc3.config.username}:${hc3.config.password}`).toString('base64');
+      const response = await fetch(`http://${hc3.config.host}:${hc3.config.port}/api/quickApp/import`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        let reason = '';
+        let detail = '';
+        try {
+          const parsed = JSON.parse(errText);
+          reason = typeof parsed?.reason === 'string' ? parsed.reason : '';
+          detail = typeof parsed?.message === 'string' ? parsed.message : '';
+        } catch { /* non-JSON body — fall through to the raw text */ }
+        const summary = [reason, detail].filter(Boolean).join(': ');
+        const hint = response.status === 403
+          ? ' HC3 returns 403 when the .fqa was encrypted for a different gateway; those can only be imported on their origin controller.'
+          : '';
+        throw new Error(
+          `import_quickapp: HTTP ${response.status}${summary ? ` ${summary}` : ''} — raw response: ${errText || '(empty body)'}.${hint}`
+        );
+      }
+
+      const created: any = await response.json().catch(() => null);
+      const newId = created?.id;
+      if (typeof newId !== 'number') {
+        throw new Error(
+          `import_quickapp: HC3 accepted the upload but returned no device id. Raw response: ${JSON.stringify(created)}`
+        );
+      }
+
+      // Post-write verify, matching the pattern used across this module.
+      const device: any = await hc3.request(`/api/devices/${newId}`);
+      if (!device || device.id !== newId) {
+        throw new Error(
+          `import_quickapp: HC3 reported device ${newId} but refetching it did not return that device.`
+        );
+      }
+      return {
+        deviceId: newId,
+        name: device.name,
+        type: device.type,
+        roomID: device.roomID,
+        enabled: device.enabled,
+        visible: device.visible,
+        source: hasB64 ? 'base64' : `filePath (server-side): ${args.filePath}`,
+        hint: `Populate or inspect files via list_quickapp_files({deviceId: ${newId}}) / get_quickapp_file. Remove with delete_device({deviceId: ${newId}}) if this was a test import.`
+      };
     },
   },
 };

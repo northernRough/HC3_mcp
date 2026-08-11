@@ -1920,22 +1920,27 @@
   },
   {
     "name": "import_quickapp",
-    "description": "Import a QuickApp from a .fqa/.fqax file. **`filePath` is resolved on the machine running this MCP server, not on the machine running the MCP client.** When the server is remote (e.g. reached over a tunnel), the file must already exist on the server's filesystem — a path to a local file on the client machine will not resolve. Copy the .fqa to the server first, or build the QA with create_quickapp + create_quickapp_file instead.",
+    "description": "Import a QuickApp from a .fqa file via POST /api/quickApp/import (multipart/form-data with file + roomId). Returns the created device, verified by refetching it.\n\nSupply the file **either** as `base64` (the .fqa bytes, no data URL prefix) **or** as `filePath` — exactly one. Prefer `base64`: `filePath` is resolved on the machine running this MCP **server**, not the machine running the client, so when the server is remote (e.g. reached over a tunnel) a path to a local file on your own machine will not resolve.\n\nThe .fqa is JSON; it is parsed and checked for the expected `name`/`type` keys before posting, so a truncated or mis-encoded payload is caught here rather than surfacing as HC3's bare \"Cannot import quick app file\". HC3 returns 403 for a .fqa that was encrypted for a different gateway — those cannot be imported anywhere but their origin controller.",
     "inputSchema": {
       "type": "object",
       "properties": {
+        "base64": {
+          "type": "string",
+          "description": "The .fqa file content, base64-encoded (no data URL prefix). Use this when driving a remote server. Mutually exclusive with filePath."
+        },
         "filePath": {
           "type": "string",
-          "description": "Path to the .fqa/.fqax file, resolved SERVER-SIDE (on the host running this MCP server, not the client)."
+          "description": "Path to the .fqa file, resolved SERVER-SIDE (on the host running this MCP server, not the client). Mutually exclusive with base64."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Optional filename to send in the multipart part. Defaults to the filePath basename, or \"import.fqa\" for base64 uploads. HC3 takes the QuickApp name from the file content, not this."
         },
         "roomId": {
           "type": "number",
-          "description": "Room ID where the QuickApp should be created"
+          "description": "Room ID where the QuickApp should be created. Defaults to the Default Room if omitted."
         }
-      },
-      "required": [
-        "filePath"
-      ]
+      }
     }
   },
   {

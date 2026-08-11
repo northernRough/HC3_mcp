@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.9.0] - 2026-08-11
+
+### Added
+- **`import_quickapp` is implemented.** It was a stub that threw unconditionally — *"QuickApp import requires file upload functionality that is not yet implemented. Use the Fibaro web interface for imports."* — for every call, with no code path that could ever contact HC3. The module header said so; the tool description did not, and 4.7.1's description (added from a bug report, on trust rather than verification) made it sound like a working tool with a server-side path. That was wrong and is corrected here.
+
+  It now posts `multipart/form-data` to `POST /api/quickApp/import` with a `file` part and an optional `roomId` part, per the gateway's own OpenAPI document at `/assets/docs/hc/quickapp.json`. Same hand-rolled multipart as `upload_icon`, which is proven against this firmware.
+
+  **`base64`** takes the .fqa content directly, so a client driving a remote server (the normal case for a tunnelled deployment) can import without shell access to the server host. **`filePath`** still works and is still resolved server-side — now stated plainly in the description, and the read error says which machine the path was resolved on. Exactly one of the two is required.
+
+  The .fqa is JSON, so it is parsed and checked for `name`/`type` before posting: a truncated or mis-encoded payload produces a precise error instead of HC3's bare `Cannot import quick app file`. A 403 is annotated with the reason it usually happens — the .fqa was encrypted for a different gateway and cannot be imported anywhere but its origin controller. Success is verified by refetching the reported device id, matching the post-write verify pattern used across this module.
+
+  Verified live against 5.210.12: a QuickApp was created, exported, re-imported via `base64` and again via `filePath`, both imports refetched and confirmed, and all three devices deleted and verified gone.
+
+### Test harness
+- **`scripts/test/unit-import-quickapp.mjs`** — no-HC3 unit test (stubs `fetch` to capture the multipart body) covering the endpoint and file part, `roomId` presence/absence and the `roomId: 0` falsy trap, the `fileName` override, the closing boundary, both mutual-exclusion refusals, the non-JSON and not-a-.fqa rejections happening before any POST, the server-side path error naming the host, HC3's `reason`/`message` surfacing, the 403 annotation, a 2xx with no device id, and the post-import verify. Wired into `npm test`.
+
 ## [4.8.0] - 2026-08-11
 
 ### Fixed
