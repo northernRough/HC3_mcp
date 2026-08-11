@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.14.0] - 2026-08-11
+
+### Added
+- **Server `instructions` at initialize.** MCP lets a server send a block of guidance that clients surface as session context. This server sent none, which left a real gap: a tool description is only read once someone has already reached for that tool, so nothing reaches the caller at the point they are deciding *how to approach a task at all*. That is where the expensive mistakes happen — a day was lost this month designing around an assumption that a tool description could never have corrected, because the tool was never opened.
+
+  The bar for this text is deliberately higher than for a tool description: it is injected into every session and nobody can opt out. **Only facts verified against a live gateway** — nothing inherited, nothing merely documented, nothing reported-but-untested. That bar was earned. An earlier draft would have asserted that device icons are single-image sets and that every state change must be code-driven; both were false, taken from Fibaro's OpenAPI spec rather than from the wire, and would have been injected into every session until someone noticed.
+
+  Nine lines: the 200-with-a-placeholder rule, the per-device-type icon set model, the 128×128 rule and the irrelevance of colour type, per-bucket icon name collisions, `get_scenes` overflow, the 501 endpoints, post-write verification, and the reminder that clients cache tool schemas at connect. Plus the four resource URIs.
+
+### Changed
+- **`create_backup` now says that it REBOOTS the gateway.** Its description was 19 characters and mentioned no such thing, so an agent asked to "take a backup first" would restart a live home-automation controller mid-flight without warning. Also records that remote backups fail *silently* once the cloud account is over quota — both create flags go false and nothing else indicates it, so a gateway can sit for months with no usable backup — and that backup payloads are encrypted, making restores all-or-nothing.
+- `can_create_backup` and `get_remote_backup_status` carry the same warnings.
+
+### Test harness
+- **`scripts/test/unit-instructions.mjs`** guards the bar as much as the field: that the two disproven claims (single-image sets, palette requirement) cannot reappear, that no unverified claim is promoted into every session's context, and that the text stays within a sane budget.
+
 ## [4.13.1] - 2026-08-11
 
 ### Fixed

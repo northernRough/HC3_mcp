@@ -45,6 +45,45 @@ import { SERVER_NAME, SERVER_VERSION } from './version';
 const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
 
+
+/**
+ * Sent once at initialize, so it reaches the client BEFORE any tool is
+ * chosen. That makes it the only channel that lands at design time — a tool
+ * description is read only when someone already reached for that tool, which
+ * is too late for "how should I approach this at all".
+ *
+ * It is also the most expensive place to be wrong: every session pays for it
+ * and no one can opt out. So the bar here is deliberately higher than for a
+ * tool description — ONLY facts verified against a live gateway. Nothing
+ * inherited, nothing merely documented, nothing reported-but-untested.
+ *
+ * That bar exists because it was earned. An earlier draft of this text would
+ * have asserted that device icons are single-image sets and that every state
+ * change must be code-driven. Both were wrong, taken from Fibaro's OpenAPI
+ * spec rather than from the wire, and would have been injected into every
+ * session until someone noticed. Two other long-standing claims in this
+ * codebase — that HC3 rejects non-palette PNGs, and that import_quickapp
+ * resolved a server-side path — also failed on contact with the gateway.
+ *
+ * If you are tempted to add a line here from documentation or a bug report,
+ * test it first or leave it in the tool description where the blast radius
+ * is one call instead of every conversation.
+ */
+const SERVER_INSTRUCTIONS = [
+  'This server controls a live Fibaro Home Center 3 (firmware 5.2x) in someone\'s home. Every fact below was verified against a real gateway; several contradict Fibaro\'s own API documentation.',
+  '',
+  '- HC3 does not 404 a missing asset. It answers **200 with a placeholder**: a 1888-byte "unknown icon" SVG under /assets/icon, or its web UI index.html elsewhere. HTTP status alone never proves an asset exists — check the content.',
+  '- Device icons are state SETS, and the set size is a property of the DEVICE TYPE: com.fibaro.genericDevice holds 1 image, binarySwitch 2 (states 0/100), multilevelSwitch 11 (0,10,...,100). HC3 switches between them from the device value on its own. Supplying the wrong shape fails silently — the icon registers, attaches, reports no error, and renders blank.',
+  '- Icon PNGs must be exactly 128x128 (HC3 answers 400 INVALID_ICON_SIZE otherwise). Colour type does NOT matter; RGBA is fine and is what most icons on a live gateway already use.',
+  '- Icon names (User<N>) are unique only WITHIN a bucket. The same name can exist as a room, scene and device icon at once, referring to three different images, and freed ids are reused. Never match an icon across buckets by name.',
+  '- get_scenes returns every scene with its full content (~1.9 MB on a modest system) and can overflow response limits. Use get_scene for a single scene.',
+  '- Several endpoints Fibaro documents return 501 on this firmware. KNOWN_DEAD_ENDPOINTS.md records the ones found so far; prefer a tool over a hand-built path.',
+  '- Mutating tools read back and verify after writing. A success means the value was confirmed on the gateway; an error message is usually specific, so read it rather than retrying blind.',
+  '- Tool schemas are cached by the client at connect. After this server is redeployed, reconnect the session or you will be calling yesterday\'s API against today\'s expectations.',
+  '',
+  'Read-only at-a-glance views are available as resources: hc3://health (is anything broken), hc3://watchdog (is the automation alive), hc3://binder (did device bindings resolve), hc3://globals (automation state).',
+].join('\n');
+
 class HC3MCPServer {
   private hc3: HC3Client;
 
@@ -134,6 +173,7 @@ class HC3MCPServer {
           // so listChanged is not advertised.
           resources: {},
         },
+        instructions: SERVER_INSTRUCTIONS,
         serverInfo: {
           name: SERVER_NAME,
           version: SERVER_VERSION,
