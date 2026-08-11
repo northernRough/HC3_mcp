@@ -12,11 +12,25 @@
 // - upload_icon sends a `deviceTemplate` part when category is
 //   "device". HC3 400s with MISSING_PARAMETER without it — device
 //   icons are filed per device type, unlike room/scene icons.
+//   HC3's own spec (/assets/docs/hc/icons.json) omits deviceTemplate
+//   entirely and lists only icon + type as required, so the gateway
+//   enforces more than it documents.
+// - Device icons uploaded here are single-image sets. The stock
+//   library has multi-state sets (light0/light50/light100) but the
+//   endpoint takes one file and has no state parameter, so state
+//   switching is code-driven via properties.deviceIcon.
+// - upload_icons batches upload_icon for variant sets. Sequential,
+//   and NOT atomic — each upload is a committed write.
 // - delete_icon uses query params (NOT JSON body) and refuses to
 //   delete built-in icons (HC3 returns 403 on non-user icons; the
 //   post-delete refetch catches them too).
 
 import { ToolModule } from './registry';
+
+/** Lua table name used in hint text; mirrors the luaTableName default. */
+function tableNameHint(args: { luaTableName?: string }): string {
+  return args.luaTableName || 'Icons';
+}
 
 export const icons: ToolModule = {
   schemas: [
@@ -42,7 +56,7 @@ export const icons: ToolModule = {
       },
       {
         name: 'upload_icon',
-        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: "User1010"}})).\n\n**category "device" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA\'s own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints. Returns `{newName, newId, category, extension, hint}`.',
+        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: "User1010"}})).\n\n**category "device" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA\'s own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**Device icons are single-image sets.** HC3\'s stock library ships multi-state sets (`light0` / `light50` / `light100`, one file per device state), but `POST /api/icons` accepts **one file per call and has no state parameter** — its own spec describes the result as "a new icon set". So an uploaded device icon covers every state, and HC3 will not switch images for you based on device value. **Every state change is code-driven**: attach with `modify_device({deviceId, properties:{deviceIcon: <newId>}})`, and switch at runtime from QuickApp Lua with `self:updateProperty("deviceIcon", id)` — verified working at runtime on 5.210.12, and `deviceIcon` is a real write, not one of HC3\'s silent-cache paths. For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, hint}`.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -52,6 +66,34 @@ export const icons: ToolModule = {
             deviceTemplate: { type: 'string', description: 'Required when category is "device", rejected otherwise. The Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". See list_icons → device[].deviceType for values already in use on this HC3.' }
           },
           required: ['base64', 'mime', 'category']
+        }
+      },
+      {
+        name: 'upload_icons',
+        description: 'Upload several icons in one call — for state-variant sets where a device swaps between many images (idle / active / warning / mode tokens). Wraps `upload_icon` per image, so every guard and post-upload verify still applies.\n\nUploads run **sequentially**, not in parallel: HC3 assigns `User<N>` ids in order and concurrent posts risk interleaved assignment. Because each upload is a committed write, this is **not atomic** — if image 7 of 17 fails, the first six exist on the gateway. The result reports `uploaded` and `failed` separately so you can retry only the failures rather than re-running the batch and creating duplicates.\n\nReturns a `labels` map (your label → assigned `User<N>` id) and, by default, a ready-to-paste Lua table of that map — which is what you need in the QuickApp, since **switching a device icon is code-driven**: `self:updateProperty("deviceIcon", id)`. Verified working at runtime on firmware 5.210.12, not just at init.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            images: {
+              type: 'array',
+              description: 'The images to upload, in order. Each needs a `label` (your key for it, e.g. "idle") and `base64`; `mime` may be given per image or once at the top level.',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Your name for this variant — becomes the key in the returned map and Lua table. Must be unique within the call.' },
+                  base64: { type: 'string', description: 'Base64-encoded image bytes, no data URL prefix.' },
+                  mime: { type: 'string', description: 'Optional per-image override of the top-level mime.' }
+                },
+                required: ['label', 'base64']
+              }
+            },
+            mime: { type: 'string', description: 'Default mime for images that do not specify their own — "image/png" or "image/svg+xml".' },
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Category for every image in the batch.' },
+            deviceTemplate: { type: 'string', description: 'Required when category is "device" (e.g. "com.fibaro.genericDevice" for a QuickApp), rejected otherwise. Applies to every image in the batch.' },
+            luaTable: { type: 'boolean', description: 'Include a ready-to-paste Lua table of label → id in the result. Default true.' },
+            luaTableName: { type: 'string', description: 'Variable name for the Lua table. Default "Icons".' }
+          },
+          required: ['images', 'category']
         }
       },
       {
@@ -301,6 +343,89 @@ export const icons: ToolModule = {
         ...(args.deviceTemplate ? { deviceTemplate: args.deviceTemplate } : {}),
         hint: `${attachHint} Re-fetch later via get_icon({category: "${args.category}", name: "${newName}", extension: "${ext}", userIcon: true}).`
       };
+    },
+
+    async upload_icons(hc3, args: {
+      images: Array<{ label: string; base64: string; mime?: string }>;
+      mime?: string;
+      category: 'room' | 'scene' | 'device';
+      deviceTemplate?: string;
+      luaTable?: boolean;
+      luaTableName?: string;
+    }): Promise<any> {
+      if (!Array.isArray(args?.images) || args.images.length === 0) {
+        throw new Error('upload_icons requires a non-empty images array.');
+      }
+      if (!args?.category) throw new Error('upload_icons requires category.');
+
+      // Validate the whole batch before writing anything. Each upload is a
+      // committed write, so a batch that is going to fail on a missing label
+      // should fail before it creates half a set on the gateway.
+      const seen = new Set<string>();
+      args.images.forEach((img, i) => {
+        if (!img?.label) throw new Error(`upload_icons: images[${i}] has no label.`);
+        if (seen.has(img.label)) throw new Error(`upload_icons: duplicate label '${img.label}' — labels key the returned map and must be unique.`);
+        seen.add(img.label);
+        if (!img?.base64) throw new Error(`upload_icons: images[${i}] ('${img.label}') has no base64.`);
+        if (!img.mime && !args.mime) throw new Error(`upload_icons: images[${i}] ('${img.label}') has no mime and no top-level mime was given.`);
+      });
+      if (args.category === 'device' && !args.deviceTemplate) {
+        throw new Error(
+          'upload_icons: category "device" requires deviceTemplate — the Fibaro device type the icons are filed under, e.g. "com.fibaro.genericDevice" for a QuickApp. Checked here so the batch fails before uploading anything.'
+        );
+      }
+      if (args.category !== 'device' && args.deviceTemplate) {
+        throw new Error(`upload_icons: deviceTemplate only applies to category "device", not "${args.category}".`);
+      }
+
+      const uploaded: any[] = [];
+      const failed: any[] = [];
+      const labels: Record<string, number> = {};
+      // Sequential on purpose: HC3 assigns User<N> ids in order, and parallel
+      // posts risk interleaved assignment.
+      for (const img of args.images) {
+        try {
+          const res = await icons.handlers.upload_icon(hc3, {
+            base64: img.base64,
+            mime: img.mime ?? args.mime,
+            category: args.category,
+            ...(args.deviceTemplate ? { deviceTemplate: args.deviceTemplate } : {}),
+          });
+          labels[img.label] = res.newId;
+          uploaded.push({ label: img.label, name: res.newName, id: res.newId, extension: res.extension });
+        } catch (e: any) {
+          failed.push({ label: img.label, error: e?.message ?? String(e) });
+        }
+      }
+
+      const result: any = {
+        category: args.category,
+        ...(args.deviceTemplate ? { deviceTemplate: args.deviceTemplate } : {}),
+        requested: args.images.length,
+        uploadedCount: uploaded.length,
+        failedCount: failed.length,
+        labels,
+        uploaded,
+        failed,
+      };
+
+      if (args.luaTable !== false && uploaded.length > 0) {
+        // Lua identifiers only match [A-Za-z_][A-Za-z0-9_]*; anything else has
+        // to use the ["..."] form or the paste will not parse.
+        const tableName = args.luaTableName || 'Icons';
+        const rows = uploaded.map(u => {
+          const key = /^[A-Za-z_][A-Za-z0-9_]*$/.test(u.label)
+            ? u.label
+            : `["${u.label.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
+          return `    ${key} = ${u.id},`;
+        });
+        result.luaTable = `local ${tableName} = {\n${rows.join('\n')}\n}`;
+      }
+
+      result.hint = failed.length > 0
+        ? `${uploaded.length} of ${args.images.length} uploaded; the ${failed.length} listed in \`failed\` were NOT created. Retry only those — re-running the whole batch would duplicate the successes.`
+        : `Attach with modify_device({deviceId, properties:{deviceIcon: <id>}}), and switch at runtime from QuickApp Lua with self:updateProperty("deviceIcon", ${tableNameHint(args)}.<label>). Device icons are single-image sets — HC3 has no multi-state upload — so every state change is code-driven.`;
+      return result;
     },
 
     async delete_icon(hc3, args: {

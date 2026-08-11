@@ -266,6 +266,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 ### Icons
 - `list_icons` - List all icons HC3 knows about, grouped by device/room/scene
 - `get_icon` - Fetch an icon's binary content base64-encoded; detects HC3's silent SVG-fallback for missing icons
+- `upload_icons` - Batch upload for state-variant sets. Labelled array in, label→id map plus a pasteable Lua table out. Sequential and not atomic; validates the whole batch before the first write
 - `upload_icon` - Upload a new user icon. Device icons require `deviceTemplate` (the Fibaro device type they are filed under, e.g. `com.fibaro.binarySwitch`); room and scene icons must not pass it. Pre-validates PNG bytes (signature, 128×128, palette mode) before posting; HC3's PNG validator silent-500s on non-palette PNGs. SVG uploads as-is. Auto-assigned name returned
 - `delete_icon` - Delete a user-uploaded icon. Built-in icons return 403
 
