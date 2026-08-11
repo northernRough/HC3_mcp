@@ -197,6 +197,23 @@ See `scripts/test/README.md` for per-phase detail.
 
 ---
 
+## Releasing
+
+Tag-driven. `.github/workflows/release.yml` publishes to npm when a `v*` tag is
+pushed, so a release is `git push origin vX.Y.Z` and nothing else.
+
+It refuses to publish if the tag disagrees with `package.json`, if the version
+is already on the registry (they are immutable), or if lint, tests or the
+release-hygiene check fail. After publishing it waits for the version to become
+resolvable rather than assuming success.
+
+Requires an npm **automation** token in the `NPM_TOKEN` repository secret.
+Automation tokens carry their own 2FA bypass, which is what makes an
+unattended publish possible — an interactive `npm publish` on a 2FA account
+prompts for a one-time password that no script can supply.
+
+---
+
 ## Feedback loop
 
 The server records where it wastes people's time, locally and with nothing
