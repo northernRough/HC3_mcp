@@ -61,7 +61,7 @@ export const globals: ToolModule = {
     },
     {
       name: 'create_global_variable',
-      description: 'Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches.',
+      description: 'Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches. NOTE for QuickApp authors: from Lua, `fibaro.setGlobalVariable` writes an existing global fine but **silently does nothing** when the variable does not exist — no error, no creation. Create the global here first, or a QA can write a heartbeat into a void for days with nothing reporting it (verified on 5.210.12).',
       inputSchema: {
         type: 'object',
         properties: {

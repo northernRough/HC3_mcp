@@ -78,6 +78,8 @@ const SERVER_INSTRUCTIONS = [
   '- Icon names (User<N>) are unique only WITHIN a bucket. The same name can exist as a room, scene and device icon at once, referring to three different images, and freed ids are reused. Never match an icon across buckets by name.',
   '- get_scenes returns every scene with its full content (~1.9 MB on a modest system) and can overflow response limits. Use get_scene for a single scene.',
   '- Several endpoints Fibaro documents return 501 on this firmware. KNOWN_DEAD_ENDPOINTS.md records the ones found so far; prefer a tool over a hand-built path.',
+  '- **A call that does not throw has not necessarily worked.** HC3 accepts and stores requests it will not act on. Verified example: from QuickApp Lua, fibaro.setGlobalVariable writes an EXISTING global fine but **silently does nothing** if the variable does not exist — no error, no creation. A QuickApp wrote a heartbeat into a non-existent global for a day and the watchdog saw nothing. After a write, read back the thing you care about, not the write\'s return code.',
+  '- Writing a QuickApp variable from outside **restarts that QuickApp** (verified: an external variable write bounced the QA within 4s). create_quickapp_variable restarts once per variable, so creating eight in a row restarts it eight times. Use update_multiple_quickapp_files to push several files in one restart, and write variables before any other call that also restarts.',
   '- Mutating tools read back and verify after writing. A success means the value was confirmed on the gateway; an error message is usually specific, so read it rather than retrying blind.',
   '- Tool schemas are cached by the client at connect. After this server is redeployed, reconnect the session or you will be calling yesterday\'s API against today\'s expectations.',
   '',
@@ -294,8 +296,23 @@ class HC3MCPServer {
         },
       };
     } catch (error) {
+      // Tool EXECUTION failures come back as a normal result carrying
+      // isError, not as a JSON-RPC protocol error. Protocol errors are for
+      // protocol faults (unknown method, malformed params); many clients
+      // render them as a generic envelope and drop the text, which is how a
+      // user spent two days seeing only "Error occurred during tool
+      // execution" while this server was in fact reporting HTTP status and
+      // HC3's response body all along. As isError content the message
+      // reaches the model and the user verbatim.
       const errorMessage = error instanceof Error ? error.message : String(error);
-      return this.errorResponse(request.id, -32000, errorMessage);
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: errorMessage }],
+        },
+      };
     }
   }
 

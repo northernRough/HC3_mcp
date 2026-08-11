@@ -2,6 +2,28 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.15.0] - 2026-08-12
+
+Acts on a field report from a project that built a ~1,300-line irrigation QuickApp against this server. Every claim was re-tested against the live gateway before being acted on; two did not survive, and are recorded here so they are not "fixed" later on the strength of the report alone.
+
+### Changed
+- **Tool failures now return `isError: true` content instead of a JSON-RPC protocol error.** The report's single biggest ask was "surface the HC3 status code and body" — and the server was *already* doing that: `hc3-client` throws `HTTP {status}: {statusText} - {body}`. The text was being lost at the *shape*: tool execution failures were returned as protocol errors (`-32000`), which many clients render as a generic envelope with the message discarded. That is how two days were spent seeing only `{"error": "Error occurred during tool execution"}` while the server was reporting chapter and verse. Protocol faults (unknown method, bad params) remain real JSON-RPC errors; `unit-error-shape.mjs` asserts both halves of the split.
+
+- **`create_quickapp` — the `uiCallbacks` caveat is now VERIFIED, not "observed".** Confirmed live: a supplied `{name: "modeSelector", eventType: "onToggled", callback: "modeSelection"}` comes back as `{name: "modeSelector", eventType: "onReleased", callback: "uimodeSelectorOnReleased"}`.
+
+- **The three QuickApp-variable tools now state that an external variable write RESTARTS the QuickApp** (verified: the QA bounced within 4s). It restarts once per call, so creating eight variables restarts it eight times, and a write issued after another restarting call may never run. `update_multiple_quickapp_files` remains the way to push several files in one restart.
+
+- **`create_global_variable` records that `fibaro.setGlobalVariable` silently no-ops on a missing global.** Verified with a controlled test: the same QuickApp wrote an existing global successfully and a non-existent one to nothing at all — no error, no creation. That is how a heartbeat went into a void for a day with a watchdog watching and reporting nothing.
+
+- **Server instructions gain the two cross-cutting facts** from the above: that a call which does not throw has not necessarily worked, and that external variable writes restart the QA.
+
+### Not adopted (tested and refuted)
+- **"`filter_devices` parentId values must be strings, not integers."** Refuted on 5.210.12: against a parent with 185 children, `[1]` and `["1"]` both returned all 185.
+- **"The MCP does not surface HC3 status codes or bodies."** It does, and has; see the error-shape change above for what was actually wrong.
+
+### Not adopted (not tested)
+QuickApp UI behaviours from the report — that a view must be installed from within the QA, that a malformed `select` blanks the whole tile, that `style.color` is ignored by the mobile app, that empty Lua tables need `json.array()` — are plausible and detailed but were **not** verified here. They are QuickApp-authoring facts rather than MCP behaviours, and this codebase has now been bitten three times by promoting an untested claim into documentation. They are deliberately left out of tool descriptions and instructions until someone tests them.
+
 ## [4.14.0] - 2026-08-11
 
 ### Added
