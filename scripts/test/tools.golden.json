@@ -361,7 +361,7 @@
   },
   {
     "name": "create_global_variable",
-    "description": "Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches.",
+    "description": "Create a new global variable via POST /api/globalVariables. Refuses if the variable already exists (use set_global_variable to update). Pre-validates name format (HC3 requires [A-Za-z][A-Za-z0-9_]*). Supports isEnum globals with an enumValues list. Post-create verifies by refetching and asserting the stored value matches. NOTE for QuickApp authors: from Lua, `fibaro.setGlobalVariable` writes an existing global fine but **silently does nothing** when the variable does not exist — no error, no creation. Create the global here first, or a QA can write a heartbeat into a void for days with nothing reporting it (verified on 5.210.12).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -439,7 +439,7 @@
         },
         "initialProperties": {
           "type": "object",
-          "description": "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole). CAVEAT (observed on firmware 5.210.12): `uiCallbacks` supplied here is not preserved — HC3 regenerates the callback table from the view at creation time, replacing named callbacks with auto-generated onReleased handlers. The layout renders correctly, so the loss is easy to miss. Write the intended callbacks back with a follow-up modify_device after creation."
+          "description": "Optional map of initial device properties (e.g. quickAppVariables, icon, deviceRole). CAVEAT (VERIFIED on firmware 5.210.12): `uiCallbacks` supplied here is **discarded**. HC3 regenerates the table from the view at creation time — a supplied {name:'modeSelector', eventType:'onToggled', callback:'modeSelection'} comes back as {name:'modeSelector', eventType:'onReleased', callback:'uimodeSelectorOnReleased'}. The layout renders correctly and only the callbacks are wrong, so it is easy to miss. Write the intended callbacks back with a follow-up modify_device after creation."
         },
         "initialInterfaces": {
           "type": "array",
@@ -497,7 +497,7 @@
   },
   {
     "name": "create_quickapp_variable",
-    "description": "Create a new QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, appends, writes back). Refuses if the name already exists (use set_quickapp_variable to update). Optional varType lets the caller choose the stored type; if omitted, type is inferred from the JS type of value: boolean → 'bool', number → 'number' (never 'integer' by inference — pass varType:'integer' explicitly), string → 'string'. Post-create verifies by refetching and asserting name, value, and type all match the intended state.",
+    "description": "Create a new QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, appends, writes back). Refuses if the name already exists (use set_quickapp_variable to update). Optional varType lets the caller choose the stored type; if omitted, type is inferred from the JS type of value: boolean → 'bool', number → 'number' (never 'integer' by inference — pass varType:'integer' explicitly), string → 'string'. Post-create verifies by refetching and asserting name, value, and type all match the intended state. **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -801,7 +801,7 @@
   },
   {
     "name": "delete_quickapp_variable",
-    "description": "Delete a QuickApp variable by name via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, filters out the named entry, writes back). Refuses if the variable does not exist (typo / already-deleted protection). Returns the deleted entry's previous {type, value} as a recovery trail. Post-delete verifies by refetch (expects the name to be absent).",
+    "description": "Delete a QuickApp variable by name via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (full-array replace — reads the current list, filters out the named entry, writes back). Refuses if the variable does not exist (typo / already-deleted protection). Returns the deleted entry's previous {type, value} as a recovery trail. Post-delete verifies by refetch (expects the name to be absent). **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2525,7 +2525,7 @@
   },
   {
     "name": "set_quickapp_variable",
-    "description": "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed).",
+    "description": "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed). **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
     "inputSchema": {
       "type": "object",
       "properties": {
