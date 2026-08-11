@@ -15,6 +15,7 @@ import { MCPRequest, MCPResponse, MCPTool } from './types';
 import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
+import { listResources, readResource } from './resources';
 import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
 import { alarm } from './tools/alarm';
 import { sprinklers } from './tools/sprinklers';
@@ -89,7 +90,9 @@ class HC3MCPServer {
         case 'ping':
           return { jsonrpc: '2.0', id: request.id, result: {} };
         case 'resources/list':
-          return { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
+          return { jsonrpc: '2.0', id: request.id, result: { resources: listResources() } };
+        case 'resources/read':
+          return await this.handleReadResource(request);
         case 'prompts/list':
           return { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         default:
@@ -97,6 +100,24 @@ class HC3MCPServer {
       }
     } catch (error) {
       return this.errorResponse(request.id, -32603, 'Internal error');
+    }
+  }
+
+  /**
+   * resources/read. Resources are read-only renderings, so a failure here is
+   * reported as an error envelope rather than a partial document — a
+   * half-rendered health view reads as "nothing wrong" and is worse than a
+   * visible failure.
+   */
+  private async handleReadResource(request: MCPRequest): Promise<MCPResponse> {
+    const uri = (request.params as any)?.uri;
+    if (typeof uri !== 'string' || uri.length === 0) {
+      return this.errorResponse(request.id, -32602, 'resources/read requires a string "uri" param.');
+    }
+    try {
+      return { jsonrpc: '2.0', id: request.id, result: await readResource(this.hc3, uri) };
+    } catch (error: any) {
+      return this.errorResponse(request.id, -32000, `resources/read failed: ${error?.message ?? String(error)}`);
     }
   }
 
@@ -108,6 +129,10 @@ class HC3MCPServer {
         protocolVersion: '2024-11-05',
         capabilities: {
           tools: {},
+          // Read-only at-a-glance views (hc3://health, watchdog, binder,
+          // globals). Declared so clients surface them; no subscribe support,
+          // so listChanged is not advertised.
+          resources: {},
         },
         serverInfo: {
           name: SERVER_NAME,
