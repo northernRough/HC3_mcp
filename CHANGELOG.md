@@ -2,6 +2,25 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.12.0] - 2026-08-11
+
+### Added
+- **`upload_icons` — batch upload for state-variant sets.** A device whose tile reflects state needs one image per variant, and doing that one call at a time is tedious and easy to lose track of. `upload_icons` takes a labelled array, wraps `upload_icon` per image so every guard and post-upload verify still applies, and returns a `labels` map plus a **ready-to-paste Lua table** of label → id — which is what you actually need in the QuickApp.
+
+  Uploads run **sequentially**: HC3 assigns `User<N>` ids in order and concurrent posts risk interleaved assignment. Each upload is a committed write and HC3 has no transaction, so the batch is **not atomic** — `uploaded` and `failed` are reported separately, and the hint warns against re-running a partially-failed batch, which would duplicate the successes. All batch-level validation (duplicate labels, missing base64/mime, `deviceTemplate` for device) runs **before the first write**, so a 17-image batch missing `deviceTemplate` creates zero icons rather than sixteen and a stop.
+
+  Labels that are not valid Lua identifiers are emitted in `["..."]` form so the table always parses.
+
+### Changed
+- **`upload_icon` description now states what device icons actually are.** HC3's stock library ships multi-state sets (`light0` / `light50` / `light100` — verified on the gateway as distinct files), which reasonably suggests an uploaded device icon should also be a set. It cannot be: `POST /api/icons` takes **one file and has no state parameter**, and HC3's own spec describes the result as "a new icon set". So a user device icon covers every state, and **HC3 will not switch images from device value** — every state change is code-driven.
+
+  The description now says so, and records the verified mechanism: attach with `modify_device({deviceId, properties:{deviceIcon: id}})`, switch at runtime with `self:updateProperty("deviceIcon", id)`. Both confirmed live on 5.210.12 — a QuickApp set its icon at init and switched to a second icon five seconds later, with the property change observed from outside. `deviceIcon` is a real write, not one of HC3's silent-cache paths.
+
+  Also recorded in the module header: HC3's spec at `/assets/docs/hc/icons.json` lists only `icon` and `type` as required and omits `deviceTemplate` entirely, so the gateway enforces more than it documents.
+
+### Test harness
+- **`scripts/test/unit-upload-icons.mjs`** — no-HC3 unit test covering the label→id map, Lua table emission including the bracket form for non-identifier labels, `luaTableName` and `luaTable: false`, per-image mime override, a partial failure keeping successes and naming failures with a retry-only-those hint, and that every batch-level validation fires before any POST (asserted by counting attempted uploads: zero). Wired into `npm test`.
+
 ## [4.11.0] - 2026-08-11
 
 ### Changed

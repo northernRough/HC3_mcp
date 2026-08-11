@@ -2897,7 +2897,7 @@
   },
   {
     "name": "upload_icon",
-    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\n**category \"device\" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints. Returns `{newName, newId, category, extension, hint}`.",
+    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\n**category \"device\" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**Device icons are single-image sets.** HC3's stock library ships multi-state sets (`light0` / `light50` / `light100`, one file per device state), but `POST /api/icons` accepts **one file per call and has no state parameter** — its own spec describes the result as \"a new icon set\". So an uploaded device icon covers every state, and HC3 will not switch images for you based on device value. **Every state change is code-driven**: attach with `modify_device({deviceId, properties:{deviceIcon: <newId>}})`, and switch at runtime from QuickApp Lua with `self:updateProperty(\"deviceIcon\", id)` — verified working at runtime on 5.210.12, and `deviceIcon` is a real write, not one of HC3's silent-cache paths. For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, hint}`.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2926,6 +2926,69 @@
       "required": [
         "base64",
         "mime",
+        "category"
+      ]
+    }
+  },
+  {
+    "name": "upload_icons",
+    "description": "Upload several icons in one call — for state-variant sets where a device swaps between many images (idle / active / warning / mode tokens). Wraps `upload_icon` per image, so every guard and post-upload verify still applies.\n\nUploads run **sequentially**, not in parallel: HC3 assigns `User<N>` ids in order and concurrent posts risk interleaved assignment. Because each upload is a committed write, this is **not atomic** — if image 7 of 17 fails, the first six exist on the gateway. The result reports `uploaded` and `failed` separately so you can retry only the failures rather than re-running the batch and creating duplicates.\n\nReturns a `labels` map (your label → assigned `User<N>` id) and, by default, a ready-to-paste Lua table of that map — which is what you need in the QuickApp, since **switching a device icon is code-driven**: `self:updateProperty(\"deviceIcon\", id)`. Verified working at runtime on firmware 5.210.12, not just at init.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "images": {
+          "type": "array",
+          "description": "The images to upload, in order. Each needs a `label` (your key for it, e.g. \"idle\") and `base64`; `mime` may be given per image or once at the top level.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Your name for this variant — becomes the key in the returned map and Lua table. Must be unique within the call."
+              },
+              "base64": {
+                "type": "string",
+                "description": "Base64-encoded image bytes, no data URL prefix."
+              },
+              "mime": {
+                "type": "string",
+                "description": "Optional per-image override of the top-level mime."
+              }
+            },
+            "required": [
+              "label",
+              "base64"
+            ]
+          }
+        },
+        "mime": {
+          "type": "string",
+          "description": "Default mime for images that do not specify their own — \"image/png\" or \"image/svg+xml\"."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "room",
+            "scene",
+            "device"
+          ],
+          "description": "Category for every image in the batch."
+        },
+        "deviceTemplate": {
+          "type": "string",
+          "description": "Required when category is \"device\" (e.g. \"com.fibaro.genericDevice\" for a QuickApp), rejected otherwise. Applies to every image in the batch."
+        },
+        "luaTable": {
+          "type": "boolean",
+          "description": "Include a ready-to-paste Lua table of label → id in the result. Default true."
+        },
+        "luaTableName": {
+          "type": "string",
+          "description": "Variable name for the Lua table. Default \"Icons\"."
+        }
+      },
+      "required": [
+        "images",
         "category"
       ]
     }
