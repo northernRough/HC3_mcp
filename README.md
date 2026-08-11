@@ -172,10 +172,26 @@ devices, custom events, and scenes).
 
 ### CI / pre-commit
 
-Per `CLAUDE.md` ("Test before commit"): at minimum run phase 0 and
-phase 1 before merging anything that touches MCP protocol or HC3 API
-code. Phase 2 is worth running before any release that touches CRUD
-tools.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to
+`master` and every pull request. Everything it runs is hermetic — no
+HC3 gateway and no credentials, since the unit suites inject fake
+clients or stub `fetch`, and the phase 0 parity check drives the server
+over stdio with stub env:
+
+- `npm run lint` and `npm test` on Node 18, 20, 22 and 24
+- **release hygiene** — `package.json`, the newest `CHANGELOG.md` entry
+  and `src/mcp/version.ts` must agree on the version
+  (`scripts/check-release-hygiene.mjs`)
+- **golden snapshot freshness** — `tools.golden.json` is regenerated and
+  the build fails if it moved, so a schema edit cannot land without the
+  snapshot that documents it
+- `npm pack --dry-run`, so a broken `files` list is caught before publish
+  rather than after a bad tarball reaches the registry
+
+The phases that need a live gateway are not in CI and stay manual. Per
+`CLAUDE.md` ("Test before commit"): at minimum run phase 0 and phase 1
+before merging anything that touches MCP protocol or HC3 API code.
+Phase 2 is worth running before any release that touches CRUD tools.
 
 See `scripts/test/README.md` for per-phase detail.
 
