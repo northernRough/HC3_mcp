@@ -354,7 +354,7 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `update_multiple_quickapp_files` - Batch update multiple files
 - `delete_quickapp_file` - Delete a source file (main files cannot be deleted)
 - `export_quickapp` - Export as .fqa (open) or .fqax (encrypted)
-- `import_quickapp` - Import from .fqa/.fqax
+- `import_quickapp` - Import a QuickApp from a .fqa. Takes the file as `base64` (use this when driving a remote server) or as a server-side `filePath`. Validates the .fqa is parseable JSON before posting, and verifies the created device by refetching it
 
 ### System Intelligence and Context
 - `get_system_context` - Comprehensive system overview
