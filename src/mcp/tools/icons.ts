@@ -9,6 +9,9 @@
 // - upload_icon pre-validates PNG bytes (signature, 128×128, palette
 //   color type 3) at the tool boundary; HC3 silent-500s on any
 //   other shape.
+// - upload_icon sends a `deviceTemplate` part when category is
+//   "device". HC3 400s with MISSING_PARAMETER without it — device
+//   icons are filed per device type, unlike room/scene icons.
 // - delete_icon uses query params (NOT JSON body) and refuses to
 //   delete built-in icons (HC3 returns 403 on non-user icons; the
 //   post-delete refetch catches them too).
@@ -38,13 +41,14 @@ export const icons: ToolModule = {
       },
       {
         name: 'upload_icon',
-        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "User1010"}})). HC3 5.x has two undocumented PNG constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png` to produce a compatible palette PNG. Returns `{newName, newId, category, extension, hint}`.',
+        description: 'Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns "User<N>". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: "User1010"}})).\n\n**category "device" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA\'s own type.\n\nPNG payloads have two undocumented HC3 5.x constraints that silent-500 if violated: dimensions must be exactly **128×128**, AND the colorspace must be **palette (8-bit colormap, PNG color type 3)** — not RGB or RGBA. Use `magick input.png -resize 128x128 -dither None -colors 256 -define png:color-type=3 output.png` (ImageMagick) or `pngquant --quality=80 input.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints. Returns `{newName, newId, category, extension, hint}`.',
         inputSchema: {
           type: 'object',
           properties: {
             base64: { type: 'string', description: 'Base64-encoded image bytes (no data URL prefix). For PNG: must be 128×128 in palette mode (8-bit colormap, color type 3). For SVG: as-is.' },
             mime: { type: 'string', description: '"image/png" or "image/svg+xml".' },
-            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Category — records under that bucket in list_icons.' }
+            category: { type: 'string', enum: ['room', 'scene', 'device'], description: 'Category — records under that bucket in list_icons.' },
+            deviceTemplate: { type: 'string', description: 'Required when category is "device", rejected otherwise. The Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". See list_icons → device[].deviceType for values already in use on this HC3.' }
           },
           required: ['base64', 'mime', 'category']
         }
@@ -116,12 +120,30 @@ export const icons: ToolModule = {
       base64: string;
       mime: string;
       category: 'room' | 'scene' | 'device';
+      deviceTemplate?: string;
     }): Promise<any> {
       if (!args?.base64) throw new Error('upload_icon requires base64.');
       if (!args?.mime) throw new Error('upload_icon requires mime.');
       if (!args?.category) throw new Error('upload_icon requires category.');
       if (!hc3.config.host || !hc3.config.username || !hc3.config.password) {
         throw new Error('Fibaro HC3 not configured.');
+      }
+
+      // Device icons are filed per device type, so HC3 requires a
+      // deviceTemplate part; room/scene icons are not and reject it.
+      // Caught here rather than letting HC3 answer with a bare
+      // MISSING_PARAMETER, which gives the caller nothing to act on.
+      if (args.category === 'device' && !args.deviceTemplate) {
+        throw new Error(
+          'upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g. "com.fibaro.binarySwitch". ' +
+          'Without it HC3 returns 400 MISSING_PARAMETER. Discover valid values from list_icons (device[].deviceType) or get_quickapp_available_types; ' +
+          'to icon a QuickApp, pass that QA\'s own type. Room and scene icons do not take this parameter.'
+        );
+      }
+      if (args.category !== 'device' && args.deviceTemplate) {
+        throw new Error(
+          `upload_icon: deviceTemplate only applies to category "device", not "${args.category}". Drop it, or set category to "device".`
+        );
       }
       const ext = args.mime === 'image/svg+xml' ? 'svg'
         : args.mime === 'image/png' ? 'png'
@@ -164,10 +186,15 @@ export const icons: ToolModule = {
         `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"` +
         (filename ? `; filename="${filename}"` : '') + CRLF +
         (type ? `Content-Type: ${type}${CRLF}` : '') + CRLF;
+      // deviceTemplate is appended last so the room/scene body stays
+      // byte-identical to the framing that is known to work.
+      const tail = partHead('fileExtension') + ext + CRLF
+        + (args.deviceTemplate ? partHead('deviceTemplate') + args.deviceTemplate + CRLF : '')
+        + `--${boundary}--${CRLF}`;
       const body = Buffer.concat([
         Buffer.from(partHead('type') + args.category + CRLF + partHead('icon', `mcp.${ext}`, args.mime)),
         bytes,
-        Buffer.from(CRLF + partHead('fileExtension') + ext + CRLF + `--${boundary}--${CRLF}`)
+        Buffer.from(CRLF + tail)
       ]);
 
       const auth = Buffer.from(`${hc3.config.username}:${hc3.config.password}`).toString('base64');
@@ -182,12 +209,26 @@ export const icons: ToolModule = {
       });
       if (!response.ok) {
         const errText = await response.text().catch(() => '');
+        // HC3 answers errors as {type, reason, message}. Pull the structured
+        // fields out when present so the caller sees *which* parameter HC3
+        // objected to, not just a status code and an opaque blob.
+        let reason = '';
+        let detail = '';
+        try {
+          const parsed = JSON.parse(errText);
+          reason = typeof parsed?.reason === 'string' ? parsed.reason : '';
+          detail = typeof parsed?.message === 'string' ? parsed.message : '';
+        } catch { /* non-JSON body — fall through to the raw text */ }
+
+        const summary = [reason, detail].filter(Boolean).join(': ');
         if (response.status === 500 && ext === 'png') {
           throw new Error(
-            `upload_icon: HTTP 500 from HC3. The pre-checks (128x128, palette mode) passed at the tool boundary, so HC3 may be in a bad state — try again, or restart HC3 if persistent. Raw response: ${errText}`
+            `upload_icon: HTTP 500 from HC3${summary ? ` (${summary})` : ''}. The pre-checks (128x128, palette mode) passed at the tool boundary, so HC3 may be in a bad state — try again, or restart HC3 if persistent. Raw response: ${errText}`
           );
         }
-        throw new Error(`upload_icon: HTTP ${response.status} - ${errText}`);
+        throw new Error(
+          `upload_icon: HTTP ${response.status}${summary ? ` ${summary}` : ''} — raw response: ${errText || '(empty body)'}`
+        );
       }
 
       // HC3 returns {id, iconSetName, fileExtension} on success. Capture from the response;
@@ -203,12 +244,16 @@ export const icons: ToolModule = {
       }
       const fresh = newOnes[0];
       const newName = fresh.iconName || fresh.iconSetName;
+      const attachHint = args.category === 'device'
+        ? `Attach with modify_device({deviceId, properties:{deviceIcon: ${fresh.id}}}) — device icons attach by numeric id, not name.`
+        : `Attach with modify_${args.category}({${args.category}Id, fields:{icon: "${newName}"}}).`;
       return {
         newName,
         newId: fresh.id,
         category: args.category,
         extension: ext,
-        hint: `Attach with modify_room/modify_scene/etc. (e.g. modify_room({roomId, fields:{icon: "${newName}"}})). Re-fetch later via get_icon({category: "${args.category}", name: "${newName}", extension: "${ext}", userIcon: true}).`
+        ...(args.deviceTemplate ? { deviceTemplate: args.deviceTemplate } : {}),
+        hint: `${attachHint} Re-fetch later via get_icon({category: "${args.category}", name: "${newName}", extension: "${ext}", userIcon: true}).`
       };
     },
 
