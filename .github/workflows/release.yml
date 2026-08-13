@@ -71,11 +71,18 @@ jobs:
           fi
           echo "OIDC token endpoint is present"
 
+      # NOTE THE ABSENCE OF registry-url. Supplying it makes setup-node write an
+      # .npmrc containing `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
+      # and export NODE_AUTH_TOKEN as the placeholder XXXXX-XXXXX-XXXXX-XXXXX.
+      # npm then believes it holds credentials, never attempts the OIDC
+      # exchange, and publishes with a junk token — which the registry answers
+      # with a 404 that reads as "package not found" rather than "bad auth".
+      # That cost one release run here. npm defaults to registry.npmjs.org
+      # anyway, so the setting bought nothing. actions/setup-node#1551.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          registry-url: https://registry.npmjs.org
 
       - name: npm must be new enough to speak OIDC
         run: |

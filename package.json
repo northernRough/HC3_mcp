@@ -41,7 +41,7 @@
   ],
   "main": "./out/mcp/hc3-mcp-server.js",
   "bin": {
-    "hc3-mcp-server": "./out/mcp/hc3-mcp-server.js"
+    "hc3-mcp-server": "out/mcp/hc3-mcp-server.js"
   },
   "files": [
     "out/mcp/**/*.js",
