@@ -16,6 +16,8 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
   This was never a stale-schema artefact. Any JSON-RPC client may send `"3"` where the schema says `3`, so the server must not do arithmetic on an unvalidated argument. `unit-excerpt.mjs` now replays the exact live failure — 1,515 lines with hits on 7 and 685, across `0`, `"0"`, `1`, `"1"`.
 
 ### Changed
+- **The server instructions no longer say "reconnect the session" after a redeploy — they say start a new one.** The old line was wrong in a way that cost time twice in one day. Three reconnects failed to refresh a client's tool list: the transport reconnected, the cached `tools/list` was reused, and tools added in 4.18/4.19 stayed uncallable while `get_server_info` cheerfully reported the new version. That version check is the trap, not the remedy — it reads live server state and looks correct precisely when the schemas are stale, so it cannot detect the condition it appears to confirm. Both facts are now in the line, funded by tightening the icon-naming rule rather than raising the character cap.
+
 - **`pi-update.sh` prints the deployed commit and the built-file hash when it finishes.** Diagnosing the above cost three round trips to the Pi to establish that the deployment was not at fault. Worse, a silent `npm run compile` failure would leave the service reporting a new version from `package.json` while running old code — "reports success, did not do the thing", which is the failure this project guards against everywhere except, until now, its own deploy script.
 
 ### Verified against the live gateway

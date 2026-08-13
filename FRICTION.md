@@ -112,6 +112,14 @@ tested. Some items predate MCP improvements that have since landed.
 | **confirmed** | Manual run detection: `trigger.type == "user"` with `property == "execute"` | Same block: `{ isTrigger = true, property = "execute", type = "user" }`. |
 | **untested** | Plain `match` with a 6-element cron array "does not fire reliably" | Untouched by the above — confirming the `matchInterval` form works says nothing about whether `match` fails. Still a negative reliability claim needing repetition, not one observation. |
 
+
+#### Client-side, confirmed 13 Aug 2026
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | A client's cached tool list survives a reconnect; only a new session refreshes it | Three reconnects across one session, plus a `/mcp reconnect` the host did not support. `get_quickapp_file` kept its 4.17.0 schema and the 4.18/4.19 tools never appeared, while the server answered with 4.19.1 response fields throughout. **New tools are the visible casualty; new parameters on existing tools pass through the stale schema and work.** |
+| **confirmed** | `get_server_info` cannot tell you whether your schemas are current | It reports live server state, so it shows the new version while the client is still holding the old tool list — it looks like confirmation and is not. |
+
 #### Agreed, no test needed — design and practice
 
 `fibaro.alert("push", {ids}, msg)` takes **user** ids while `api.post("/mobile/push")` takes **iOS device** ids, and the wrong kind fails silently; interactive push needs `category = "YES_NO"` (`"STANDARD"` → 400, omitted → 500); never bare-`pcall` a notification call. Marked empirically verified by the reporter on 25 July, and the 400/500 specificity reads as real testing. **This server has no push-sending tool at all**, so the knowledge currently has no home here — `get_ios_devices` is the tool that would supply the device ids.

@@ -88,8 +88,14 @@ check('mentions the partial-read arguments', () => {
   assert.match(text, /startLine\/endLine or contains/);
 });
 
-check('tells the reader to reconnect after a redeploy', () => {
-  assert.match(text, /cache tool schemas at connect/);
+// "reconnect the session" was the advice until 13 Aug 2026, when three
+// reconnects in one session failed to refresh the tool list while
+// get_server_info happily reported the new version. A reconnect is not enough
+// and the version check cannot detect the problem — say both.
+check('says a reconnect may not be enough after a redeploy', () => {
+  assert.match(text, /schemas cache at connect/);
+  assert.match(text, /NEW SESSION/);
+  assert.match(text, /get_server_info shows the live version/);
 });
 
 check('advertises the resources by uri', () => {
