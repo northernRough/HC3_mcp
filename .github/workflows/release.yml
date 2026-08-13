@@ -119,11 +119,32 @@ jobs:
           fi
           echo "$NAME@$PKG is not yet published"
 
+      # The claims npm matches a trusted publisher against. Printed because an
+      # OIDC mismatch surfaces as ENEEDAUTH, which says "you are not logged in"
+      # and names nothing that could be compared against the registration. The
+      # token itself is never printed — only the claim fields, which are not
+      # secret and are exactly what the npmjs.com form is asking for.
+      - name: What identity is being offered to npm
+        run: |
+          RESP=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org")
+          echo "$RESP" | python3 -c '
+import sys, json, base64
+tok = json.load(sys.stdin).get("value", "")
+if not tok:
+    print("no OIDC token returned"); raise SystemExit(0)
+p = tok.split(".")[1]; p += "=" * (-len(p) % 4)
+c = json.loads(base64.urlsafe_b64decode(p))
+for k in ("repository", "repository_owner", "job_workflow_ref", "workflow_ref", "ref", "event_name", "aud"):
+    print(f"  {k}: {c.get(k)}")
+'
+
       # No NODE_AUTH_TOKEN: npm detects the OIDC environment on its own.
       # Provenance attestations are generated automatically on this path, so
-      # --provenance is not passed.
+      # --provenance is not passed. Verbose because a failure here is an
+      # authentication dead end otherwise.
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --loglevel verbose
 
       - name: Confirm it resolves
         run: |
