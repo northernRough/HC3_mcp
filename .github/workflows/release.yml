@@ -1,19 +1,38 @@
 name: Release
 
-# Publishes to npm when a version tag is pushed. Tagging is already the habit
-# here, so a release becomes `git push origin vX.Y.Z` and nothing else.
+# Publishes to npm when a version tag is pushed, using npm's trusted publishing
+# (OIDC). There is no NPM_TOKEN and no secret of any kind: the runner proves its
+# identity to npm with a short-lived GitHub OIDC token, and npm checks that
+# against a trusted publisher registered on the package.
 #
-# This exists because npm requires a one-time password for interactive
-# publishes on a 2FA account, which cannot be supplied from a script. An npm
-# *automation* token bypasses that — it is the supported mechanism for CI, and
-# it lives in a GitHub secret rather than on anyone's laptop.
+# Tokens were tried first and never worked. A classic Publish token and a
+# replacement token both failed at the publish step with npm's EOTP, because
+# 2FA on writes rejects any credential without an explicit bypass — a classic
+# *Automation* token, or a granular token with "Bypass 2FA" set, which is off
+# by default and which the old comment here did not mention. Trusted publishing
+# removes the credential entirely, so there is nothing to choose wrongly,
+# rotate, or leak.
 #
-# One-time setup:
-#   1. npmjs.com -> Access Tokens -> Generate New Token -> **Automation**
-#      (Granular tokens also work; they need "Read and write" on this package.)
-#   2. GitHub -> repo Settings -> Secrets and variables -> Actions ->
-#      New repository secret -> name NPM_TOKEN, paste the token.
-# The token is never printed, and never leaves GitHub's secret store.
+# One-time setup on npmjs.com — package -> Settings -> Trusted publisher:
+#   Organization or user:  northernRough
+#   Repository:            HC3_mcp
+#   Workflow filename:     release.yml      (the filename, with extension)
+#   Environment:           leave blank
+#   Allowed actions:       npm publish
+#
+# Three things that will bite otherwise:
+#   1. GitHub creates NO event when more than three tags are pushed at once.
+#      `git push origin v1 v2 v3 v4` publishes nothing, silently: no run
+#      appears and no warning is given. Push tags one at a time, or use the
+#      workflow_dispatch input below.
+#   2. npm matches the workflow FILENAME registered above. If this file is ever
+#      renamed or moved, update the trusted publisher first or every publish
+#      fails authentication.
+#   3. OIDC does not work on self-hosted runners, only GitHub-hosted ones.
+#
+# Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0. Node 22 ships
+# npm 10, which has no OIDC support at all, so npm is upgraded explicitly below
+# rather than inherited from whatever the runner image happens to carry.
 
 on:
   push:
@@ -21,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to publish (e.g. v4.17.0)'
+        description: 'Existing tag to publish (e.g. v4.19.2)'
         required: true
 
 permissions:
@@ -30,31 +49,38 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # mints the OIDC token npm verifies. Without
+                               # this the publish fails as an auth error, with
+                               # nothing in the message about OIDC.
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      # Fail here rather than after two minutes of tests with npm's
-      # ENEEDAUTH, which does not mention the secret and reads like a
-      # credential problem on the runner.
-      - name: NPM_TOKEN must be configured
+      # Fail here rather than after two minutes of tests with an npm error that
+      # reads like a credential problem. This variable is only present when the
+      # job actually holds id-token: write, so it tests the permission rather
+      # than trusting that the block above was not edited away.
+      - name: OIDC must be available to this job
         run: |
-          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "::error::NPM_TOKEN secret is not set, so the publish would fail at the last step."
-            echo "Set it once: npmjs.com -> Access Tokens -> Generate New Token -> Automation,"
-            echo "then: gh secret set NPM_TOKEN"
-            echo "An automation token is required specifically because it bypasses the 2FA"
-            echo "one-time password that an interactive publish would prompt for."
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "::error::No OIDC token endpoint. This job needs permissions: id-token: write."
             exit 1
           fi
-          echo "NPM_TOKEN is present"
+          echo "OIDC token endpoint is present"
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: npm must be new enough to speak OIDC
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
 
       - run: npm ci
 
@@ -86,11 +112,11 @@ jobs:
           fi
           echo "$NAME@$PKG is not yet published"
 
+      # No NODE_AUTH_TOKEN: npm detects the OIDC environment on its own.
+      # Provenance attestations are generated automatically on this path, so
+      # --provenance is not passed.
       - name: Publish
         run: npm publish --access public
-        env:
-          # An automation token carries its own 2FA bypass, so no OTP prompt.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Confirm it resolves
         run: |
