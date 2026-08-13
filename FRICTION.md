@@ -103,6 +103,15 @@ tested. Some items predate MCP improvements that have since landed.
 | **confirmed** | `call_ui_event` returns nothing — no ack, no echo, no indication a callback was bound | Confirmed in this repo's own source. Fixed in 4.19.0: the tool now reports the matched `uiCallbacks` entry and warns when there is none. |
 | **confirmed** | `update_multiple_quickapp_files` returns only `{name, isMain, isOpen}`, so the push result cannot serve as verification | Confirmed in source. Fixed in 4.19.0 — both file-write tools now return `bytes` + `contentHash`, taken from the verify fetch they were already doing and discarding. |
 
+
+#### Confirmed by the read-only verification pass, 13 Aug 2026
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | Cron needs `operator = "matchInterval"` with `value = { date = {"*"x6}, interval = N }` in seconds | Read live from scene 645's `conditions` block, in production use: `interval = 60`. |
+| **confirmed** | Manual run detection: `trigger.type == "user"` with `property == "execute"` | Same block: `{ isTrigger = true, property = "execute", type = "user" }`. |
+| **untested** | Plain `match` with a 6-element cron array "does not fire reliably" | Untouched by the above — confirming the `matchInterval` form works says nothing about whether `match` fails. Still a negative reliability claim needing repetition, not one observation. |
+
 #### Agreed, no test needed — design and practice
 
 `fibaro.alert("push", {ids}, msg)` takes **user** ids while `api.post("/mobile/push")` takes **iOS device** ids, and the wrong kind fails silently; interactive push needs `category = "YES_NO"` (`"STANDARD"` → 400, omitted → 500); never bare-`pcall` a notification call. Marked empirically verified by the reporter on 25 July, and the 400/500 specificity reads as real testing. **This server has no push-sending tool at all**, so the knowledge currently has no home here — `get_ios_devices` is the tool that would supply the device ids.

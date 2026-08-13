@@ -4,7 +4,7 @@
 //
 //   node scripts/test/unit-excerpt.mjs
 
-import { excerpt, wantsExcerpt } from '../../out/mcp/patch.js';
+import { excerpt, wantsExcerpt, applyEdits } from '../../out/mcp/patch.js';
 import { quickapps } from '../../out/mcp/tools/quickapps.js';
 import { scenes } from '../../out/mcp/tools/scenes.js';
 import { strict as assert } from 'node:assert';
@@ -107,6 +107,69 @@ await check('endLine before startLine throws', () => {
 await check('an over-long range clamps to the content', () => {
   const r = excerpt(BODY, { startLine: 498, endLine: 9999 });
   assert.equal(r.returnedLines, 3);
+});
+
+// --- numeric arguments arriving as strings ---------------------------------
+//
+// Regression, found on a live gateway on 13 Aug 2026. A client sent
+// contextLines as the STRING "0". `h + contextLines` then concatenated instead
+// of adding: for a hit on line 7, 7 + "0" is "70", so a zero-line window became
+// lines 7-70. Against a real 1,515-line file with hits on lines 7 and 685 that
+// returned 895 lines while correctly reporting matchCount=2 — wrong, large, and
+// with no error anywhere.
+
+await check('a string contextLines behaves exactly like the number', () => {
+  const a = excerpt(BODY, { contains: 'line250 ', contextLines: 0 });
+  const b = excerpt(BODY, { contains: 'line250 ', contextLines: '0' });
+  assert.deepEqual(b, a);
+  assert.equal(b.returnedLines, 1, 'contextLines 0 means the hit alone');
+});
+
+await check('the exact live failure: two hits, string contextLines', () => {
+  const lines = Array.from({ length: 1515 }, (_, i) => `line ${i + 1}`);
+  lines[6] = 'has quickAppVariables here';
+  lines[684] = 'and quickAppVariables again';
+  const body = lines.join('\n');
+  for (const c of [0, '0', 1, '1']) {
+    const r = excerpt(body, { contains: 'quickAppVariables', contextLines: c, maxLines: 6 });
+    assert.equal(r.matchCount, 2, `contextLines=${JSON.stringify(c)}`);
+    const expected = Number(c) === 0 ? 2 : 6;
+    assert.equal(
+      r.returnedLines, expected,
+      `contextLines=${JSON.stringify(c)} selected ${r.returnedLines}, expected ${expected}`
+    );
+    assert.equal(r.truncated, false, 'two small windows cannot exceed maxLines=6');
+  }
+});
+
+await check('string startLine/endLine/maxLines behave like numbers', () => {
+  assert.deepEqual(
+    excerpt(BODY, { startLine: '10', endLine: '12' }),
+    excerpt(BODY, { startLine: 10, endLine: 12 })
+  );
+  assert.deepEqual(
+    excerpt(BODY, { startLine: 1, endLine: 500, maxLines: '10' }),
+    excerpt(BODY, { startLine: 1, endLine: 500, maxLines: 10 })
+  );
+});
+
+await check('a non-numeric argument is refused rather than coerced to nonsense', () => {
+  assert.throws(() => excerpt(BODY, { contains: 'x', contextLines: 'lots' }), /contextLines must be a number/);
+  assert.throws(() => excerpt(BODY, { startLine: 'top' }), /startLine must be a number/);
+  assert.throws(() => excerpt(BODY, { maxLines: 0 }), /maxLines must be at least 1/);
+  assert.throws(() => excerpt(BODY, { contains: 'x', contextLines: -1 }), /contextLines must be at least 0/);
+});
+
+await check('a string count on a patch edit is honoured, not refused', () => {
+  const r = applyEdits('a\na\na\n', [{ old: 'a', new: 'b', count: '3' }]);
+  assert.equal(r.content, 'b\nb\nb\n');
+  assert.equal(r.applied[0].occurrences, 3);
+});
+
+await check('a non-integer count is still refused', () => {
+  assert.throws(() => applyEdits('a\na\n', [{ old: 'a', new: 'b', count: '1.5' }]), /positive integer/);
+  assert.throws(() => applyEdits('a\na\n', [{ old: 'a', new: 'b', count: 'two' }]), /positive integer/);
+  assert.throws(() => applyEdits('a\na\n', [{ old: 'a', new: 'b', count: 0 }]), /positive integer/);
 });
 
 // --- get_quickapp_file -----------------------------------------------------

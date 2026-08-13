@@ -58,6 +58,30 @@ function replaceAll(haystack: string, needle: string, replacement: string): stri
   }
 }
 
+/**
+ * Coerce a JSON-supplied number, or throw.
+ *
+ * A tool argument arrives as whatever the client sent. Some send "3" where the
+ * schema says 3, and JavaScript then makes `line + context` concatenate rather
+ * than add: with contextLines="0", `7 + "0"` is "70", so a one-line window
+ * silently became lines 7-70. That shipped, reached a live gateway, and
+ * returned 895 lines for a two-line match while reporting matchCount=2 — wrong
+ * with no error anywhere, which is the exact failure mode this server exists to
+ * refuse. Never do arithmetic on an unvalidated argument.
+ */
+function toInt(value: unknown, name: string, fallback: number, min: number): number {
+  if (value === undefined || value === null) return fallback;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(n)) {
+    throw new Error(`${name} must be a number (got ${JSON.stringify(value)}).`);
+  }
+  const i = Math.trunc(n);
+  if (i < min) {
+    throw new Error(`${name} must be at least ${min} (got ${i}).`);
+  }
+  return i;
+}
+
 /** Collapse runs of whitespace so a near-miss can be reported as such. */
 function normaliseWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
@@ -113,8 +137,19 @@ export function applyEdits(original: string, edits: PatchEdit[], label = 'patch'
       );
     }
 
-    const expected = edit.count === undefined ? 1 : edit.count;
-    if (typeof expected !== 'number' || !Number.isInteger(expected) || expected < 1) {
+    // Coerced like every other numeric argument. This one was already loud
+    // rather than silently wrong — a string count was refused — but a client
+    // that sends "2" means 2, and refusing it is a papercut with no upside.
+    let expected: number;
+    try {
+      expected = toInt(edit.count, 'count', 1, 1);
+    } catch {
+      throw new Error(
+        `${label}: ${where} has count=${JSON.stringify(edit.count)}. ` +
+        `count must be a positive integer (it is the number of occurrences you expect, default 1).`
+      );
+    }
+    if (!Number.isInteger(edit.count === undefined ? 1 : Number(edit.count))) {
       throw new Error(
         `${label}: ${where} has count=${JSON.stringify(edit.count)}. ` +
         `count must be a positive integer (it is the number of occurrences you expect, default 1).`
@@ -364,11 +399,14 @@ export interface ExcerptResult {
 export function excerpt(content: string, req: ExcerptRequest): ExcerptResult {
   const all = content.split('\n');
   const totalLines = all.length;
-  const maxLines = req.maxLines ?? 200;
-  const contextLines = req.contextLines ?? 3;
+  // Coerced, not trusted — see toInt. These four feed arithmetic below.
+  const maxLines = toInt(req.maxLines, 'excerpt: maxLines', 200, 1);
+  const contextLines = toInt(req.contextLines, 'excerpt: contextLines', 3, 0);
+  const startLine = toInt(req.startLine, 'excerpt: startLine', 1, 1);
+  const endLine = toInt(req.endLine, 'excerpt: endLine', totalLines, 1);
 
-  const from = Math.max(1, req.startLine ?? 1);
-  const to = Math.min(totalLines, req.endLine ?? totalLines);
+  const from = Math.max(1, startLine);
+  const to = Math.min(totalLines, endLine);
   if (from > totalLines) {
     return {
       excerpt: '',
@@ -378,8 +416,8 @@ export function excerpt(content: string, req: ExcerptRequest): ExcerptResult {
       note: `startLine ${from} is past the end of the content (${totalLines} lines).`,
     };
   }
-  if (req.endLine !== undefined && req.endLine < from) {
-    throw new Error(`excerpt: endLine (${req.endLine}) is before startLine (${from}).`);
+  if (req.endLine !== undefined && req.endLine !== null && endLine < from) {
+    throw new Error(`excerpt: endLine (${endLine}) is before startLine (${from}).`);
   }
 
   // Which 1-indexed line numbers to show.

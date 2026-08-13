@@ -2,6 +2,43 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.19.1] - 2026-08-13
+
+### Fixed
+- **A numeric tool argument sent as a string produced silently wrong results.** Found on the live gateway during the first read-only verification pass of the 4.18/4.19 work — which is the entire argument for running one.
+
+  `get_quickapp_file(contains: "quickAppVariables", contextLines: 0)` returned **895 lines** for a two-line match, while correctly reporting `matchCount: 2`. The client had sent `contextLines` as the string `"0"`, so `h + contextLines` concatenated instead of adding: for the hit on line 7, `7 + "0"` is `"70"`, turning a zero-line window into lines 7–70; for the hit on line 685, `"6850"` clamped to the end of the file. Union: 895 lines. Wrong, large, and with no error anywhere — the exact shape this server exists to refuse.
+
+  The arithmetic is what gave it away. Moving `contextLines` from `0` to `1` changed the selection by **3** lines, which no correct implementation and neither of the first two hypotheses could produce; only the concatenation model predicts 895 and 898 exactly, and it reproduces both.
+
+  All four numeric inputs to `excerpt` (`startLine`, `endLine`, `contextLines`, `maxLines`) are now coerced and range-checked before any arithmetic, and a non-numeric value is refused rather than silently coerced to nonsense. A patch edit's `count` is coerced the same way — it was already loud rather than wrong, but refusing `"2"` from a client that means 2 was a papercut with no upside.
+
+  This was never a stale-schema artefact. Any JSON-RPC client may send `"3"` where the schema says `3`, so the server must not do arithmetic on an unvalidated argument. `unit-excerpt.mjs` now replays the exact live failure — 1,515 lines with hits on 7 and 685, across `0`, `"0"`, `1`, `"1"`.
+
+### Changed
+- **`pi-update.sh` prints the deployed commit and the built-file hash when it finishes.** Diagnosing the above cost three round trips to the Pi to establish that the deployment was not at fault. Worse, a silent `npm run compile` failure would leave the service reporting a new version from `package.json` while running old code — "reports success, did not do the thing", which is the failure this project guards against everywhere except, until now, its own deploy script.
+
+### Verified against the live gateway
+The rest of the read-only pass confirmed the 4.18/4.19 work against real data, closing the "not yet verified" caveat on everything except the patch tools:
+
+- `get_scene(block:"conditions")` returns parsed Lua directly — 330 bytes, no JSON-in-JSON double parse. `block:"actions"` reports 72,198 of scene 645's 75,428-byte content across 1,647 lines.
+- `contentHash` is stable across four calls with different parameters, confirming it hashes the whole body regardless of the excerpt requested, and is returned even when the body is omitted.
+- Line-range reads returned 12 lines of a 1,647-line scene and 10 of a 1,515-line file for a few hundred bytes.
+- A search that misses explains itself rather than returning an empty response.
+
+`patch_quickapp_file` and `patch_scene_content` remain unverified against real data: new *parameters* pass through a client's cached schema, but new *tools* cannot be called until the session reconnects.
+
+### Confirmed from the field report, at no cost
+Scene 645's live `conditions` block contains exactly the cron and manual-run forms the reporting project described, in production use on a working scene:
+
+```lua
+{ isTrigger = true, operator = "matchInterval", property = "cron",
+  type = "date", value = { date = {"*","*","*","*","*","*"}, interval = 60 } },
+{ isTrigger = true, property = "execute", type = "user" }
+```
+
+Two ledger rows move from untested to confirmed. Their separate negative claim — that plain `match` with a 6-element array "does not fire reliably" — is untouched by this and remains untested.
+
 ## [4.19.0] - 2026-08-13
 
 Acts on a five-item field report from the project that builds scenes and QuickApps through this server, run against 4.17.0 on 5.210.12. Every item was isolated by the reporter with a scratch QuickApp created and deleted for the purpose. Two were re-verified here before adoption; the rest were confirmed against this repo's own source.
