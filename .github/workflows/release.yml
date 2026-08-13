@@ -139,10 +139,11 @@ jobs:
 
       # No NODE_AUTH_TOKEN: npm detects the OIDC environment on its own.
       # Provenance attestations are generated automatically on this path, so
-      # --provenance is not passed. Verbose because a failure here is an
-      # authentication dead end otherwise.
+      # --provenance is not passed. If this ever fails on authentication again,
+      # add --loglevel verbose: it prints the token exchange POST and the
+      # registry's actual reason, where the default output says only ENEEDAUTH.
       - name: Publish
-        run: npm publish --access public --loglevel verbose
+        run: npm publish --access public
 
       - name: Confirm it resolves
         run: |
