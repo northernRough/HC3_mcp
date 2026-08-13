@@ -4,7 +4,7 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
 
 ## [4.18.0] - 2026-08-13
 
-Acts on a field report asking for patch-based editing. The report's core diagnosis is right and is confirmed in the code: the write path expresses **replacements** rather than **changes**, so the cost of an edit is proportional to the size of the file rather than the size of the edit, and above a certain size the write tools stop being usable at all. Every claim was re-checked before acting; the corrections are recorded below alongside what was adopted.
+Acts on a field report asking for patch-based editing. The report's core diagnosis is right and is confirmed in the code: the write path expresses **replacements** rather than **changes**, so the cost of an edit is proportional to the size of the file rather than the size of the change, and above a certain size the write tools stop being usable at all. This release works through the whole of that report — patching, concurrency guards, partial reads, and the two validation asks — and records the corrections and the parts still untested rather than only what was adopted.
 
 ### Changed
 - **`update_scene_content` no longer returns three copies of the scene body.** It returned `previous`, `current` **and** the full scene record. Measured on this gateway, scene 645 carries a `contentLength` of **75,428 bytes**, so a one-line change cost roughly 75 KB in and ~225 KB out — enough to exhaust a context window on its own, and a better explanation than request size for why a diagnosed one-line fix went unshipped for days.
@@ -24,7 +24,22 @@ Acts on a field report asking for patch-based editing. The report's core diagnos
 
 - **`contentHash` in `util.ts`** — md5 of a stored body. Hashes whatever HC3 returned rather than what was submitted, so the value stays comparable across a later re-fetch. Groundwork for the `expectedHash` concurrency guard, which is not in this release.
 
-- `unit-patch.mjs` (36 checks) and `unit-scene-content.mjs` (6 checks). The atomicity and dry-run claims are proved by asserting on the recorded request log — that no PUT was issued at all — rather than by inspecting the return value, since the whole subject here is writes that should not have happened.
+- **`patch_scene_content`.** Same semantics on a Lua scene's `actions` or `conditions`, and scenes need it more: a QuickApp can be split across files to keep edits small, but a scene is one monolithic block with no equivalent escape hatch, so every scene edit otherwise pays the full 75 KB. The untouched block is carried across and **post-write verified as unchanged** — a patch to `actions` that moved `conditions` throws rather than reporting success. `sceneWasRunning` reports whether the scene was mid-run, and claims nothing beyond that.
+
+- **`expectedHash` on both patch tools; `contentHash` from both getters.** `get_quickapp_file` and `get_scene` now return an md5 of the stored body (`get_scene` returns it even when the body itself is omitted). Pass it back as `expectedHash` and the patch refuses if the target moved in between. A QuickApp file or scene has no single writer — the web UI, the mobile app, another MCP session and the QA's own Lua can all write it.
+
+- **Partial reads on `get_quickapp_file` and `get_scene`.** `startLine`/`endLine`, or `contains` for a line-numbered excerpt around every literal match, with `contextLines` and a `maxLines` cap. `totalLines` always comes back so a caller knows what it did not see, and the gutter line numbers quote straight back into a patch `old`.
+
+- **`get_scene` can hand back parsed Lua.** `block: "actions" | "conditions"` returns the block directly, removing the JSON-inside-JSON double parse. Internally every scene tool now goes through one `parseSceneContent` helper instead of three hand-rolled try/catch blocks.
+
+- **`modify_device` refuses a viewLayout whose selects would blank the tile.** Unlike the Lua check this one blocks, because the trigger is verified rather than heuristic (4.16.0, on 5.210.12): a `select` missing `selectionType`, or with `values`/`selectedItems` as an object rather than an array, is stored, reports verified, and then renders an empty tile with every other component gone. The refusal names each offending element and its field. `allowUnsafeViewLayout: true` overrides it.
+
+- **A shallow Lua checker (`src/mcp/lua.ts`), warn-only.** Both patch tools report `luaWarnings` on the patched result. It is a lexer that blanks strings and comments and then checks bracket balance and `function`/`if`/`do` … `end` balance — deliberately not a parser, and it **never blocks**, because a false refusal on a device holding irrigation valves open is worse than the gap it closes. No dependency was added; a real parser would mean taking the first runtime dependency beyond `dotenv`, which is a larger call than this change should make. Most of `unit-lua.mjs` asserts that valid Lua produces *nothing* — `end` inside strings and comments, `elseif`, long strings, `repeat`/`until`, escaped quotes — since a false positive is the failure mode that matters.
+
+- Tests: `unit-patch.mjs` (42), `unit-scene-content.mjs` (18), `unit-lua.mjs` (25), `unit-excerpt.mjs` (22), `unit-viewlayout.mjs` (18). The atomicity, dry-run and stale-hash claims are proved by asserting on the recorded request log — that no PUT was issued at all — rather than by inspecting the return value, since the whole subject here is writes that should not have happened.
+
+### Not yet verified against the gateway
+Everything above is unit-tested against fake clients only. The MCP instance connected during development was running 4.17.0, so the new parameters could not be exercised end-to-end on the live HC3 — the excerpt paths, `expectedHash`, and the viewLayout refusal need a redeploy and a pass against real data before they are trusted in the way the rest of this file's claims are.
 
 ### Corrected from the report
 - **"Three files."** The gateway shows four on device 4933 (`main`, `watering`, `picker`, `icons`).
@@ -37,7 +52,7 @@ Acts on a field report asking for patch-based editing. The report's core diagnos
 - **Whether an external QuickApp *file* write restarts the QuickApp.** 4.15.0 verified this for *variable* writes. The file case is likely but has not been isolated here, so `patch_quickapp_file` does **not** report `restarted` in its response, as the report's suggested shape proposed. Its description says only what is known: batch multi-file changes into one `update_multiple_quickapp_files` call rather than N patches.
 
 ### Still outstanding from the report
-`patch_scene_content` (next, and it reuses everything above), Lua syntax checking before commit, `expectedHash`, partial reads, and viewLayout validation as a warning. `update_quickapp_file` also still echoes HC3's PUT response, a smaller instance of the same amplification.
+`update_quickapp_file` still echoes HC3's PUT response — a smaller instance of the same amplification as the scene fix above. A real Lua parser (dependency decision) rather than the shallow checker. And the two untested claims above want a `scripts/probe.mjs` run each.
 
 ## [4.17.0] - 2026-08-12
 

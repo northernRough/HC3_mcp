@@ -1,4 +1,5 @@
-// Text patching primitives: exact-match edits and unified diff rendering.
+// Text primitives: exact-match edits, unified diff rendering, and the
+// excerpting used by the partial-read paths.
 //
 // Why this exists: HC3's write endpoints take a whole file. That is fine for
 // the gateway and ruinous for the caller — a one-line fix to a 58 KB QuickApp
@@ -323,4 +324,126 @@ export function unifiedDiff(before: string, after: string, opts: DiffOptions = {
   }
 
   return body.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Excerpting — read the bit, not the file
+// ---------------------------------------------------------------------------
+
+export interface ExcerptRequest {
+  /** 1-indexed inclusive first line. */
+  startLine?: number;
+  /** 1-indexed inclusive last line. */
+  endLine?: number;
+  /** Literal substring to find; every matching line is returned with context. */
+  contains?: string;
+  /** Unchanged lines either side of a `contains` hit. Default 3. */
+  contextLines?: number;
+  /** Cap on returned lines, so a loose filter cannot return the whole file. Default 200. */
+  maxLines?: number;
+}
+
+export interface ExcerptResult {
+  excerpt: string;
+  totalLines: number;
+  returnedLines: number;
+  /** Present for a `contains` query: how many lines matched. */
+  matchCount?: number;
+  truncated: boolean;
+  /** Set when the request asked for something the content cannot supply. */
+  note?: string;
+}
+
+/**
+ * Return part of a body, with 1-indexed line-number gutters so the caller can
+ * quote what it sees straight back into a patch `old`.
+ *
+ * `startLine`/`endLine` and `contains` compose: the range narrows first, then
+ * the filter runs inside it.
+ */
+export function excerpt(content: string, req: ExcerptRequest): ExcerptResult {
+  const all = content.split('\n');
+  const totalLines = all.length;
+  const maxLines = req.maxLines ?? 200;
+  const contextLines = req.contextLines ?? 3;
+
+  const from = Math.max(1, req.startLine ?? 1);
+  const to = Math.min(totalLines, req.endLine ?? totalLines);
+  if (from > totalLines) {
+    return {
+      excerpt: '',
+      totalLines,
+      returnedLines: 0,
+      truncated: false,
+      note: `startLine ${from} is past the end of the content (${totalLines} lines).`,
+    };
+  }
+  if (req.endLine !== undefined && req.endLine < from) {
+    throw new Error(`excerpt: endLine (${req.endLine}) is before startLine (${from}).`);
+  }
+
+  // Which 1-indexed line numbers to show.
+  let wanted: number[];
+  let matchCount: number | undefined;
+  let note: string | undefined;
+
+  if (req.contains !== undefined && req.contains !== '') {
+    const hits: number[] = [];
+    for (let ln = from; ln <= to; ln++) {
+      if (all[ln - 1].includes(req.contains)) hits.push(ln);
+    }
+    matchCount = hits.length;
+    if (hits.length === 0) {
+      return {
+        excerpt: '',
+        totalLines,
+        returnedLines: 0,
+        matchCount: 0,
+        truncated: false,
+        note: `No line contains ${JSON.stringify(req.contains)}${req.startLine || req.endLine ? ` within lines ${from}-${to}` : ''}. The search is literal and case-sensitive.`,
+      };
+    }
+    const keep = new Set<number>();
+    for (const h of hits) {
+      for (let ln = Math.max(from, h - contextLines); ln <= Math.min(to, h + contextLines); ln++) {
+        keep.add(ln);
+      }
+    }
+    wanted = [...keep].sort((a, b) => a - b);
+  } else {
+    wanted = [];
+    for (let ln = from; ln <= to; ln++) wanted.push(ln);
+  }
+
+  const truncated = wanted.length > maxLines;
+  if (truncated) {
+    note = `Showing the first ${maxLines} of ${wanted.length} selected lines (maxLines). Narrow the range or raise maxLines.`;
+    wanted = wanted.slice(0, maxLines);
+  }
+
+  // Gutter width from the largest number actually shown.
+  const width = String(wanted.length ? wanted[wanted.length - 1] : 1).length;
+  const rendered: string[] = [];
+  let prev: number | null = null;
+  for (const ln of wanted) {
+    if (prev !== null && ln !== prev + 1) rendered.push('  …');
+    rendered.push(`${String(ln).padStart(width, ' ')}| ${all[ln - 1]}`);
+    prev = ln;
+  }
+
+  return {
+    excerpt: rendered.join('\n'),
+    totalLines,
+    returnedLines: wanted.length,
+    ...(matchCount !== undefined ? { matchCount } : {}),
+    truncated,
+    ...(note ? { note } : {}),
+  };
+}
+
+/** True when the caller asked for any kind of excerpt. */
+export function wantsExcerpt(req: ExcerptRequest | undefined): boolean {
+  if (!req) return false;
+  return req.startLine !== undefined || req.endLine !== undefined ||
+    (req.contains !== undefined && req.contains !== '');
 }

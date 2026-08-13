@@ -2,6 +2,25 @@
 
 import { ToolModule } from './registry';
 import { verifyWrite, contentHash } from '../util';
+import { applyEdits, unifiedDiff, excerpt, wantsExcerpt, PatchEdit } from '../patch';
+import { luaLint, luaWarningSummary } from '../lua';
+
+/**
+ * A lua scene's `content` is a JSON string holding {conditions, actions} —
+ * JSON inside JSON, so reaching the Lua takes two parses. Callers should not
+ * have to know that, so every scene tool here goes through this.
+ */
+function parseSceneContent(content: unknown): { conditions: string; actions: string } {
+  try {
+    const parsed = JSON.parse(typeof content === 'string' ? content : '{}');
+    return {
+      conditions: typeof parsed.conditions === 'string' ? parsed.conditions : '',
+      actions: typeof parsed.actions === 'string' ? parsed.actions : '',
+    };
+  } catch {
+    return { conditions: '', actions: '' };
+  }
+}
 
 export const scenes: ToolModule = {
   schemas: [
@@ -24,7 +43,7 @@ export const scenes: ToolModule = {
       },
       {
         name: 'get_scene',
-        description: 'Fetch a single scene by id via GET /api/scenes/{id}. Returns the full scene record — metadata (name, type, roomId, mode, enabled, isRunning, created/updated, …) plus the complete `content` (the Lua source for lua scenes, or the block/scenario JSON for scenario scenes). Use this to inspect ONE scene: get_scenes returns every scene with its full content and can be very large (easily >1MB), so it is impractical for looking at a single scene. Set includeContent=false to get metadata only (content bodies can be 100KB+) — the response then reports contentLength so you know how big it was.',
+        description: 'Fetch a single scene by id via GET /api/scenes/{id}. Returns the full scene record — metadata (name, type, roomId, mode, enabled, isRunning, created/updated, …) plus the complete `content`. Use this to inspect ONE scene: get_scenes returns every scene with its full content and can be very large (easily >1MB).\n\nAlways returns `contentHash` (md5 of what HC3 stored) — pass it to patch_scene_content as expectedHash so the write refuses if the scene changed in between. `contentHash` is returned even when the body is not.\n\n**Getting at the Lua without two JSON parses.** For a lua scene, `content` is a JSON string holding {conditions, actions}, so reaching the source normally means parsing twice. Set block="actions" (or "conditions") and the parsed Lua comes back directly as `block`/`blockContent`, no second parse.\n\n**Reading part of it.** Scene bodies here run to 75 KB. includeContent=false gives metadata plus contentLength only. startLine/endLine or `contains` return a line-numbered excerpt — of the chosen block when `block` is set, otherwise of the raw content — with totalLines so you know what you did not see. Those line numbers quote straight back into a patch_scene_content `old`.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -35,6 +54,31 @@ export const scenes: ToolModule = {
             includeContent: {
               type: 'boolean',
               description: 'Include the full `content` body (Lua/scenario). Default true. Set false to strip a potentially large content body and return metadata only.',
+            },
+            block: {
+              type: 'string',
+              enum: ['actions', 'conditions'],
+              description: 'Lua scenes only. Return this block of the parsed content directly instead of the raw JSON-in-JSON `content` string.',
+            },
+            startLine: {
+              type: 'number',
+              description: '1-indexed first line to return.',
+            },
+            endLine: {
+              type: 'number',
+              description: '1-indexed last line to return (inclusive).',
+            },
+            contains: {
+              type: 'string',
+              description: 'Return only lines containing this literal substring, with context either side. Case-sensitive, not a regex.',
+            },
+            contextLines: {
+              type: 'number',
+              description: 'Lines of context either side of a `contains` hit. Default 3.',
+            },
+            maxLines: {
+              type: 'number',
+              description: 'Cap on returned lines. Default 200.',
             },
           },
           required: ['sceneId'],
@@ -171,6 +215,55 @@ export const scenes: ToolModule = {
           required: ['sceneId'],
         },
       },
+      {
+        name: 'patch_scene_content',
+        description: 'Change part of a Lua scene by supplying only the text to replace, instead of reproducing the whole body as update_scene_content requires. Same semantics as patch_quickapp_file, and scenes need it more: a QuickApp can be split across files to keep edits small, but a scene is one monolithic block with no equivalent escape hatch, so every scene edit otherwise pays the full cost. Bodies here run to 75 KB.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. `old` is literal text, never a regex or a line number, and must match byte for byte. Set `new` to an empty string to delete. Edits apply in order, each against the result of the previous one.\n\nPatches `actions` by default; set block="conditions" for the other. The block you do not touch is preserved exactly.\n\nAtomic: edits apply to an in-memory copy, the scene is written once, then re-fetched and compared. Returns a unified diff, sizes and an md5 — not the body. dryRun=true returns that diff with no write, which matters more here than on a QuickApp: **a scene that will not compile fails silently.** It sits inert until its trigger fires, potentially hours later, with nothing to distinguish it from a trigger that never fired. The patched result is checked for gross Lua damage and reported as `luaWarnings` — a heuristic, not a parser, so it warns and still writes.\n\nIf the scene is running when patched, the response reports `sceneWasRunning` so a write landing mid-run is at least visible. What HC3 does to an in-flight scene whose source changes underneath it has not been isolated on this gateway, so the flag states the fact and claims nothing further.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sceneId: {
+              type: 'number',
+              description: 'Scene ID',
+            },
+            block: {
+              type: 'string',
+              enum: ['actions', 'conditions'],
+              description: 'Which block to patch. Default "actions".',
+            },
+            edits: {
+              type: 'array',
+              description: 'Edits to apply, in order. At least one.',
+              items: {
+                type: 'object',
+                properties: {
+                  old: {
+                    type: 'string',
+                    description: 'Exact existing text to replace. Literal, not a pattern; must match byte for byte including indentation. Cannot be empty.',
+                  },
+                  new: {
+                    type: 'string',
+                    description: 'Replacement text. Empty string deletes the matched text.',
+                  },
+                  count: {
+                    type: 'number',
+                    description: 'Exact number of occurrences expected. Default 1. Any other number aborts the whole patch before anything is written.',
+                  },
+                },
+                required: ['old', 'new'],
+              },
+            },
+            expectedHash: {
+              type: 'string',
+              description: 'The contentHash from get_scene. If supplied and the scene no longer hashes to it, the patch is refused without writing. A scene can also be edited from the web UI or the mobile app, so there is no single writer.',
+            },
+            dryRun: {
+              type: 'boolean',
+              description: 'Compute and return the diff without writing anything. Default false.',
+            },
+          },
+          required: ['sceneId', 'edits'],
+        },
+      },
   ],
 
   handlers: {
@@ -195,22 +288,59 @@ export const scenes: ToolModule = {
       return scenes;
     },
 
-    async get_scene(hc3, args: { sceneId: number; includeContent?: boolean }): Promise<any> {
+    async get_scene(hc3, args: {
+      sceneId: number;
+      includeContent?: boolean;
+      block?: 'actions' | 'conditions';
+      startLine?: number;
+      endLine?: number;
+      contains?: string;
+      contextLines?: number;
+      maxLines?: number;
+    }): Promise<any> {
       if (typeof args?.sceneId !== 'number') {
         throw new Error('get_scene requires a numeric sceneId.');
       }
-      const scene = await hc3.request(`/api/scenes/${args.sceneId}`);
-      // Content bodies can be 100KB+; let callers opt out to keep the response
-      // small when they only need metadata. Report the size that was dropped.
-      if (args?.includeContent === false && scene && typeof scene === 'object' && !Array.isArray(scene)) {
-        const { content, ...rest } = scene as Record<string, any>;
-        return {
-          ...rest,
-          contentOmitted: true,
-          contentLength: typeof content === 'string' ? content.length : undefined,
-        };
+      if (args.block !== undefined && args.block !== 'actions' && args.block !== 'conditions') {
+        throw new Error(`get_scene: block must be "actions" or "conditions" (got ${JSON.stringify(args.block)}).`);
       }
-      return scene;
+      const scene = await hc3.request(`/api/scenes/${args.sceneId}`);
+      if (!scene || typeof scene !== 'object' || Array.isArray(scene)) return scene;
+
+      const { content, ...rest } = scene as Record<string, any>;
+      const hash = contentHash(content);
+      const meta = {
+        ...rest,
+        ...(hash ? { contentHash: hash } : {}),
+        contentLength: typeof content === 'string' ? content.length : undefined,
+      };
+
+      // Metadata only.
+      if (args.includeContent === false) {
+        return { ...meta, contentOmitted: true };
+      }
+
+      // A named block: hand back the parsed Lua rather than JSON inside JSON.
+      if (args.block !== undefined) {
+        if (rest.type !== 'lua') {
+          throw new Error(
+            `get_scene: block="${args.block}" is for lua scenes; scene ${args.sceneId} is type '${rest.type}'. ` +
+            `Omit block to get the raw content.`
+          );
+        }
+        const parsed = parseSceneContent(content);
+        const body = parsed[args.block];
+        if (wantsExcerpt(args)) {
+          return { ...meta, contentOmitted: true, block: args.block, blockLength: body.length, ...excerpt(body, args) };
+        }
+        return { ...meta, contentOmitted: true, block: args.block, blockLength: body.length, blockContent: body };
+      }
+
+      if (wantsExcerpt(args) && typeof content === 'string') {
+        return { ...meta, contentOmitted: true, ...excerpt(content, args) };
+      }
+
+      return { ...rest, content, ...(hash ? { contentHash: hash } : {}) };
     },
 
     async run_scene(hc3, args: { sceneId: number }): Promise<any> {
@@ -336,6 +466,108 @@ export const scenes: ToolModule = {
       };
     },
 
+    async patch_scene_content(hc3, args: {
+      sceneId: number;
+      block?: 'actions' | 'conditions';
+      edits: PatchEdit[];
+      expectedHash?: string;
+      dryRun?: boolean;
+    }): Promise<any> {
+      const { sceneId, edits, expectedHash, dryRun } = args ?? ({} as any);
+      const block = args?.block ?? 'actions';
+      if (typeof sceneId !== 'number') {
+        throw new Error('patch_scene_content requires a numeric sceneId.');
+      }
+      if (block !== 'actions' && block !== 'conditions') {
+        throw new Error(`patch_scene_content: block must be "actions" or "conditions" (got ${JSON.stringify(args?.block)}).`);
+      }
+
+      const existing: any = await hc3.request(`/api/scenes/${sceneId}`);
+      if (existing?.type !== 'lua') {
+        throw new Error(
+          `patch_scene_content: scene ${sceneId} is type '${existing?.type}'; this tool supports Lua scenes only. ` +
+          `Scenario scenes use structured JSON and would be corrupted by a text patch.`
+        );
+      }
+
+      const hashBefore = contentHash(existing?.content);
+      if (expectedHash !== undefined && expectedHash !== hashBefore) {
+        throw new Error(
+          `patch_scene_content refused: scene ${sceneId} has changed since you read it. ` +
+          `Expected md5 ${expectedHash}, found ${hashBefore}. Nothing was written. ` +
+          `Re-read it (get_scene) and rebuild the edits against the current content.`
+        );
+      }
+
+      const previous = parseSceneContent(existing?.content);
+      const before = previous[block];
+
+      // Throws before any write if an edit does not fit.
+      const { content: after, applied } = applyEdits(before, edits, 'patch_scene_content');
+      const luaWarnings = luaWarningSummary(luaLint(after));
+
+      const diff = unifiedDiff(before, after, {
+        fromLabel: `scene ${sceneId} ${block} (before)`,
+        toLabel: `scene ${sceneId} ${block} (after)`,
+      });
+
+      const base = {
+        target: `scene:${sceneId}/${block}`,
+        block,
+        occurrencesReplaced: applied.reduce((n, e) => n + e.occurrences, 0),
+        bytesBefore: before.length,
+        bytesAfter: after.length,
+        sceneWasRunning: !!existing?.isRunning,
+        hashBefore,
+        ...(luaWarnings ? { luaWarnings } : {}),
+        diff,
+      };
+
+      if (dryRun === true) {
+        return {
+          ...base,
+          dryRun: true,
+          written: false,
+          editsMatched: applied.length,
+          hashWouldBe: contentHash(JSON.stringify({
+            conditions: block === 'conditions' ? after : previous.conditions,
+            actions: block === 'actions' ? after : previous.actions,
+          })),
+        };
+      }
+
+      const newContent = {
+        conditions: block === 'conditions' ? after : previous.conditions,
+        actions: block === 'actions' ? after : previous.actions,
+      };
+      await hc3.request(`/api/scenes/${sceneId}`, 'PUT', { content: JSON.stringify(newContent) });
+
+      const updated: any = await hc3.request(`/api/scenes/${sceneId}`);
+      const current = parseSceneContent(updated?.content);
+      if (current[block] !== after) {
+        throw new Error(
+          `patch_scene_content: content mismatch after PUT on scene ${sceneId}. ` +
+          `Submitted ${after.length} chars for '${block}', HC3 stored ${current[block].length}. ` +
+          `The write was silently altered or dropped — re-read the scene before patching again.`
+        );
+      }
+      const untouched = block === 'actions' ? 'conditions' : 'actions';
+      if (current[untouched] !== previous[untouched]) {
+        throw new Error(
+          `patch_scene_content: the '${untouched}' block changed although it was not patched ` +
+          `(${previous[untouched].length} chars before, ${current[untouched].length} after). ` +
+          `Re-read scene ${sceneId} and check it.`
+        );
+      }
+
+      return {
+        ...base,
+        written: true,
+        editsApplied: applied.length,
+        hashAfter: contentHash(updated?.content),
+      };
+    },
+
     async update_scene_content(hc3, args: { sceneId: number; actions?: string; conditions?: string; returnContent?: boolean }): Promise<any> {
       if (args.actions === undefined && args.conditions === undefined) {
         throw new Error('update_scene_content requires at least one of actions or conditions.');
@@ -350,16 +582,7 @@ export const scenes: ToolModule = {
         );
       }
 
-      let previous: { conditions: string; actions: string } = { conditions: '', actions: '' };
-      try {
-        const parsed = JSON.parse(existing.content || '{}');
-        previous = {
-          conditions: typeof parsed.conditions === 'string' ? parsed.conditions : '',
-          actions: typeof parsed.actions === 'string' ? parsed.actions : '',
-        };
-      } catch {
-        // leave previous as empty defaults
-      }
+      const previous = parseSceneContent(existing.content);
 
       const newContent = {
         conditions: args.conditions !== undefined ? args.conditions : previous.conditions,
@@ -369,16 +592,7 @@ export const scenes: ToolModule = {
       await hc3.request(`/api/scenes/${args.sceneId}`, 'PUT', { content: JSON.stringify(newContent) });
       const updated = await hc3.request(`/api/scenes/${args.sceneId}`);
 
-      let current: { conditions: string; actions: string } = { conditions: '', actions: '' };
-      try {
-        const parsed = JSON.parse(updated.content || '{}');
-        current = {
-          conditions: typeof parsed.conditions === 'string' ? parsed.conditions : '',
-          actions: typeof parsed.actions === 'string' ? parsed.actions : '',
-        };
-      } catch {
-        // leave current as empty defaults
-      }
+      const current = parseSceneContent(updated.content);
 
       const changedFields: string[] = [];
       if (args.conditions !== undefined) changedFields.push('conditions');

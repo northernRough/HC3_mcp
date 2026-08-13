@@ -78,9 +78,14 @@ check('points at get_scene over get_scenes', () => {
 // A caller who already knows update_quickapp_file will never find the patch
 // tool on its own — whole-file rewriting looks like it works right up until
 // the file is too big to express.
-check('points at patch_quickapp_file over rewriting a file whole', () => {
+check('points at the patch tools over rewriting a body whole', () => {
   assert.match(text, /patch_quickapp_file/);
-  assert.match(text, /refuses one that no longer fits/);
+  assert.match(text, /patch_scene_content/);
+  assert.match(text, /no longer fits/);
+});
+
+check('mentions the partial-read arguments', () => {
+  assert.match(text, /startLine\/endLine or contains/);
 });
 
 check('tells the reader to reconnect after a redeploy', () => {

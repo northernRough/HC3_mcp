@@ -15,6 +15,7 @@
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { verifyWrite } from '../util';
+import { validateViewLayout, describeViewLayoutProblems } from '../viewlayout';
 
 export const deleteDeviceSchema: MCPTool =
       {
@@ -218,6 +219,10 @@ export const devices: ToolModule = {
               type: 'object',
               description: 'Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: "..."}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters (the PUT path caches without transmitting on firmware 5.x — use set_device_parameter, which wraps the working setConfiguration action); associations / multichannelAssociations (precautionary reject, no verified REST path yet — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries).',
             },
+            allowUnsafeViewLayout: {
+              type: 'boolean',
+              description: 'Write a viewLayout even though its selects fail validation. Default false. The refusal exists because HC3 accepts a malformed select, this tool\'s post-write verify passes, and the tile then renders empty — so the write reports success while the device shows nothing. Only set this if you intend to inspect get_plugin_view afterwards.',
+            },
           },
           required: ['deviceId'],
         },
@@ -379,6 +384,7 @@ export const devices: ToolModule = {
       deviceId: number;
       topLevel?: Record<string, any>;
       properties?: Record<string, any>;
+      allowUnsafeViewLayout?: boolean;
     }): Promise<any> {
       const { deviceId, topLevel, properties } = args;
 
@@ -398,6 +404,24 @@ export const devices: ToolModule = {
         throw new Error(
           "modify_device does not accept properties.associations or properties.multichannelAssociations — precautionary reject based on the S14 finding (the structurally identical properties.parameters PUT caches without transmitting on this firmware). For parameters specifically, the `setConfiguration` action was later confirmed to transmit and is exposed as set_device_parameter; no equivalent working REST path has been verified for associations. Set associations via the HC3 Web UI until a transmitting path is found."
         );
+      }
+
+      // A malformed select is verified-bad, not merely suspicious: HC3 accepts
+      // it, this tool's own post-write verify passes, and the tile then renders
+      // empty with nothing reporting a fault. Refuse rather than hand back a
+      // "verified" that the gateway will quietly contradict.
+      if (properties && properties.viewLayout !== undefined && args.allowUnsafeViewLayout !== true) {
+        const problems = validateViewLayout(properties.viewLayout);
+        if (problems.length > 0) {
+          throw new Error(
+            `modify_device refuses this viewLayout: ${problems.length} select problem(s) that HC3 ` +
+            `accepts silently and then renders as an EMPTY tile (verified on 5.210.12 — every other ` +
+            `component disappears too, not just the offending one).\n` +
+            describeViewLayoutProblems(problems) + '\n' +
+            `Nothing was written. Fix the select(s), or pass allowUnsafeViewLayout=true to write anyway ` +
+            `and then check get_plugin_view to see what actually rendered.`
+          );
+        }
       }
 
       const topLevelKeys = topLevel ? Object.keys(topLevel) : [];

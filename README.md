@@ -312,7 +312,8 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `stop_scene` - Stop a running scene
 - `modify_scene` - Update scene metadata (name, icon, room, etc.)
 - `create_scene` - Create a new scene (with HC3-required field defaults; post-create verify)
-- `update_scene_content` - Replace scene Lua (actions/conditions) content
+- `update_scene_content` - Replace scene Lua (actions/conditions) content wholesale. Returns lengths + md5 by default rather than three copies of the body (`returnContent: true` restores the old shape)
+- `patch_scene_content` - Change part of a scene by supplying only the text to replace. Each `old` must match exactly `count` times or nothing is written. Atomic, `dryRun`, `expectedHash`, returns a unified diff. A scene cannot be split across files the way a QuickApp can, so this is the only way to keep scene edits small
 - `delete_scene` - Delete a scene by id with read-first-for-recovery-trail, refusal of currently-running scenes, and post-delete refetch verify
 
 ### Icons
@@ -429,9 +430,10 @@ A condensed summary follows. See the live `tools/list` from the running server (
 
 ### QuickApp File Management
 - `list_quickapp_files` - List source files for a QuickApp
-- `get_quickapp_file` - Get a single file's content
+- `get_quickapp_file` - Get a single file's content, plus `contentHash` for optimistic concurrency. Supports partial reads: `startLine`/`endLine`, or `contains` for a line-numbered excerpt around every match
 - `create_quickapp_file` - Create a new source file (arg: `fileName`; renamed from `name` in 4.0.0)
-- `update_quickapp_file` - Update an existing source file
+- `update_quickapp_file` - Replace an existing source file wholesale
+- `patch_quickapp_file` - Change part of a file by supplying only the text to replace, instead of reproducing the whole thing. Each `old` must match exactly `count` times or the whole patch aborts before anything is written. Atomic, `dryRun`, `expectedHash`, Lua sanity warnings, returns a unified diff
 - `update_multiple_quickapp_files` - Batch update multiple files
 - `delete_quickapp_file` - Delete a source file (main files cannot be deleted)
 - `export_quickapp` - Export as .fqa (open) or .fqax (encrypted)

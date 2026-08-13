@@ -48,7 +48,7 @@
   "get_hc3_lua_scenes_guide": "{sections:{actions:{content:string,title:string},api:{content:string,title:string},conditions:{content:string,title:string},examples:{content:string,title:string},overview:string,triggers:{content:string,title:string}},title:string}",
   "get_hc3_programming_examples": "{categories:{climate:{examples:array(1)<…>,title:string},devices:{examples:array(1)<…>,title:string},lighting:{examples:array(2)<…>,title:string},mqtt:{examples:array(1)<…>,title:string},overview:string,scenes:{examples:array(1)<…>,title:string},security:{examples:array(1)<…>,title:string},tcp:{examples:array(1)<…>,title:string}},title:string}",
   "list_quickapp_files": "array(19)<{isMain:boolean,isOpen:boolean,name:string}>",
-  "get_quickapp_file": "{content:string,isMain:boolean,isOpen:boolean,name:string}",
+  "get_quickapp_file": "{content:string,contentHash:string,isMain:boolean,isOpen:boolean,name:string}",
   "get_quickapp_variable": "{deviceId:number,exists:boolean}",
   "get_quickapp_available_types": "array(32)<{label:string,type:string}>",
   "get_plugins": "{all:{types:array(8)<{category:…,installed:…,plugins:…}>},installed:array(1)<{name:string,predefined:boolean}>,promo:array(3)<{image:{big:…,small:…},url:string}>}",

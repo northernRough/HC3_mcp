@@ -29,7 +29,8 @@
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { readFile } from 'node:fs/promises';
-import { applyEdits, unifiedDiff, PatchEdit } from '../patch';
+import { applyEdits, unifiedDiff, excerpt, wantsExcerpt, PatchEdit } from '../patch';
+import { luaLint, luaWarningSummary } from '../lua';
 import { contentHash } from '../util';
 
 export const quickappsCoreSchemas: MCPTool[] = [
@@ -88,7 +89,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "get_quickapp_file",
-        description: "Get detailed information about a specific QuickApp file including its content.",
+        description: "Get a specific QuickApp file. Returns the whole content by default, plus `contentHash` (md5 of what HC3 stored) — pass that hash to patch_quickapp_file as expectedHash to make the write refuse if anything edited the file in between.\n\n**Reading part of a file.** A 1,500-line engine costs its whole length to look at one function. Supply startLine/endLine, or `contains` to get every matching line with surrounding context, and the response carries a line-numbered excerpt instead of the body. Those line numbers make the excerpt directly quotable back into a patch `old`. The response always reports totalLines so you know what you did not see.",
         inputSchema: {
           type: "object",
           properties: {
@@ -99,6 +100,26 @@ export const quickappsExtSchemas: MCPTool[] = [
             fileName: {
               type: "string",
               description: "Name of the file to retrieve"
+            },
+            startLine: {
+              type: "number",
+              description: "1-indexed first line to return. With endLine, returns just that range."
+            },
+            endLine: {
+              type: "number",
+              description: "1-indexed last line to return (inclusive)."
+            },
+            contains: {
+              type: "string",
+              description: "Return only lines containing this literal substring, with context either side. Case-sensitive, not a regex. Composes with startLine/endLine, which narrow the search first."
+            },
+            contextLines: {
+              type: "number",
+              description: "Lines of context either side of a `contains` hit. Default 3."
+            },
+            maxLines: {
+              type: "number",
+              description: "Cap on returned lines so a loose filter cannot return the whole file. Default 200."
             }
           },
           required: ["deviceId", "fileName"]
@@ -205,7 +226,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "patch_quickapp_file",
-        description: "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
+        description: "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nThe patched result is checked for gross Lua damage (unbalanced brackets, unterminated strings, missing `end`) and any finding is reported as `luaWarnings`. It is a heuristic, not a parser, so it **warns and still writes** — a false refusal on a device holding valves open would be worse than the gap. No warnings does not mean it compiles.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
         inputSchema: {
           type: "object",
           properties: {
@@ -238,6 +259,10 @@ export const quickappsExtSchemas: MCPTool[] = [
                 },
                 required: ["old", "new"]
               }
+            },
+            expectedHash: {
+              type: "string",
+              description: "The contentHash from get_quickapp_file. If supplied and the file no longer hashes to it, the patch is refused without writing — the file changed since you read it (web UI, mobile app, another MCP session, or the QuickApp's own Lua; there is no single writer). Omit to skip the check."
             },
             dryRun: {
               type: "boolean",
@@ -489,9 +514,35 @@ export const quickapps: ToolModule = {
       return await hc3.request(`/api/quickApp/${deviceId}/files`);
     },
 
-    async get_quickapp_file(hc3, args: { deviceId: number; fileName: string }): Promise<any> {
+    async get_quickapp_file(hc3, args: {
+      deviceId: number;
+      fileName: string;
+      startLine?: number;
+      endLine?: number;
+      contains?: string;
+      contextLines?: number;
+      maxLines?: number;
+    }): Promise<any> {
       const { deviceId, fileName } = args;
-      return await hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`);
+      const file: any = await hc3.request(
+        `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`
+      );
+      if (typeof file?.content !== 'string') return file;
+
+      const hash = contentHash(file.content);
+      if (!wantsExcerpt(args)) {
+        return { ...file, contentHash: hash };
+      }
+
+      const { content, ...meta } = file as Record<string, any>;
+      const ex = excerpt(content, args);
+      return {
+        ...meta,
+        contentHash: hash,
+        contentOmitted: true,
+        contentLength: content.length,
+        ...ex,
+      };
     },
 
     async create_quickapp_file(hc3, args: {
@@ -570,9 +621,10 @@ export const quickapps: ToolModule = {
       deviceId: number;
       fileName: string;
       edits: PatchEdit[];
+      expectedHash?: string;
       dryRun?: boolean;
     }): Promise<any> {
-      const { deviceId, fileName, edits, dryRun } = args ?? ({} as any);
+      const { deviceId, fileName, edits, expectedHash, dryRun } = args ?? ({} as any);
       if (typeof deviceId !== 'number') {
         throw new Error('patch_quickapp_file requires a numeric deviceId.');
       }
@@ -591,9 +643,20 @@ export const quickapps: ToolModule = {
         );
       }
 
+      const hashBefore = contentHash(before)!;
+      if (expectedHash !== undefined && expectedHash !== hashBefore) {
+        throw new Error(
+          `patch_quickapp_file refused: file '${fileName}' on device ${deviceId} has changed since you read it. ` +
+          `Expected md5 ${expectedHash}, found ${hashBefore}. Nothing was written. ` +
+          `Re-read the file (get_quickapp_file) and rebuild the edits against the current content — ` +
+          `a QuickApp file can be edited from the web UI, the mobile app, another MCP session, or the QA's own Lua.`
+        );
+      }
+
       // Throws before any write if an edit does not fit. Nothing below this
       // line runs on a mismatch, so a refused patch leaves the device alone.
       const { content: after, applied } = applyEdits(before, edits, 'patch_quickapp_file');
+      const luaWarnings = luaWarningSummary(luaLint(after));
 
       const diff = unifiedDiff(before, after, {
         fromLabel: `${fileName} (device ${deviceId}, before)`,
@@ -608,8 +671,9 @@ export const quickapps: ToolModule = {
           editsMatched: applied.length,
           bytesBefore: before.length,
           bytesAfter: after.length,
-          hashBefore: contentHash(before),
+          hashBefore,
           hashWouldBe: contentHash(after),
+          ...(luaWarnings ? { luaWarnings } : {}),
           diff,
         };
       }
@@ -635,8 +699,9 @@ export const quickapps: ToolModule = {
         occurrencesReplaced: applied.reduce((n, e) => n + e.occurrences, 0),
         bytesBefore: before.length,
         bytesAfter: after.length,
-        hashBefore: contentHash(before),
+        hashBefore,
         hashAfter: contentHash(stored.content),
+        ...(luaWarnings ? { luaWarnings } : {}),
         diff,
       };
     },

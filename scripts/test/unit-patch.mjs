@@ -350,5 +350,68 @@ await check('the file name is URL-encoded in the path', async () => {
   assert.equal(hc3.calls[0].endpoint, '/api/quickApp/7/files/my%20file');
 });
 
+await check('expectedHash refuses a file that moved under us', async () => {
+  const hc3 = fakeHc3();
+  await assert.rejects(
+    () => patchFile(hc3, {
+      deviceId: 4933,
+      fileName: 'main',
+      expectedHash: '0'.repeat(32),
+      edits: [{ old: 'self.zones = 2', new: 'self.zones = 4' }],
+    }),
+    /has changed since you read it/
+  );
+  assert.deepEqual(hc3.calls.map(c => c.method), ['GET'], 'a stale patch must not write');
+  assert.equal(hc3.stored, FILE);
+});
+
+await check('a matching expectedHash proceeds', async () => {
+  const hc3 = fakeHc3();
+  const probe = await patchFile(hc3, {
+    deviceId: 4933, fileName: 'main', dryRun: true,
+    edits: [{ old: 'self.zones = 2', new: 'self.zones = 4' }],
+  });
+  const r = await patchFile(fakeHc3(), {
+    deviceId: 4933, fileName: 'main', expectedHash: probe.hashBefore,
+    edits: [{ old: 'self.zones = 2', new: 'self.zones = 4' }],
+  });
+  assert.equal(r.written, true);
+});
+
+await check('the hash refusal names both hashes and the multi-writer cause', async () => {
+  await assert.rejects(
+    () => patchFile(fakeHc3(), {
+      deviceId: 4933, fileName: 'main', expectedHash: 'abc',
+      edits: [{ old: 'self.zones = 2', new: 'self.zones = 4' }],
+    }),
+    e => {
+      assert.match(e.message, /Expected md5 abc, found [0-9a-f]{32}/);
+      assert.match(e.message, /web UI, the mobile app, another MCP session/);
+      assert.match(e.message, /Nothing was written/);
+      return true;
+    }
+  );
+});
+
+await check('broken Lua warns but does not block the write', async () => {
+  const hc3 = fakeHc3();
+  const r = await patchFile(hc3, {
+    deviceId: 4933,
+    fileName: 'main',
+    edits: [{ old: 'function QuickApp:tick()', new: 'function QuickApp:tick(' }],
+  });
+  assert.equal(r.written, true, 'the checker must never block');
+  assert.match(r.luaWarnings, /NOT blocking/);
+});
+
+await check('clean Lua adds no warning field', async () => {
+  const r = await patchFile(fakeHc3(), {
+    deviceId: 4933,
+    fileName: 'main',
+    edits: [{ old: 'self.zones = 2', new: 'self.zones = 4' }],
+  });
+  assert.ok(!('luaWarnings' in r));
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll patch checks passed');
 process.exit(failures ? 1 : 0);

@@ -1684,7 +1684,7 @@
   },
   {
     "name": "get_quickapp_file",
-    "description": "Get detailed information about a specific QuickApp file including its content.",
+    "description": "Get a specific QuickApp file. Returns the whole content by default, plus `contentHash` (md5 of what HC3 stored) — pass that hash to patch_quickapp_file as expectedHash to make the write refuse if anything edited the file in between.\n\n**Reading part of a file.** A 1,500-line engine costs its whole length to look at one function. Supply startLine/endLine, or `contains` to get every matching line with surrounding context, and the response carries a line-numbered excerpt instead of the body. Those line numbers make the excerpt directly quotable back into a patch `old`. The response always reports totalLines so you know what you did not see.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1695,6 +1695,26 @@
         "fileName": {
           "type": "string",
           "description": "Name of the file to retrieve"
+        },
+        "startLine": {
+          "type": "number",
+          "description": "1-indexed first line to return. With endLine, returns just that range."
+        },
+        "endLine": {
+          "type": "number",
+          "description": "1-indexed last line to return (inclusive)."
+        },
+        "contains": {
+          "type": "string",
+          "description": "Return only lines containing this literal substring, with context either side. Case-sensitive, not a regex. Composes with startLine/endLine, which narrow the search first."
+        },
+        "contextLines": {
+          "type": "number",
+          "description": "Lines of context either side of a `contains` hit. Default 3."
+        },
+        "maxLines": {
+          "type": "number",
+          "description": "Cap on returned lines so a loose filter cannot return the whole file. Default 200."
         }
       },
       "required": [
@@ -1779,7 +1799,7 @@
   },
   {
     "name": "get_scene",
-    "description": "Fetch a single scene by id via GET /api/scenes/{id}. Returns the full scene record — metadata (name, type, roomId, mode, enabled, isRunning, created/updated, …) plus the complete `content` (the Lua source for lua scenes, or the block/scenario JSON for scenario scenes). Use this to inspect ONE scene: get_scenes returns every scene with its full content and can be very large (easily >1MB), so it is impractical for looking at a single scene. Set includeContent=false to get metadata only (content bodies can be 100KB+) — the response then reports contentLength so you know how big it was.",
+    "description": "Fetch a single scene by id via GET /api/scenes/{id}. Returns the full scene record — metadata (name, type, roomId, mode, enabled, isRunning, created/updated, …) plus the complete `content`. Use this to inspect ONE scene: get_scenes returns every scene with its full content and can be very large (easily >1MB).\n\nAlways returns `contentHash` (md5 of what HC3 stored) — pass it to patch_scene_content as expectedHash so the write refuses if the scene changed in between. `contentHash` is returned even when the body is not.\n\n**Getting at the Lua without two JSON parses.** For a lua scene, `content` is a JSON string holding {conditions, actions}, so reaching the source normally means parsing twice. Set block=\"actions\" (or \"conditions\") and the parsed Lua comes back directly as `block`/`blockContent`, no second parse.\n\n**Reading part of it.** Scene bodies here run to 75 KB. includeContent=false gives metadata plus contentLength only. startLine/endLine or `contains` return a line-numbered excerpt — of the chosen block when `block` is set, otherwise of the raw content — with totalLines so you know what you did not see. Those line numbers quote straight back into a patch_scene_content `old`.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1790,6 +1810,34 @@
         "includeContent": {
           "type": "boolean",
           "description": "Include the full `content` body (Lua/scenario). Default true. Set false to strip a potentially large content body and return metadata only."
+        },
+        "block": {
+          "type": "string",
+          "enum": [
+            "actions",
+            "conditions"
+          ],
+          "description": "Lua scenes only. Return this block of the parsed content directly instead of the raw JSON-in-JSON `content` string."
+        },
+        "startLine": {
+          "type": "number",
+          "description": "1-indexed first line to return."
+        },
+        "endLine": {
+          "type": "number",
+          "description": "1-indexed last line to return (inclusive)."
+        },
+        "contains": {
+          "type": "string",
+          "description": "Return only lines containing this literal substring, with context either side. Case-sensitive, not a regex."
+        },
+        "contextLines": {
+          "type": "number",
+          "description": "Lines of context either side of a `contains` hit. Default 3."
+        },
+        "maxLines": {
+          "type": "number",
+          "description": "Cap on returned lines. Default 200."
         }
       },
       "required": [
@@ -2101,6 +2149,10 @@
         "properties": {
           "type": "object",
           "description": "Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: \"...\"}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters (the PUT path caches without transmitting on firmware 5.x — use set_device_parameter, which wraps the working setConfiguration action); associations / multichannelAssociations (precautionary reject, no verified REST path yet — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries)."
+        },
+        "allowUnsafeViewLayout": {
+          "type": "boolean",
+          "description": "Write a viewLayout even though its selects fail validation. Default false. The refusal exists because HC3 accepts a malformed select, this tool's post-write verify passes, and the tile then renders empty — so the write reports success while the device shows nothing. Only set this if you intend to inspect get_plugin_view afterwards."
         }
       },
       "required": [
@@ -2219,7 +2271,7 @@
   },
   {
     "name": "patch_quickapp_file",
-    "description": "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
+    "description": "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nThe patched result is checked for gross Lua damage (unbalanced brackets, unterminated strings, missing `end`) and any finding is reported as `luaWarnings`. It is a heuristic, not a parser, so it **warns and still writes** — a false refusal on a device holding valves open would be worse than the gap. No warnings does not mean it compiles.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2256,6 +2308,10 @@
             ]
           }
         },
+        "expectedHash": {
+          "type": "string",
+          "description": "The contentHash from get_quickapp_file. If supplied and the file no longer hashes to it, the patch is refused without writing — the file changed since you read it (web UI, mobile app, another MCP session, or the QuickApp's own Lua; there is no single writer). Omit to skip the check."
+        },
         "dryRun": {
           "type": "boolean",
           "description": "Compute and return the diff without writing anything. Default false."
@@ -2264,6 +2320,64 @@
       "required": [
         "deviceId",
         "fileName",
+        "edits"
+      ]
+    }
+  },
+  {
+    "name": "patch_scene_content",
+    "description": "Change part of a Lua scene by supplying only the text to replace, instead of reproducing the whole body as update_scene_content requires. Same semantics as patch_quickapp_file, and scenes need it more: a QuickApp can be split across files to keep edits small, but a scene is one monolithic block with no equivalent escape hatch, so every scene edit otherwise pays the full cost. Bodies here run to 75 KB.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. `old` is literal text, never a regex or a line number, and must match byte for byte. Set `new` to an empty string to delete. Edits apply in order, each against the result of the previous one.\n\nPatches `actions` by default; set block=\"conditions\" for the other. The block you do not touch is preserved exactly.\n\nAtomic: edits apply to an in-memory copy, the scene is written once, then re-fetched and compared. Returns a unified diff, sizes and an md5 — not the body. dryRun=true returns that diff with no write, which matters more here than on a QuickApp: **a scene that will not compile fails silently.** It sits inert until its trigger fires, potentially hours later, with nothing to distinguish it from a trigger that never fired. The patched result is checked for gross Lua damage and reported as `luaWarnings` — a heuristic, not a parser, so it warns and still writes.\n\nIf the scene is running when patched, the response reports `sceneWasRunning` so a write landing mid-run is at least visible. What HC3 does to an in-flight scene whose source changes underneath it has not been isolated on this gateway, so the flag states the fact and claims nothing further.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "number",
+          "description": "Scene ID"
+        },
+        "block": {
+          "type": "string",
+          "enum": [
+            "actions",
+            "conditions"
+          ],
+          "description": "Which block to patch. Default \"actions\"."
+        },
+        "edits": {
+          "type": "array",
+          "description": "Edits to apply, in order. At least one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "old": {
+                "type": "string",
+                "description": "Exact existing text to replace. Literal, not a pattern; must match byte for byte including indentation. Cannot be empty."
+              },
+              "new": {
+                "type": "string",
+                "description": "Replacement text. Empty string deletes the matched text."
+              },
+              "count": {
+                "type": "number",
+                "description": "Exact number of occurrences expected. Default 1. Any other number aborts the whole patch before anything is written."
+              }
+            },
+            "required": [
+              "old",
+              "new"
+            ]
+          }
+        },
+        "expectedHash": {
+          "type": "string",
+          "description": "The contentHash from get_scene. If supplied and the scene no longer hashes to it, the patch is refused without writing. A scene can also be edited from the web UI or the mobile app, so there is no single writer."
+        },
+        "dryRun": {
+          "type": "boolean",
+          "description": "Compute and return the diff without writing anything. Default false."
+        }
+      },
+      "required": [
+        "sceneId",
         "edits"
       ]
     }
