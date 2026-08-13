@@ -2,6 +2,43 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.18.0] - 2026-08-13
+
+Acts on a field report asking for patch-based editing. The report's core diagnosis is right and is confirmed in the code: the write path expresses **replacements** rather than **changes**, so the cost of an edit is proportional to the size of the file rather than the size of the edit, and above a certain size the write tools stop being usable at all. Every claim was re-checked before acting; the corrections are recorded below alongside what was adopted.
+
+### Changed
+- **`update_scene_content` no longer returns three copies of the scene body.** It returned `previous`, `current` **and** the full scene record. Measured on this gateway, scene 645 carries a `contentLength` of **75,428 bytes**, so a one-line change cost roughly 75 KB in and ~225 KB out — enough to exhaust a context window on its own, and a better explanation than request size for why a diagnosed one-line fix went unshipped for days.
+
+  The default response now carries lengths plus an md5 of the raw `content` string as HC3 stored it, and strips `content` from the scene record the way `get_scene(includeContent=false)` does. **`returnContent: true` restores the old shape exactly**, for callers that specifically want a last-known-good copy inline.
+
+  The tradeoff is stated plainly because it is a real one: the previous shape existed so a caller always had a recovery copy, and that is no longer handed over by default. A caller that wants one should read the scene before writing. An amplification that makes the tool unusable on a real scene is not a safety feature.
+
+### Added
+- **`patch_quickapp_file`.** Supply only the text to change. Each `old` must match exactly `count` times (default 1); any other number aborts the **whole** patch before anything is written, including edits earlier in the same list. That refusal is the feature: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot distinguish a real change from a truncated paste or a stale copy — which is how a file containing the literal text `-- placeholder` reached a live controller and cost it its 60-second tick. An edit that does not fit its file is self-evidently wrong and can simply be refused.
+
+  Edits are applied to an in-memory copy and written once through the same endpoint `update_quickapp_file` uses, then re-fetched and compared byte for byte. `dryRun: true` returns the diff with no write at all. The response carries a unified diff, before/after sizes and an md5 — and **not** the file: on a 2,000-line file the response is under a twentieth of the body, and stays flat as the file grows.
+
+  A zero-match refusal distinguishes the two causes rather than leaving the caller to guess: if a whitespace-insensitive search finds the text, it says the difference is whitespace; otherwise it says the copy may be stale. Too many matches reports the actual count and suggests setting it deliberately.
+
+- **`src/mcp/patch.ts`** — `applyEdits` and `unifiedDiff` as dependency-free pure functions, so `patch_scene_content` can reuse both. The diff trims the common head and tail before the O(n·m) core, which is what keeps a one-line change in a 5,000-line file down to a handful of diff lines, and caps its own output rather than returning something as large as the file it describes.
+
+- **`contentHash` in `util.ts`** — md5 of a stored body. Hashes whatever HC3 returned rather than what was submitted, so the value stays comparable across a later re-fetch. Groundwork for the `expectedHash` concurrency guard, which is not in this release.
+
+- `unit-patch.mjs` (36 checks) and `unit-scene-content.mjs` (6 checks). The atomicity and dry-run claims are proved by asserting on the recorded request log — that no PUT was issued at all — rather than by inspecting the return value, since the whole subject here is writes that should not have happened.
+
+### Corrected from the report
+- **"Three files."** The gateway shows four on device 4933 (`main`, `watering`, `picker`, `icons`).
+- **"58,591 bytes, roughly 30,000 tokens."** Lua runs about 3.5 characters per token, so that push is ~16–19k tokens. The figure is right only if the read is counted alongside the write.
+- **"`get_scene` returns everything."** Out of date since 4.7.0: `includeContent=false` returns metadata plus `contentLength`. The real gap is that it is all-or-nothing — there is no `lineRange` — which is unaddressed here.
+- **`expectedHash` ranked as the most important guard.** Demoted. Exact-match-`count` already covers most of the stale-copy case it was proposed for: if the file has drifted, `old` will usually not match and the patch refuses. It remains worth adding, one tier down.
+
+### Not adopted (untested)
+- **"HC3 restarts a scene to execute a timer callback, re-running it from the top."** Not reproduced here and not documented anywhere in this project. It is not load-bearing — strike it and the argument for patching scenes still stands on the other three grounds — so it is recorded rather than acted on, pending a one-variable `scripts/probe.mjs` run.
+- **Whether an external QuickApp *file* write restarts the QuickApp.** 4.15.0 verified this for *variable* writes. The file case is likely but has not been isolated here, so `patch_quickapp_file` does **not** report `restarted` in its response, as the report's suggested shape proposed. Its description says only what is known: batch multi-file changes into one `update_multiple_quickapp_files` call rather than N patches.
+
+### Still outstanding from the report
+`patch_scene_content` (next, and it reuses everything above), Lua syntax checking before commit, `expectedHash`, partial reads, and viewLayout validation as a warning. `update_quickapp_file` also still echoes HC3's PUT response, a smaller instance of the same amplification.
+
 ## [4.17.0] - 2026-08-12
 
 ### Added

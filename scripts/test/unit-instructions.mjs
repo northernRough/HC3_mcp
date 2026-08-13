@@ -72,11 +72,19 @@ check('warns that icon names collide across buckets', () => {
 
 check('points at get_scene over get_scenes', () => {
   assert.match(text, /get_scenes/);
-  assert.match(text, /get_scene for a single scene/);
+  assert.match(text, /use get_scene/);
+});
+
+// A caller who already knows update_quickapp_file will never find the patch
+// tool on its own — whole-file rewriting looks like it works right up until
+// the file is too big to express.
+check('points at patch_quickapp_file over rewriting a file whole', () => {
+  assert.match(text, /patch_quickapp_file/);
+  assert.match(text, /refuses one that no longer fits/);
 });
 
 check('tells the reader to reconnect after a redeploy', () => {
-  assert.match(text, /cached by the client at connect/);
+  assert.match(text, /cache tool schemas at connect/);
 });
 
 check('advertises the resources by uri', () => {

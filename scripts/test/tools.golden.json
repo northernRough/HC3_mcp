@@ -2218,6 +2218,57 @@
     }
   },
   {
+    "name": "patch_quickapp_file",
+    "description": "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the file to patch (from list_quickapp_files)"
+        },
+        "edits": {
+          "type": "array",
+          "description": "Edits to apply, in order. At least one.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "old": {
+                "type": "string",
+                "description": "Exact existing text to replace. Literal, not a pattern; must match byte for byte including indentation. Cannot be empty — to insert, anchor on a nearby line and include it in both old and new."
+              },
+              "new": {
+                "type": "string",
+                "description": "Replacement text. Empty string deletes the matched text."
+              },
+              "count": {
+                "type": "number",
+                "description": "Exact number of occurrences expected. Default 1. Any other number of matches aborts the whole patch before anything is written."
+              }
+            },
+            "required": [
+              "old",
+              "new"
+            ]
+          }
+        },
+        "dryRun": {
+          "type": "boolean",
+          "description": "Compute and return the diff without writing anything. Default false."
+        }
+      },
+      "required": [
+        "deviceId",
+        "fileName",
+        "edits"
+      ]
+    }
+  },
+  {
     "name": "publish_plugin_event",
     "description": "Publish various types of events through the plugin system.",
     "inputSchema": {
@@ -2883,7 +2934,7 @@
   },
   {
     "name": "update_scene_content",
-    "description": "Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved. Returns both previous and current content so the caller has a last-known-good copy for recovery.",
+    "description": "Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2898,6 +2949,10 @@
         "conditions": {
           "type": "string",
           "description": "Conditions block source (Lua table as a string). If omitted, existing conditions are preserved. Only valid for Lua-type scenes."
+        },
+        "returnContent": {
+          "type": "boolean",
+          "description": "Return the full previous/current bodies and the untrimmed scene record (pre-4.18 shape). Default false. On a large scene this multiplies the response by roughly three times the body size."
         }
       },
       "required": [

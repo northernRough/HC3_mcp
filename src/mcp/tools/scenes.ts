@@ -1,7 +1,7 @@
 // Scene tools (run, modify, create, content updates).
 
 import { ToolModule } from './registry';
-import { verifyWrite } from '../util';
+import { verifyWrite, contentHash } from '../util';
 
 export const scenes: ToolModule = {
   schemas: [
@@ -147,7 +147,7 @@ export const scenes: ToolModule = {
       },
       {
         name: 'update_scene_content',
-        description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved. Returns both previous and current content so the caller has a last-known-good copy for recovery.',
+        description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -162,6 +162,10 @@ export const scenes: ToolModule = {
             conditions: {
               type: 'string',
               description: 'Conditions block source (Lua table as a string). If omitted, existing conditions are preserved. Only valid for Lua-type scenes.',
+            },
+            returnContent: {
+              type: 'boolean',
+              description: 'Return the full previous/current bodies and the untrimmed scene record (pre-4.18 shape). Default false. On a large scene this multiplies the response by roughly three times the body size.',
             },
           },
           required: ['sceneId'],
@@ -332,7 +336,7 @@ export const scenes: ToolModule = {
       };
     },
 
-    async update_scene_content(hc3, args: { sceneId: number; actions?: string; conditions?: string }): Promise<any> {
+    async update_scene_content(hc3, args: { sceneId: number; actions?: string; conditions?: string; returnContent?: boolean }): Promise<any> {
       if (args.actions === undefined && args.conditions === undefined) {
         throw new Error('update_scene_content requires at least one of actions or conditions.');
       }
@@ -380,12 +384,39 @@ export const scenes: ToolModule = {
       if (args.conditions !== undefined) changedFields.push('conditions');
       if (args.actions !== undefined) changedFields.push('actions');
 
+      if (args.returnContent === true) {
+        return {
+          sceneId: args.sceneId,
+          changedFields,
+          previous,
+          current,
+          scene: updated,
+        };
+      }
+
+      // Default: describe the bodies rather than repeating them. Hash the raw
+      // `content` string as HC3 stored it, so the value is comparable against
+      // a later re-fetch.
+      const { content: updatedContent, ...sceneWithoutContent } = (updated ?? {}) as Record<string, any>;
       return {
         sceneId: args.sceneId,
         changedFields,
-        previous,
-        current,
-        scene: updated,
+        previous: {
+          conditionsLength: previous.conditions.length,
+          actionsLength: previous.actions.length,
+          contentHash: contentHash(existing?.content),
+        },
+        current: {
+          conditionsLength: current.conditions.length,
+          actionsLength: current.actions.length,
+          contentHash: contentHash(updatedContent),
+        },
+        scene: {
+          ...sceneWithoutContent,
+          contentOmitted: true,
+          contentLength: typeof updatedContent === 'string' ? updatedContent.length : undefined,
+        },
+        hint: 'Bodies omitted to keep the response small. Pass returnContent=true for the full previous/current text, or get_scene for the stored source.',
       };
     },
   },

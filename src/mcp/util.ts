@@ -1,6 +1,20 @@
 // Shared utilities used by multiple tool modules and server-class methods.
 // Pure functions, no `this` binding, no HC3 coupling.
 
+import { createHash } from 'node:crypto';
+
+/**
+ * md5 of a content string, as an identity for "the bytes I am looking at".
+ *
+ * Hash whatever HC3 actually stored and returned — not what was submitted —
+ * so the value stays comparable across a later re-fetch. Cheap to compute and
+ * short enough to return in place of a 75 KB body.
+ */
+export function contentHash(content: string | undefined | null): string | undefined {
+  if (typeof content !== 'string') return undefined;
+  return createHash('md5').update(content, 'utf8').digest('hex');
+}
+
 export async function tolerantFetch<T>(
   _label: string,
   promise: Promise<T>

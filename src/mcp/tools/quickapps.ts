@@ -1,14 +1,14 @@
 // QuickApp tools — both the core operations (get/restart/create/types,
 // variable get/set) and the file-management subgroup (list/get/create/
-// update/delete/export/import). 15 tools total.
+// update/patch/delete/export/import). 16 tools total.
 //
 // Two named schema arrays exposed because the original tools/list
 // ordering scatters QA tools across two non-adjacent positions: a
-// 3-tool "core" cluster early in the array, and a 12-tool extended
+// 3-tool "core" cluster early in the array, and a 13-tool extended
 // cluster later (after the "System Context & Intelligence" group).
 // To preserve byte-equivalent tools/list ordering, the server spreads
 // these two arrays at their respective positions; the registry merges
-// all 15 handlers via the single ToolModule export.
+// all 16 handlers via the single ToolModule export.
 //
 // Behavioural notes preserved verbatim from the originals:
 // - restart_quickapp wraps /api/plugins/restart (HC3 5.x has no
@@ -29,6 +29,8 @@
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { readFile } from 'node:fs/promises';
+import { applyEdits, unifiedDiff, PatchEdit } from '../patch';
+import { contentHash } from '../util';
 
 export const quickappsCoreSchemas: MCPTool[] = [
       {
@@ -199,6 +201,50 @@ export const quickappsExtSchemas: MCPTool[] = [
             }
           },
           required: ["deviceId", "files"]
+        }
+      },
+      {
+        name: "patch_quickapp_file",
+        description: "Change part of a QuickApp file by supplying only the text to replace, instead of reproducing the whole file as update_quickapp_file requires. Prefer this for any edit to a file you are not creating from scratch: on a 58 KB engine a one-line fix costs ~16k tokens through update_quickapp_file and ~200 bytes through this tool.\n\n**Each `old` must match exactly `count` times (default 1), or NOTHING is written** — not the failing edit and not the edits before it. This is the point of the tool: a complete file is always a structurally valid thing to write, so a whole-file PUT cannot tell a real change from a truncated paste or a stale copy, whereas an edit that does not fit its file is self-evidently wrong and gets refused. Zero matches usually means your copy is stale or the whitespace differs; too many means `old` is not unique, so extend it with surrounding lines (or set count deliberately to change them all).\n\n`old` is literal text, never a regex or a line number, and must match byte for byte including indentation. Set `new` to an empty string to delete the matched text. Edits apply in order, each against the result of the previous one.\n\nAtomic: edits are applied to an in-memory copy and the file is written once via the same PUT update_quickapp_file uses, then re-fetched and compared byte for byte. Returns a unified diff of what changed plus before/after sizes and an md5 of the stored result — so you can confirm the change landed where you meant without re-reading the file.\n\nSet dryRun=true to get that diff with no write at all: the safe way to confirm an edit before touching a QuickApp that is controlling hardware.\n\nTo change several files, prefer one update_multiple_quickapp_files call over several patches — each external write goes through HC3's file endpoint and QuickApps are known to restart on external writes, so N calls risk N restarts.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: {
+              type: "number",
+              description: "QuickApp device ID"
+            },
+            fileName: {
+              type: "string",
+              description: "Name of the file to patch (from list_quickapp_files)"
+            },
+            edits: {
+              type: "array",
+              description: "Edits to apply, in order. At least one.",
+              items: {
+                type: "object",
+                properties: {
+                  old: {
+                    type: "string",
+                    description: "Exact existing text to replace. Literal, not a pattern; must match byte for byte including indentation. Cannot be empty — to insert, anchor on a nearby line and include it in both old and new."
+                  },
+                  new: {
+                    type: "string",
+                    description: "Replacement text. Empty string deletes the matched text."
+                  },
+                  count: {
+                    type: "number",
+                    description: "Exact number of occurrences expected. Default 1. Any other number of matches aborts the whole patch before anything is written."
+                  }
+                },
+                required: ["old", "new"]
+              }
+            },
+            dryRun: {
+              type: "boolean",
+              description: "Compute and return the diff without writing anything. Default false."
+            }
+          },
+          required: ["deviceId", "fileName", "edits"]
         }
       },
       {
@@ -518,6 +564,81 @@ export const quickapps: ToolModule = {
       }
 
       return putResult;
+    },
+
+    async patch_quickapp_file(hc3, args: {
+      deviceId: number;
+      fileName: string;
+      edits: PatchEdit[];
+      dryRun?: boolean;
+    }): Promise<any> {
+      const { deviceId, fileName, edits, dryRun } = args ?? ({} as any);
+      if (typeof deviceId !== 'number') {
+        throw new Error('patch_quickapp_file requires a numeric deviceId.');
+      }
+      if (typeof fileName !== 'string' || fileName === '') {
+        throw new Error('patch_quickapp_file requires a fileName (see list_quickapp_files).');
+      }
+
+      const path = `/api/quickApp/${deviceId}/files/${encodeURIComponent(fileName)}`;
+      const file: any = await hc3.request(path);
+      const before: unknown = file?.content;
+      if (typeof before !== 'string') {
+        throw new Error(
+          `patch_quickapp_file: file '${fileName}' on device ${deviceId} returned no string content ` +
+          `(got ${before === undefined ? 'undefined' : typeof before}). ` +
+          `Confirm the file name with list_quickapp_files.`
+        );
+      }
+
+      // Throws before any write if an edit does not fit. Nothing below this
+      // line runs on a mismatch, so a refused patch leaves the device alone.
+      const { content: after, applied } = applyEdits(before, edits, 'patch_quickapp_file');
+
+      const diff = unifiedDiff(before, after, {
+        fromLabel: `${fileName} (device ${deviceId}, before)`,
+        toLabel: `${fileName} (device ${deviceId}, after)`,
+      });
+
+      if (dryRun === true) {
+        return {
+          target: `quickapp:${deviceId}/${fileName}`,
+          dryRun: true,
+          written: false,
+          editsMatched: applied.length,
+          bytesBefore: before.length,
+          bytesAfter: after.length,
+          hashBefore: contentHash(before),
+          hashWouldBe: contentHash(after),
+          diff,
+        };
+      }
+
+      await hc3.request(path, 'PUT', { content: after });
+
+      // Same post-write verify as update_quickapp_file: HC3 has silent-write
+      // paths on QA file edits, so a PUT that did not throw proves nothing.
+      const stored: any = await hc3.request(path);
+      if (stored?.content !== after) {
+        throw new Error(
+          `patch_quickapp_file: content mismatch after PUT on device ${deviceId}, file '${fileName}'. ` +
+          `Submitted ${after.length} chars, HC3 stored ${(stored?.content ?? '').length} chars. ` +
+          `The write was silently altered or dropped — re-fetch the file before patching again, ` +
+          `as it may now hold a partially applied version.`
+        );
+      }
+
+      return {
+        target: `quickapp:${deviceId}/${fileName}`,
+        written: true,
+        editsApplied: applied.length,
+        occurrencesReplaced: applied.reduce((n, e) => n + e.occurrences, 0),
+        bytesBefore: before.length,
+        bytesAfter: after.length,
+        hashBefore: contentHash(before),
+        hashAfter: contentHash(stored.content),
+        diff,
+      };
     },
 
     async update_multiple_quickapp_files(hc3, args: {
