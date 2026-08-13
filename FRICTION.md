@@ -103,6 +103,16 @@ tested. Some items predate MCP improvements that have since landed.
 | **confirmed** | `call_ui_event` returns nothing — no ack, no echo, no indication a callback was bound | Confirmed in this repo's own source. Fixed in 4.19.0: the tool now reports the matched `uiCallbacks` entry and warns when there is none. |
 | **confirmed** | `update_multiple_quickapp_files` returns only `{name, isMain, isOpen}`, so the push result cannot serve as verification | Confirmed in source. Fixed in 4.19.0 — both file-write tools now return `bytes` + `contentHash`, taken from the verify fetch they were already doing and discarding. |
 
+#### The telemetry table above, read correctly — 13 Aug 2026
+
+The generated "Recurring failures" table hard-codes the verdict `untested`, so a
+row cannot be marked resolved there. These two are.
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | The `upload_icon` row is a server defect, not user error — it is 12 of 12 recorded entries | The schema's `required` was `['base64', 'mime', 'category']`, while the handler refuses `base64` for a device state set and refuses a device upload with no `deviceTemplate`. Obeying the schema therefore guaranteed the refusal, and the real requirement lived only in prose, in the second paragraph of a ~4,000 character description. **Fixed in 4.19.2**: `required` is `['mime', 'category']` with an `if`/`then`/`else` stating the dependent requirement in schema, where a client can act on it before the call. |
+| **confirmed** | A friction log can contain the test suite's own output, and the table cannot tell you so | Until 4.19.2, an explicit but unwritable `MCP_FRICTION_LOG` fell through to the next candidate. `unit-friction.mjs` sets exactly that to prove telemetry never throws, so every `npm test` run appended two fixture entries to the developer's own `~/.hc3-mcp` log — **all 19 entries on that machine were fixtures**, including 5 `upload_icon` failures byte-identical in shape to real ones. The deployed unit's 12 are genuine: `scripts/pi-update.sh` runs `npm ci` and `npm run compile`, never `npm test`. Fixed by using an explicit path or disabling, by disabling telemetry across the suite, and by `npm run triage` refusing to regenerate a file that was generated from a different log. |
+
 
 #### Confirmed by the read-only verification pass, 13 Aug 2026
 
@@ -152,8 +162,12 @@ re-running the top produces the same symptom.
 
 - No push-sending tool, so the verified push routing rules have nowhere to live.
 - No scene-variable tool, despite "scene variables beat globals" being sound.
-- `update_quickapp_file` still echoes HC3's PUT response — the smaller sibling
-  of the scene response amplification fixed in 4.18.0.
+- ~~`update_quickapp_file` still echoes HC3's PUT response~~ — **closed in
+  4.19.0**, which is recorded four rows up in this same file: both file-write
+  tools return `bytes` + `contentHash`, taken from the verify fetch they were
+  already doing. It stayed listed as an open gap until 4.19.2. A stale
+  open-gap row is precisely the failure this file exists to prevent, so it is
+  struck rather than deleted.
 
 <!-- END manual ledger -->
 

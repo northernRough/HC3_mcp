@@ -2,6 +2,24 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.19.2] - 2026-08-13
+
+### Fixed
+- **`upload_icon`'s schema demanded the argument its own handler refuses.** `required` was `['base64', 'mime', 'category']`, but a device icon for a state-set type (a relay, a dimmer) must be passed as `states`, and the handler rejects `base64` alongside it and rejects `base64` on its own for those types. So a client that obeyed the schema was guaranteed a refusal, and a client that ignored it was violating a stated requirement. `required` is now `['mime', 'category']`, with an `if`/`then`/`else` that asks for `deviceTemplate` plus one of `base64`/`states` on a device upload, and `base64` alone for a room or scene.
+
+  This is the tool behind **every friction entry recorded against this server** — 12 of 12, all of them the "category device requires deviceTemplate" refusal. The requirement was documented all along, in the second paragraph of a ~4,000 character description, behind the 128×128 rule. A conditional requirement belongs in schema, where a client can act on it before the call, rather than in prose it may never weigh. The two decisions that actually determine whether the call succeeds now open the description instead of trailing it.
+
+- **The property descriptions contradicted the tool's own findings.** `base64` still told callers PNGs must be "palette mode (8-bit colormap, color type 3)", which 4.13.1 refuted on the gateway (colour type does not matter; RGBA is what most existing icons use) and which the main description already said. It also claimed device icons always use `states`, when a `com.fibaro.genericDevice` tile takes a single `base64` image. `states` claimed a device upload without it is refused, which is not what the handler does.
+
+- **An unwritable `MCP_FRICTION_LOG` fell through to the next candidate.** Setting the variable says *where* telemetry goes; it is not a first preference. When the named path could not be written, the resolver moved on and wrote to `~/.hc3-mcp/friction.jsonl` instead. The cost was not hypothetical: `unit-friction.mjs` sets the variable to a deliberately unwritable path to prove telemetry never throws, so **every `npm test` run appended two fixture entries to the developer's real log** — 12 of the 17 entries on this machine came from a tool named `t` with the message "should be swallowed". A metric that records its own test suite cannot be trusted to describe users. An explicit path is now used or telemetry disables itself, and the test asserts that rather than merely commenting it.
+
+- **`npm test` disables telemetry for the whole run.** The leak above was one route in; three test files (`unit-upload-icon`, `unit-upload-icons`, `unit-error-shape`) exercise failing tool calls and none of them redirected telemetry, so the next such file would have re-opened it. `MCP_FRICTION_DISABLE=true` now wraps the suite, and `unit-friction.mjs` opts back in explicitly, which also makes it hermetic when run by hand in a shell that has the variable set.
+
+- **`npm run triage` refuses to regenerate a file that came from a different log.** The header already recorded which log a generation came from, and the telemetry path is per-machine: `/var/lib/hc3-mcp` on the deployed unit, `~/.hc3-mcp` on a laptop. Running triage on the wrong one replaced the deployed unit's recorded friction with whatever the laptop held, and did it quietly, because the hand-written ledger is carried across and only the generated half changes. It now compares the two paths and exits non-zero naming both, with `--force` for when replacing it is the intent. `unit-triage.mjs` covers the refusal, the escape hatch, and that the ledger survives regeneration.
+
+### Changed
+- **`MCPTool.inputSchema` accepts JSON Schema conditionals** (`if`/`then`/`else`, `anyOf`/`allOf`/`oneOf`). The type previously allowed only `type`, `properties` and `required`, which is why a dependent requirement had nowhere to go but prose.
+
 ## [4.19.1] - 2026-08-13
 
 ### Fixed

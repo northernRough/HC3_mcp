@@ -27,5 +27,17 @@ export interface MCPTool {
     type: string;
     properties: Record<string, any>;
     required?: string[];
+    /**
+     * JSON Schema conditionals. A requirement that depends on another
+     * argument (deviceTemplate only when category is "device") can then be
+     * stated in schema rather than in prose, which is the only form a client
+     * can act on before the call is made.
+     */
+    if?: Record<string, any>;
+    then?: Record<string, any>;
+    else?: Record<string, any>;
+    anyOf?: Record<string, any>[];
+    allOf?: Record<string, any>[];
+    oneOf?: Record<string, any>[];
   };
 }

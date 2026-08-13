@@ -25,6 +25,19 @@ import { fileURLToPath } from 'node:url';
 const MANUAL_BEGIN = '<!-- BEGIN manual ledger -->';
 const MANUAL_END = '<!-- END manual ledger -->';
 
+// The header records which log a generation came from. The telemetry log is
+// per-machine — /var/lib/hc3-mcp on the deployed unit, ~/.hc3-mcp on a laptop —
+// so running triage on the wrong one replaces real signal with whatever the
+// local machine happens to hold, and the generated half of the file is gone
+// with no diff to explain it. Read the previous source and refuse the mismatch.
+const SOURCE_LINE = /^_Generated .*? from \d+ entries at `([^`]+)`\._/m;
+
+function previousSource(file) {
+  if (!existsSync(file)) return null;
+  const m = readFileSync(file, 'utf8').match(SOURCE_LINE);
+  return m ? m[1] : null;
+}
+
 function carryOverManualLedger(file) {
   if (!existsSync(file)) return null;
   const prev = readFileSync(file, 'utf8');
@@ -37,11 +50,28 @@ function carryOverManualLedger(file) {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { readEntries, groupFailures, frictionPath } = await import(resolve(ROOT, 'out/mcp/friction.js'));
 
-const outFile = resolve(process.argv[2] ?? resolve(ROOT, 'FRICTION.md'));
+const argv = process.argv.slice(2).filter(a => a !== '--force');
+const force = process.argv.includes('--force');
+const outFile = resolve(argv[0] ?? resolve(ROOT, 'FRICTION.md'));
 const entries = readEntries();
 const failures = groupFailures(entries);
 const findings = entries.filter(e => e.kind === 'finding');
 const path = frictionPath();
+
+const source = path ?? '(not recording)';
+const previous = previousSource(outFile);
+if (previous && previous !== source && !force) {
+  console.error(
+    `Refusing to regenerate ${outFile}.\n\n` +
+    `  it was generated from: ${previous}\n` +
+    `  this machine records to: ${source}\n\n` +
+    'Those are different logs, so this run would replace one machine\'s recorded\n' +
+    'friction with another\'s — silently, since the hand-written ledger is carried\n' +
+    'across and only the generated half changes. Run it where the telemetry lives\n' +
+    '(the deployed unit, normally), or pass --force if replacing it is the intent.'
+  );
+  process.exit(1);
+}
 const when = new Date().toISOString().slice(0, 16).replace('T', ' ');
 const ago = ts => `${Math.round((Date.now() / 1000 - ts) / 86400)}d ago`;
 

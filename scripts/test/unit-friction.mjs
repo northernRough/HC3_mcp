@@ -15,6 +15,11 @@ import { join } from 'node:path';
 
 const dir = mkdtempSync(join(tmpdir(), 'friction-'));
 process.env.MCP_FRICTION_LOG = join(dir, 'friction.jsonl');
+// `npm test` disables telemetry for the whole run so no test can append to a
+// real friction log. This one test is about the telemetry itself, so it opts
+// back in — and does so unconditionally, which also makes it hermetic when
+// run by hand in a shell that happens to have the variable set.
+delete process.env.MCP_FRICTION_DISABLE;
 
 const F = await import('../../out/mcp/friction.js');
 F._resetFrictionPath();
@@ -81,10 +86,14 @@ check('NEVER throws when the path is unwritable', () => {
   chmodSync(bad, 0o500);                       // read+execute, no write
   process.env.MCP_FRICTION_LOG = join(bad, 'x.jsonl');
   F._resetFrictionPath();
-  // Must not throw, and must not fall back into a directory it cannot use.
+  // Must not throw, and must not fall back to a path the operator did not
+  // name. This assertion is the one that was missing: without it the resolver
+  // fell through to ~/.hc3-mcp/friction.jsonl and every test run polluted a
+  // real telemetry log with fixture entries, which then showed up in triage.
+  assert.equal(F.frictionPath(), null);
   F.recordFailure('t', 'should be swallowed');
   F.recordFinding('t', { expected: 'a', actual: 'b', reproduction: 'c' });
-  assert.ok(true);
+  assert.deepEqual(F.readEntries(), []);
   chmodSync(bad, 0o700);
 });
 
