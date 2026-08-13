@@ -40,6 +40,25 @@
 // would differ, and the probe would look like a clean refutation while
 // measuring nothing at all. withGlobal creates them; do not "simplify" that
 // away.
+//
+// ---------------------------------------------------------------------------
+// Arm 3 — closure survival, which is the thing code actually depends on
+//
+// Counting restarts infers the mechanism. Capturing a local in the callback
+// measures the consequence directly, as one value, and separates three
+// outcomes that the restart count cannot:
+//
+//   INSTANCE-1  the original instance survived; the closure is intact, and the
+//               reported "captured value is nil" symptom has another cause
+//   LOST        the upvalue is nil when the callback runs — the instance is
+//               gone and the closure with it
+//   INSTANCE-2  the callback ran with a LATER instance's value. The top re-ran
+//               and rebuilt the closure, so `if token == savedToken` compares
+//               the new run's token against itself, or against the wrong one
+//
+// That third case is the one that produces the reported symptom while looking
+// like the second, and it needs a different fix: not "avoid closures" but
+// "never trust a value that a re-entry would recompute". Worth the extra arm.
 // ---------------------------------------------------------------------------
 
 import { withScene, withGlobal, sleep, client } from './probe.mjs';
@@ -61,6 +80,28 @@ fibaro.setTimeout(${TIMER_MS}, function()
 end)
 ` : '-- (no timer in this arm)'}
 `.trim();
+
+// Arm 3 body. `captured` exists only as an upvalue of the closure — nothing
+// writes it to a global before the callback runs, so whatever the callback
+// sees is what survived.
+const closureBody = (topsVar, seenVar) => `
+local tops = tonumber(fibaro.getGlobalVariable("${topsVar}")) or 0
+fibaro.setGlobalVariable("${topsVar}", tostring(tops + 1))
+local captured = "INSTANCE-" .. tostring(tops + 1)
+fibaro.debug("probe", "TOP, captured=" .. captured)
+
+fibaro.setTimeout(${TIMER_MS}, function()
+  -- If the instance died, captured is nil here. If the top re-ran and
+  -- rebuilt the closure, it holds the LATER run's value, not this one's.
+  fibaro.setGlobalVariable("${seenVar}", tostring(captured or "LOST"))
+  fibaro.debug("probe", "CALLBACK, captured=" .. tostring(captured or "LOST"))
+end)
+`.trim();
+
+async function readVar(hc3, name) {
+  const v = await hc3.request(`/api/globalVariables/${name}`);
+  return String(v?.value ?? '');
+}
 
 async function readCounters(hc3, topsVar, cbsVar) {
   const get = async name => {
@@ -95,10 +136,27 @@ async function runArm(label, { withTimer, topsVar, cbsVar }) {
   }, { actions: body(topsVar, cbsVar, withTimer) });
 }
 
+async function runClosureArm({ topsVar, seenVar }) {
+  return withScene(async (sceneId, hc3, sceneTools) => {
+    await hc3.request(`/api/globalVariables/${topsVar}`, 'PUT', { name: topsVar, value: '0' });
+    await hc3.request(`/api/globalVariables/${seenVar}`, 'PUT', { name: seenVar, value: 'NOTHING-WROTE-THIS' });
+    console.log(`\n  [arm] CLOSURE survival — scene ${sceneId}`);
+
+    await sceneTools.run_scene(hc3, { sceneId });
+    await sleep(SAMPLE_AFTER_MS);
+
+    const seen = await readVar(hc3, seenVar);
+    const tops = Number(await readVar(hc3, topsVar));
+    console.log(`    tops=${tops}, callback saw captured=${JSON.stringify(seen)}`);
+    return { seen, tops };
+  }, { actions: closureBody(topsVar, seenVar) });
+}
+
 const hc3 = await client();
 
 await withGlobal(async topsVar => {
   await withGlobal(async cbsVar => {
+   await withGlobal(async seenVar => {
     console.log('\n=== Does a setTimeout callback re-run a scene from the top? ===');
 
     const control = await runArm('WITHOUT timer (control)', { withTimer: false, topsVar, cbsVar });
@@ -124,6 +182,29 @@ await withGlobal(async topsVar => {
     console.log('\ncontrol:', JSON.stringify(control));
     console.log('test   :', JSON.stringify(test));
 
+    // Arm 3 — the consequence, measured directly.
+    const closure = await runClosureArm({ topsVar, seenVar });
+    console.log('\n--- closure verdict ---');
+    if (closure.seen === 'NOTHING-WROTE-THIS') {
+      console.log('INCONCLUSIVE: the callback never wrote. Either it did not fire, or the');
+      console.log('global write failed. Check the debug log below before concluding anything.');
+    } else if (closure.seen === 'INSTANCE-1' && closure.tops === 1) {
+      console.log('CLOSURE SURVIVED: the callback saw the value captured by the run that armed');
+      console.log('it. Upvalues are intact across the timer, so "captured value is nil in the');
+      console.log('callback" has some other cause and the closure-free workaround is unnecessary.');
+    } else if (closure.seen === 'LOST') {
+      console.log('CLOSURE LOST: the upvalue was nil when the callback ran. The instance did not');
+      console.log('survive. Capture nothing; re-read all state from scene variables.');
+    } else if (/^INSTANCE-(\d+)$/.test(closure.seen)) {
+      console.log(`CLOSURE REBUILT: the callback saw ${closure.seen} after ${closure.tops} top-level run(s).`);
+      console.log('The top re-ran and rebuilt the closure, so a captured token compares against');
+      console.log('the LATER run\'s value. This is the dangerous case: it looks like a nil bug but');
+      console.log('the fix is different — never trust a value a re-entry would recompute.');
+    } else {
+      console.log(`UNEXPECTED: captured=${JSON.stringify(closure.seen)}, tops=${closure.tops}. Investigate before reporting.`);
+    }
+    console.log('closure:', JSON.stringify(closure));
+
     // Second witness. If the globals and the log disagree, trust neither and
     // find out why before writing any of this down.
     try {
@@ -135,7 +216,9 @@ await withGlobal(async topsVar => {
       console.log(`\n  (could not read the debug log: ${e.message})`);
     }
 
-    console.log('\nWhatever this says, record it — in CHANGELOG.md and via report_finding.');
-    console.log('The last time this question was answered, the answer was not written down.');
+    console.log('\nWhatever this says, record it — in CHANGELOG.md, in FRICTION.md, and via');
+    console.log('report_finding. The last time this question was answered it was not written');
+    console.log('down anywhere, which is why it is being asked again.');
+   });
   });
 });

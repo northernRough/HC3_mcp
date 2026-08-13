@@ -13,9 +13,26 @@
 //
 //   node scripts/friction-triage.mjs [outfile]     # default: FRICTION.md
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Everything between these markers is written by hand — the ledger of claims
+// from field reports, with verdicts. This script regenerates the rest of the
+// file from telemetry, so without this the first `npm run triage` after
+// someone writes a ledger would silently destroy it. Which would be a poor
+// showing for a file whose entire purpose is that findings do not get lost.
+const MANUAL_BEGIN = '<!-- BEGIN manual ledger -->';
+const MANUAL_END = '<!-- END manual ledger -->';
+
+function carryOverManualLedger(file) {
+  if (!existsSync(file)) return null;
+  const prev = readFileSync(file, 'utf8');
+  const from = prev.indexOf(MANUAL_BEGIN);
+  const to = prev.indexOf(MANUAL_END);
+  if (from === -1 || to === -1 || to < from) return null;
+  return prev.slice(from, to + MANUAL_END.length);
+}
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { readEntries, groupFailures, frictionPath } = await import(resolve(ROOT, 'out/mcp/friction.js'));
@@ -76,6 +93,23 @@ if (findings.length === 0) {
     if (f.finding?.impact) lines.push(`\n**Cost:** ${f.finding.impact}\n`);
     if (f.finding?.reporter) lines.push(`\n_Reported by ${f.finding.reporter}_\n`);
   }
+}
+
+const manual = carryOverManualLedger(outFile);
+if (manual) {
+  lines.push('\n' + manual + '\n');
+} else {
+  lines.push(`
+${MANUAL_BEGIN}
+
+## Claim ledger
+
+_None yet. Claims that arrive by field report rather than through telemetry go
+here, one row each, with a verdict. Anything written between the two markers
+survives regeneration; anything outside them does not._
+
+${MANUAL_END}
+`);
 }
 
 lines.push(`
