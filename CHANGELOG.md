@@ -48,7 +48,11 @@ Everything above is unit-tested against fake clients only. The MCP instance conn
 - **`expectedHash` ranked as the most important guard.** Demoted. Exact-match-`count` already covers most of the stale-copy case it was proposed for: if the file has drifted, `old` will usually not match and the patch refuses. It remains worth adding, one tier down.
 
 ### Not adopted (untested)
-- **"HC3 restarts a scene to execute a timer callback, re-running it from the top."** Not reproduced here and not documented anywhere in this project. It is not load-bearing — strike it and the argument for patching scenes still stands on the other three grounds — so it is recorded rather than acted on, pending a one-variable `scripts/probe.mjs` run.
+- **"HC3 restarts a scene to execute a timer callback, re-running it from the top."** Not reproduced here and not documented anywhere in this project. It is not load-bearing — strike it and the argument for patching scenes still stands on the other three grounds — so it is recorded rather than acted on.
+
+  **`scripts/probe-scene-timer.mjs` now exists to settle it**, along with a `withScene` helper in `probe.mjs` (there was none, which is part of why this went untested). The single variable is the presence of the `setTimeout`; the control arm must score exactly one top-level execution or the run is inconclusive. The counter is sampled once before the timer is due and once after, so a second execution is tied to the callback rather than merely observed at the end. Both counters live in globals that are **created first**, because `fibaro.setGlobalVariable` silently no-ops on a global that does not exist (verified in 4.15.0) — skip that and every counter reads 0 and the probe looks like a clean refutation while measuring nothing. The debug log is read as an independent second witness.
+
+  Not yet run: it needs gateway credentials, which the environment this was written in does not have.
 - **Whether an external QuickApp *file* write restarts the QuickApp.** 4.15.0 verified this for *variable* writes. The file case is likely but has not been isolated here, so `patch_quickapp_file` does **not** report `restarted` in its response, as the report's suggested shape proposed. Its description says only what is known: batch multi-file changes into one `update_multiple_quickapp_files` call rather than N patches.
 
 ### Still outstanding from the report

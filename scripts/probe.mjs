@@ -87,6 +87,48 @@ export async function withIcon(fn, { category = 'room', deviceTemplate, base64, 
   }
 }
 
+/**
+ * Throwaway Lua scene, deleted in finally.
+ *
+ * Never probe a live scene. Scene 645 on this gateway opens irrigation valves;
+ * a probe that runs it does not just measure, it waters the garden. Build a
+ * throwaway that resembles it instead — and keep `fibaro.call` out of the body
+ * entirely, so a probe that misbehaves cannot reach a device.
+ *
+ * `restart` and `maxRunningInstances` are set explicitly rather than left to
+ * HC3's defaults: both plausibly affect how a scene behaves when it is
+ * re-entered, so a probe about re-entry must not let them vary silently.
+ */
+export async function withScene(fn, { actions = '', conditions = '{ conditions = {}, operator = "all" }', restart = true, maxRunningInstances = 1 } = {}) {
+  const hc3 = await client();
+  const sceneTools = (await tools('scenes')).handlers;
+  const rooms = await hc3.request('/api/rooms');
+  const roomId = rooms?.[0]?.id;
+  if (typeof roomId !== 'number') throw new Error('withScene: no room found to create a scene in.');
+
+  const created = await sceneTools.create_scene(hc3, {
+    name: `PROBE_${stamp()}`,
+    type: 'lua',
+    roomId,
+    restart,
+    maxRunningInstances,
+    content: { conditions, actions },
+  });
+  const sceneId = created.sceneId;
+  console.log(`  [probe] created scene ${sceneId} (restart=${restart}, maxRunningInstances=${maxRunningInstances})`);
+  try {
+    return await fn(sceneId, hc3, sceneTools);
+  } finally {
+    try {
+      try { await sceneTools.stop_scene(hc3, { sceneId }); } catch { /* not running */ }
+      await sceneTools.delete_scene(hc3, { sceneId });
+      console.log(`  [probe] deleted scene ${sceneId}`);
+    } catch (e) {
+      console.error(`  [probe] FAILED to delete scene ${sceneId}: ${e.message}`);
+    }
+  }
+}
+
 /** Throwaway global variable, deleted in finally. */
 export async function withGlobal(fn, { value = '0' } = {}) {
   const hc3 = await client();
