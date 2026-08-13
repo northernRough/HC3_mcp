@@ -2,6 +2,32 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.19.0] - 2026-08-13
+
+Acts on a five-item field report from the project that builds scenes and QuickApps through this server, run against 4.17.0 on 5.210.12. Every item was isolated by the reporter with a scratch QuickApp created and deleted for the purpose. Two were re-verified here before adoption; the rest were confirmed against this repo's own source.
+
+### Changed
+- **`call_ui_event` returns a receipt instead of nothing.** HC3's `callUIEvent` answers with an empty body: no acknowledgement, no echo, no indication that a callback was even bound to the element. That is the silent-success shape the rest of this server closes, and it matters more here than elsewhere because this is the tool reached for *as* a verification step — the reporter only knew their event had landed because they had planted a log line to catch it.
+
+  The tool now reads the device's `uiCallbacks` **before** dispatching and reports the matched entry as `boundCallback`. A null there warns that the event will likely go nowhere; it does not refuse, because HC3 may still route to a generic handler. A failed lookup is reported as `bindingLookupError` rather than being misreported as "unbound" — not knowing is not the same as knowing it is absent.
+
+- **`update_quickapp_file` and `update_multiple_quickapp_files` return hashes.** Both previously handed back HC3's PUT response, which carries `{name, isMain, isOpen}` and no content — so the push result could not serve as the verification and callers had to fetch again to byte-compare. Both tools *already* re-fetched every file to verify the write and then discarded what they read. They now return `bytes` and `contentHash` per file, comparable directly against `get_quickapp_file`'s `contentHash`. `update_quickapp_file` called without `content` reports `verified: false`, since nothing was compared.
+
+- **`modify_device` records the verified way to restore named `uiCallbacks`.** 4.15.0 verified that `create_quickapp` cannot keep them — HC3 rewrites a supplied `{name:"modeSelector", eventType:"onToggled", callback:"modeSelection"}` into `{onReleased, uimodeSelectorOnReleased}` at creation. The reporter has now tested the other half: writing the named array back through `modify_device` **sticks**, survives a later `update_multiple_quickapp_files` push with the `uiCallbacks` modified timestamp unchanged, and dispatches the named method with `{eventType, elementName, values, deviceId}`. The recommended fix is therefore confirmed end to end rather than merely advisable. The description now also says to read it back afterwards, because the read is cheap and the failure mode is silent.
+
+  **This resolves the conflict logged in FRICTION.md**: both records were true, and the create-time rewrite is the only place it happens.
+
+- **`call_ui_event` documents HC3's undocumented `UIEvent:` trace line.** HC3 emits a trace-level line tagged with the QuickApp, carrying the same event table, immediately before dispatch — so the UI event path can be confirmed from `get_debug_messages` with nothing instrumented in the QuickApp at all. **Re-verified here independently** and read-only, from the residue of the reporter's own probe: `UICBPROBE trace UIEvent: {"values":[],"deviceId":4950,"eventType":"onReleased","elementName":"modeSelector"}`.
+
+  The same log distinguishes the two callback styles, which is worth more than it looks: a named callback dispatches to its own method, while an auto-generated one appears as `onAction: {"actionName":"UIAction","args":["onReleased","<elementName>"]}`. Both shapes were visible side by side on this gateway.
+
+- `unit-ui-event.mjs` — 11 checks covering the binding lookup ordering, the no-refusal rule, the failed-lookup case, and that a write receipt's hash matches what a read would report.
+
+### Known gaps, not closed here
+The report's fifth item names two, and both are real. **There is no push tool**, so the verified routing rule — `fibaro.alert("push", …)` takes USER ids, `POST /api/mobile/push` takes mobile DEVICE ids, and the wrong kind fails silently at both ends — has nowhere to live, even though `get_ios_devices` already supplies half the ids. **There is no scene-variable tool**, so `fibaro.getSceneVariable`/`setSceneVariable`, the backbone of the restart-safe scheduler pattern, are unreachable from here.
+
+Neither is being guessed at. A push tool built on an unverified request body, or a scene-variable tool on an endpoint that might return 501 like the others in `KNOWN_DEAD_ENDPOINTS.md`, would be exactly the "plausible and wrong" shape this project keeps having to reverse. Both want their request and response shapes pinned against the live gateway first.
+
 ## [4.18.0] - 2026-08-13
 
 Acts on a field report asking for patch-based editing. The report's core diagnosis is right and is confirmed in the code: the write path expresses **replacements** rather than **changes**, so the cost of an edit is proportional to the size of the file rather than the size of the change, and above a certain size the write tools stop being usable at all. This release works through the whole of that report — patching, concurrency guards, partial reads, and the two validation asks — and records the corrections and the parts still untested rather than only what was adopted.

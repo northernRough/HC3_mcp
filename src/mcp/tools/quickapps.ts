@@ -612,9 +612,17 @@ export const quickapps: ToolModule = {
             `The write was silently altered or dropped.`
           );
         }
+        return {
+          deviceId,
+          fileName,
+          bytes: content.length,
+          contentHash: contentHash(after.content),
+          verified: true,
+          hc3Response: putResult ?? null,
+        };
       }
 
-      return putResult;
+      return { deviceId, fileName, verified: false, hc3Response: putResult ?? null };
     },
 
     async patch_quickapp_file(hc3, args: {
@@ -752,7 +760,20 @@ export const quickapps: ToolModule = {
         );
       }
 
-      return putResult;
+      // HC3's PUT answers with {name, isMain, isOpen} and no content, so the
+      // push result could not serve as the verification and callers had to
+      // fetch again to byte-compare. The verify above already fetched every
+      // file — hand back what it saw rather than discarding it.
+      return {
+        deviceId,
+        filesWritten: files.length,
+        files: files.map(f => {
+          const stored = storedByName.get(f.fileName) ?? '';
+          return { fileName: f.fileName, bytes: stored.length, contentHash: contentHash(stored) };
+        }),
+        verified: true,
+        hc3Response: putResult ?? null,
+      };
     },
 
     async delete_quickapp_file(hc3, args: { deviceId: number; fileName: string }): Promise<any> {

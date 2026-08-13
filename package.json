@@ -1,6 +1,6 @@
 {
   "name": "@northernrough/hc3-mcp-server",
-  "version": "4.18.0",
+  "version": "4.19.0",
   "description": "Standalone Model Context Protocol server for Fibaro Home Center 3. 130+ tools with read-modify-write + post-write-verify guards on every mutating endpoint, HTTP transport, Z-Wave diagnostics, an audit family for cross-surface drift detection, and a 24-module per-domain architecture. Originally based on jangabrielsson/HC3_mcp.",
   "license": "MIT",
   "author": {
@@ -61,7 +61,7 @@
     "watch": "tsc -watch -p ./",
     "prepublishOnly": "npm run compile",
     "lint": "eslint src --ext ts",
-    "test": "npm run compile && node scripts/test/unit-event-history-filters.mjs && node scripts/test/unit-hc3-time.mjs && node scripts/test/unit-get-scene.mjs && node scripts/test/unit-upload-icon.mjs && node scripts/test/unit-icon-paths.mjs && node scripts/test/unit-import-quickapp.mjs && node scripts/test/unit-resources.mjs && node scripts/test/unit-upload-icons.mjs && node scripts/test/unit-instructions.mjs && node scripts/test/unit-error-shape.mjs && node scripts/test/unit-friction.mjs && node scripts/test/unit-patch.mjs && node scripts/test/unit-scene-content.mjs && node scripts/test/unit-lua.mjs && node scripts/test/unit-excerpt.mjs && node scripts/test/unit-viewlayout.mjs",
+    "test": "npm run compile && node scripts/test/unit-event-history-filters.mjs && node scripts/test/unit-hc3-time.mjs && node scripts/test/unit-get-scene.mjs && node scripts/test/unit-upload-icon.mjs && node scripts/test/unit-icon-paths.mjs && node scripts/test/unit-import-quickapp.mjs && node scripts/test/unit-resources.mjs && node scripts/test/unit-upload-icons.mjs && node scripts/test/unit-instructions.mjs && node scripts/test/unit-error-shape.mjs && node scripts/test/unit-friction.mjs && node scripts/test/unit-patch.mjs && node scripts/test/unit-scene-content.mjs && node scripts/test/unit-lua.mjs && node scripts/test/unit-excerpt.mjs && node scripts/test/unit-viewlayout.mjs && node scripts/test/unit-ui-event.mjs",
     "dashboard": "npm run compile && node scripts/dashboard.mjs",
     "triage": "npm run compile && node scripts/friction-triage.mjs"
   },

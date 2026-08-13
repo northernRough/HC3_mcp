@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-08-13 16:15 UTC from 7 entries at `/var/lib/hc3-mcp/friction.jsonl`._
+_Generated 2026-08-13 17:36 UTC from 12 entries at `/var/lib/hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -27,7 +27,7 @@ cheapest wins available.
 
 | Verdict | Count | Tool | Last | Message |
 |---|---|---|---|---|
-| untested | 7 | `upload_icon` | 0d ago | upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g.  |
+| untested | 12 | `upload_icon` | 0d ago | upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g.  |
 
 
 ## Submitted findings — 0
@@ -94,11 +94,14 @@ tested. Some items predate MCP improvements that have since landed.
 | **untested** | FGS-2x3: params 10/15 are operating mode (0 disables); time params 12/17 at 0 mean 0.1s, not disabled | Check the device manual first — that is free. |
 | **untested** | FGR223 unresponsive-but-confirmed means lost calibration after a power cut; HC3 reports stale position | |
 
-#### Conflict to resolve
+#### Resolved
 
-| Verdict | Claim | Conflict |
+| Verdict | Claim | Resolution |
 |---|---|---|
-| **untested, conflicting** | Named `uiCallbacks` dispatch as `method(self, event)` with `{eventType, elementName, values, deviceId}` | This repo **verified the opposite at creation time** (4.15.0): a supplied `{name:"modeSelector", eventType:"onToggled", callback:"modeSelection"}` comes back as `{eventType:"onReleased", callback:"uimodeSelectorOnReleased"}` — named callbacks are discarded. Both can hold if the rewrite happens only on create and a later edit sticks. One probe settles it, and until it does the two records contradict each other. |
+| **confirmed** | Named `uiCallbacks` dispatch as `method(self, event)` with `{eventType, elementName, values, deviceId}` | **Resolved 13 Aug 2026 — both records were true.** HC3 rewrites named callbacks *at creation only*. Writing the named array back with `modify_device` afterwards sticks, survives a later `update_multiple_quickapp_files` push (modified timestamp unchanged), and dispatches the named method. Isolated by the reporting project on scratch QA 4950. The dispatch was re-verified here read-only from the `UIEvent:` trace line that probe left behind. |
+| **confirmed** | HC3 emits an undocumented trace-level `UIEvent:` line carrying the event table, immediately before dispatch | Re-verified here independently and read-only: `UICBPROBE trace UIEvent: {"values":[],"deviceId":4950,...}`. Means the UI event path can be confirmed without instrumenting the QuickApp. Now in the `call_ui_event` description. |
+| **confirmed** | `call_ui_event` returns nothing — no ack, no echo, no indication a callback was bound | Confirmed in this repo's own source. Fixed in 4.19.0: the tool now reports the matched `uiCallbacks` entry and warns when there is none. |
+| **confirmed** | `update_multiple_quickapp_files` returns only `{name, isMain, isOpen}`, so the push result cannot serve as verification | Confirmed in source. Fixed in 4.19.0 — both file-write tools now return `bytes` + `contentHash`, taken from the verify fetch they were already doing and discarding. |
 
 #### Agreed, no test needed — design and practice
 

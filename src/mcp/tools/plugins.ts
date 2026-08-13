@@ -102,7 +102,7 @@ export const plugins: ToolModule = {
       },
       {
         name: "call_ui_event",
-        description: "Trigger UI events on plugin interface elements (buttons, sliders, switches, etc.).",
+        description: "Trigger a UI event on a QuickApp interface element (button, slider, switch, select, …), as though a user had touched it.\n\n**HC3's endpoint returns nothing** — no acknowledgement, no echo, no indication that a callback was even bound to that element. That is the silent-success shape this server exists to close, and it matters more here than elsewhere because this is the tool people reach for *as* a verification step. So before dispatching, this tool reads the device's `uiCallbacks` and reports what the element is bound to as `boundCallback`. A null there means HC3 has no binding for that (elementName, eventType) pair, and the event will very likely go nowhere — it is reported, not refused, because HC3 may still route it to a generic handler.\n\n**Confirming it actually ran, without instrumenting the QuickApp.** HC3 emits an undocumented trace-level line tagged with the QA, `UIEvent: {\"values\":[…],\"deviceId\":N,\"eventType\":\"…\",\"elementName\":\"…\"}`, immediately before dispatch. Verified on 5.210.12. Call get_debug_messages(type=\"trace\") after this and look for it — that confirms the UI event path end to end with no log line planted in the QuickApp.\n\nThe log also reveals which callback style a QA uses: a named callback dispatches to its own method, while an auto-generated one shows as `onAction: {\"actionName\":\"UIAction\",\"args\":[\"onReleased\",\"<elementName>\"]}`.",
         inputSchema: {
           type: "object",
           properties: {
@@ -354,12 +354,47 @@ export const plugins: ToolModule = {
     }): Promise<any> {
       const { deviceId, elementName, eventType, value } = args;
 
+      // Look up the binding BEFORE dispatching. HC3's endpoint returns an
+      // empty body, so without this the caller cannot tell a delivered event
+      // from one that fell on the floor — and this is the tool most often
+      // reached for as a verification step.
+      let boundCallback: any = null;
+      let bindingLookupError: string | undefined;
+      try {
+        const device: any = await hc3.request(`/api/devices/${deviceId}`);
+        const callbacks: any[] = Array.isArray(device?.properties?.uiCallbacks)
+          ? device.properties.uiCallbacks
+          : [];
+        boundCallback = callbacks.find(
+          c => c?.name === elementName && c?.eventType === eventType
+        ) ?? null;
+      } catch (e: any) {
+        bindingLookupError = e?.message ?? String(e);
+      }
+
       let url = `/api/plugins/callUIEvent?deviceID=${deviceId}&elementName=${encodeURIComponent(elementName)}&eventType=${encodeURIComponent(eventType)}`;
       if (value) {
         url += `&value=${encodeURIComponent(value)}`;
       }
 
-      return await hc3.request(url, 'GET');
+      const raw = await hc3.request(url, 'GET');
+
+      return {
+        dispatched: { deviceId, elementName, eventType, ...(value !== undefined ? { value } : {}) },
+        boundCallback,
+        ...(boundCallback === null && !bindingLookupError
+          ? {
+              warning:
+                `No uiCallbacks entry binds '${elementName}' to '${eventType}' on device ${deviceId}. ` +
+                `HC3 accepts the call regardless and returns nothing, so this event may have gone nowhere. ` +
+                `Check the element name and eventType against get_device_info properties.uiCallbacks.`,
+            }
+          : {}),
+        ...(bindingLookupError ? { bindingLookupError } : {}),
+        confirmWith:
+          `get_debug_messages(type="trace") — HC3 logs "UIEvent: {...}" immediately before dispatch.`,
+        hc3Response: raw ?? null,
+      };
     },
 
     async create_child_device(hc3, args: {
