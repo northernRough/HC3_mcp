@@ -128,16 +128,14 @@ jobs:
         run: |
           RESP=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org")
-          echo "$RESP" | python3 -c '
-import sys, json, base64
-tok = json.load(sys.stdin).get("value", "")
-if not tok:
-    print("no OIDC token returned"); raise SystemExit(0)
-p = tok.split(".")[1]; p += "=" * (-len(p) % 4)
-c = json.loads(base64.urlsafe_b64decode(p))
-for k in ("repository", "repository_owner", "job_workflow_ref", "workflow_ref", "ref", "event_name", "aud"):
-    print(f"  {k}: {c.get(k)}")
-'
+          echo "$RESP" | python3 -c 'import sys, json, base64
+          tok = json.load(sys.stdin).get("value", "")
+          if not tok:
+              print("no OIDC token returned"); raise SystemExit(0)
+          p = tok.split(".")[1]; p += "=" * (-len(p) % 4)
+          c = json.loads(base64.urlsafe_b64decode(p))
+          for k in ("repository", "repository_owner", "job_workflow_ref", "workflow_ref", "ref", "event_name", "aud"):
+              print("  {}: {}".format(k, c.get(k)))'
 
       # No NODE_AUTH_TOKEN: npm detects the OIDC environment on its own.
       # Provenance attestations are generated automatically on this path, so
