@@ -274,7 +274,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "get_quickapp_variable",
-        description: "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.",
+        description: "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.\n\nNote for the Lua you write against it: inside the QuickApp, `self:getVariable(name)` returns \"\" for a variable that does not exist AND for one deliberately set to \"\", with no way to tell them apart — HC3 logs `Variable <name> not found`, which your code cannot see. This tool CAN tell them apart, which is one reason to check configuration from here rather than inferring it from QuickApp logs.",
         inputSchema: {
           type: "object",
           properties: {
@@ -428,7 +428,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "create_quickapp",
-        description: "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.",
+        description: "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.\n\n**Before writing the Lua, call get_hc3_quickapp_programming_guide({topic:\"gotchas\"}).** It carries the platform behaviours that silently break QuickApps written by competent Lua developers: coroutines are unavailable (so the common `coroutine.yield` HTTP wrapper cannot work), `quickApp` reports as `userdata` with a null-type tostring while being fully usable so it must never be tested with `== nil`, `getVariable` cannot distinguish missing from empty, and `createChildDevice` takes `initialProperties`/`initialInterfaces` with the class as its second argument rather than the flat shape most examples show.",
         inputSchema: {
           type: "object",
           properties: {

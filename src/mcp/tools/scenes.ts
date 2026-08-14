@@ -125,7 +125,7 @@ export const scenes: ToolModule = {
       },
       {
         name: 'modify_scene',
-        description: 'Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.',
+        description: 'Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.\n\n**`restart` is the concurrency control.** A scene runs one instance at a time; `restart: true` means an incoming trigger kills the running instance, `false` means the running instance is protected and the trigger is dropped. **`maxRunningInstances` is vestigial** — an HC2 leftover that reads a constant 2 on every scene and is not exposed in the HC3 UI. It is accepted here because HC3 accepts it, but writing it does nothing; do not design around it.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -158,7 +158,7 @@ export const scenes: ToolModule = {
       },
       {
         name: 'create_scene',
-        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics).',
+        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:"execution_model"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -191,7 +191,7 @@ export const scenes: ToolModule = {
       },
       {
         name: 'update_scene_content',
-        description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.',
+        description: 'Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.\n\nWriting scene Lua from scratch or reworking control flow? get_hc3_lua_scenes_guide({topic:"execution_model"}) first — one instance governed by `restart`, and a firing `fibaro.setTimeout` does not restart the scene or lose its closure, which is the opposite of what most forum advice says.',
         inputSchema: {
           type: 'object',
           properties: {

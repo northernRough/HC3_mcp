@@ -2,8 +2,396 @@
 // response remains byte-identical. Do not reflow whitespace.
 
 export const examples = {
-      overview: 'Practical HC3 programming examples and code snippets for common home automation scenarios.',
-      
+      overview: 'Practical HC3 examples. The "patterns" category holds self-contained, gateway-tested building blocks for scenes and QuickApps; the rest are scenario snippets by domain.',
+
+      patterns: {
+        title: 'Reusable components for scenes and QuickApps',
+        content: `
+## Scene: trigger parsing and manual-run guard
+
+\`\`\`lua
+local function getSourceTrigger()
+  local t = sourceTrigger          -- provided as a global, no declaration needed
+  if type(t) ~= "table" then return { type = "unknown" } end
+  return t
+end
+
+local function isManualRun(trigger)
+  -- Both halves matter: type=="user" alone catches other user-originated triggers.
+  return trigger.type == "user" and trigger.property == "execute"
+end
+
+local trigger = getSourceTrigger()
+if isManualRun(trigger) then
+  fibaro.debug("SCENE", "Manual run: inspect only, no actions.")
+  return
+end
+\`\`\`
+
+A manual run must not wipe state that live control depends on. If the state table
+records what the automation last commanded, clearing it strands devices where they
+are, because the code that would move them back is guarded by that record.
+
+## Scene: scene-variable state store with safe init
+
+\`\`\`lua
+local function svGet(name, default)
+  local v = fibaro.getSceneVariable(name)
+  if v == nil or v == "" then return default end
+  return v
+end
+
+local function svSet(name, value)
+  fibaro.setSceneVariable(name, tostring(value))   -- values are strings
+end
+
+local function svGetNumber(name, default)
+  local v = svGet(name, nil)
+  return v and (tonumber(v) or default) or default
+end
+
+local function svGetBool(name, default)
+  local v = svGet(name, nil)
+  if v == nil then return default end
+  if v == true  or v == "true"  or v == "1" then return true end
+  if v == false or v == "false" or v == "0" then return false end
+  return default
+end
+
+local function svInitIfMissing(name, default)
+  local v = fibaro.getSceneVariable(name)
+  if v == nil or v == "" then svSet(name, default); return default end
+  return v
+end
+
+local function checkSceneVariables()
+  svInitIfMissing("cursor", "0")
+  svInitIfMissing("lastRunEpoch", "0")
+  svInitIfMissing("scheduledJson", "[]")
+end
+\`\`\`
+
+Scene variables are reported to have no REST API, so nothing outside the scene can
+read or repair them. State you will one day need to inspect belongs in a QuickApp
+using \`quickAppVariables\`.
+
+## Scene: structured logging with room names
+
+\`\`\`lua
+local LOG_TAG = "AWNING"
+
+local function getRoomNameByDeviceID(deviceID)
+  local ok, dev = pcall(api.get, "/devices/" .. tostring(deviceID))
+  if not ok or type(dev) ~= "table" then return "Unknown room" end
+  if dev.roomID then
+    local ok2, room = pcall(api.get, "/rooms/" .. tostring(dev.roomID))
+    if ok2 and type(room) == "table" and room.name then return room.name end
+  end
+  return "No room"
+end
+
+local function log(level, msg)
+  local fn = fibaro.debug
+  if level == "WARN"  then fn = fibaro.warning end
+  if level == "ERROR" then fn = fibaro.error end
+  fn(LOG_TAG, msg)
+end
+
+local function logDevice(level, deviceID, msg)
+  log(level, string.format("[d:%s | %s] %s", tostring(deviceID),
+      getRoomNameByDeviceID(deviceID), msg))
+end
+\`\`\`
+
+Room names in log lines are not cosmetic: they change behaviour, because you
+troubleshoot faster and stop making wrong assumptions. The lookup costs two API
+calls, so cache it in a local table inside a device loop.
+
+## Scene: restart-safe scheduler
+
+Use this for DURABILITY, not because of the timer model. A plain
+\`fibaro.setTimeout\` survives its own callback with its closure intact (see
+get_hc3_lua_scenes_guide, execution_model). This pattern earns its place when the
+delay is long enough that a reboot, an engine restart, a scene edit or a
+\`restart = true\` trigger could land inside it.
+
+\`\`\`lua
+local SCHED_VAR = "scheduledJson"
+
+local function schedLoad()
+  local ok, t = pcall(json.decode, svGet(SCHED_VAR, "[]"))
+  return (ok and type(t) == "table") and t or {}
+end
+
+local function schedSave(jobs)
+  local ok, s = pcall(json.encode, jobs)
+  svSet(SCHED_VAR, (ok and s) or "[]")
+end
+
+local function schedAdd(jobType, runAtEpoch, payload)
+  local jobs = schedLoad()
+  jobs[#jobs + 1] = {
+    type = jobType, runAt = tonumber(runAtEpoch), payload = payload or {},
+    id = tostring(os.time()) .. "-" .. tostring(math.random(1000, 9999))
+  }
+  schedSave(jobs)
+end
+
+local function schedCancelByType(jobType)
+  local kept = {}
+  for _, j in ipairs(schedLoad()) do
+    if j.type ~= jobType then kept[#kept + 1] = j end
+  end
+  schedSave(kept)
+end
+
+-- handlerFn(job) returns true when the job is consumed
+local function schedDrain(handlerFn)
+  local now, due, kept = os.time(), {}, {}
+  for _, j in ipairs(schedLoad()) do
+    if tonumber(j.runAt) and tonumber(j.runAt) <= now then due[#due + 1] = j
+    else kept[#kept + 1] = j end
+  end
+  for _, j in ipairs(due) do
+    local ok, consumed = pcall(handlerFn, j)
+    if not ok or consumed ~= true then kept[#kept + 1] = j end  -- retry next run
+  end
+  schedSave(kept)
+end
+\`\`\`
+
+Jobs drain on any scene run. To drain when nothing else triggers the scene, add a
+periodic condition using \`matchInterval\` (see the scenes guide).
+
+## Scene: window gating with a force override
+
+\`\`\`lua
+local function minutesSinceMidnight()
+  local t = os.date("*t")
+  return (t.hour * 60) + t.min
+end
+
+local function isWithinWindow(now, startM, endM)
+  if startM <= endM then return now >= startM and now < endM end
+  return now >= startM or now < endM              -- wraps midnight
+end
+
+local function shouldResetOutsideWindow(forceResetOutsideWindow, withinWindow)
+  if withinWindow then return true end
+  return forceResetOutsideWindow == true          -- default: do NOT reset outside
+end
+\`\`\`
+
+Name boolean flags so the default is the safe behaviour and \`true\` reads as an
+intentional override.
+
+## Scene: cache an expensive daily computation
+
+\`\`\`lua
+local function cachedDaily(varName, computeFn)
+  local raw = svGet(varName, nil)
+  if raw then
+    local ok, t = pcall(json.decode, raw)
+    if ok and type(t) == "table" and t.date == os.date("%Y-%m-%d") then
+      return t.value
+    end
+  end
+  local value = computeFn()
+  svSet(varName, json.encode({ date = os.date("%Y-%m-%d"), value = value }))
+  return value
+end
+\`\`\`
+
+A per-minute walk of the day to find sun-angle windows is thousands of
+trigonometric iterations for an answer that moves about a minute per day.
+
+## QuickApp: polling loop with backoff and jitter
+
+\`\`\`lua
+function QuickApp:initPoller()
+  self._poll = { baseIntervalMs = 10000, maxIntervalMs = 300000,
+                 currentMs = 10000, failures = 0, timer = nil }
+end
+
+function QuickApp:scheduleNextPoll()
+  if not self._poll then self:initPoller() end
+  if self._poll.timer then clearTimeout(self._poll.timer) end
+  self._poll.timer = setTimeout(function() self:pollOnce() end,
+                                self._poll.currentMs + math.random(0, 500))
+end
+
+function QuickApp:pollOk()
+  self._poll.failures, self._poll.currentMs = 0, self._poll.baseIntervalMs
+end
+
+function QuickApp:pollFail()
+  self._poll.failures = self._poll.failures + 1
+  self._poll.currentMs = math.min(
+    self._poll.baseIntervalMs * (2 ^ math.min(self._poll.failures, 6)),
+    self._poll.maxIntervalMs)
+end
+
+function QuickApp:pollOnce()
+  -- The HTTP call is async, so ok/fail arrive from the callback, not a pcall.
+  self:fetchAndUpdate(function(ok, err)
+    if ok then self:pollOk() else self:error("Poll error: " .. tostring(err)); self:pollFail() end
+    self:scheduleNextPoll()
+  end)
+end
+\`\`\`
+
+Note the bare \`setTimeout\` is callback-first while \`fibaro.setTimeout\` is
+delay-first, in QuickApps as well as scenes.
+
+## QuickApp: HTTP wrapper, callback based
+
+Coroutines are not available on HC3, so any wrapper that suspends on
+\`coroutine.yield\` to fake a synchronous call does not work here. Reuse one client
+rather than constructing one per request.
+
+\`\`\`lua
+function QuickApp:initHttp(timeoutMs)
+  self._http = net.HTTPClient({ timeout = timeoutMs or 10000 })
+end
+
+-- cb(ok, resultOrError, status)
+function QuickApp:httpJson(method, url, headers, body, cb)
+  if not self._http then self:initHttp() end
+  self._http:request(url, {
+    options = { method = method, headers = headers or {}, data = body },
+    success = function(resp)
+      if resp.status < 200 or resp.status >= 300 then
+        cb(false, "HTTP " .. tostring(resp.status) .. ": " .. tostring(resp.data), resp.status)
+        return
+      end
+      local ok, obj = pcall(json.decode, resp.data)
+      if not ok then cb(false, "JSON decode failed: " .. tostring(resp.data), resp.status); return end
+      cb(true, obj, resp.status)
+    end,
+    error = function(message) cb(false, tostring(message), nil) end
+  })
+end
+\`\`\`
+
+## QuickApp: child device factory
+
+\`initChildDevices\` first, or every restart creates duplicates. The class is the
+SECOND argument to \`createChildDevice\`, and HC3 assigns the id, so the map from
+your logical name to that id has to be persisted.
+
+\`\`\`lua
+local CHILD_MAP_VAR = "childMap"
+
+function QuickApp:loadChildMap()
+  local raw = self:getVariable(CHILD_MAP_VAR)
+  if raw == "" then return {} end
+  if type(raw) == "table" then return raw end
+  local ok, t = pcall(json.decode, raw)
+  return (ok and type(t) == "table") and t or {}
+end
+
+function QuickApp:saveChildMap(map) self:setVariable(CHILD_MAP_VAR, json.encode(map)) end
+
+function QuickApp:ensureChild(idSuffix, name, typeName, unit)
+  local map = self:loadChildMap()
+  local existing = map[idSuffix]
+  if existing and self.childDevices[existing] then return self.childDevices[existing] end
+
+  local child = self:createChildDevice({
+    name = name,
+    type = typeName,                         -- e.g. "com.fibaro.powerMeter"
+    initialProperties = {
+      quickAppVariables = { { name = "metricKey", value = idSuffix } },
+      unit = unit
+    },
+    initialInterfaces = {}
+  }, BaseMeterChild)                         -- the class, as the second argument
+
+  map[idSuffix] = child.id
+  self:saveChildMap(map)
+  return child
+end
+
+function QuickApp:onInit()
+  self:initChildDevices({ ["com.fibaro.powerMeter"] = BaseMeterChild })
+  self:initPoller(); self:initHttp(); self:initAverages()
+  self.live = self:ensureChild("solar_live", "Solar Live (W)", "com.fibaro.powerMeter", "W")
+  self:startPolling()
+end
+\`\`\`
+
+## QuickApp: rolling average
+
+\`\`\`lua
+local function makeEma(alpha)
+  alpha = math.max(0, math.min(alpha or 0.2, 1))    -- higher reacts faster
+  return {
+    alpha = alpha, value = nil,
+    update = function(self, x)
+      if x == nil then return self.value end
+      self.value = (self.value == nil) and x
+                   or (self.alpha * x) + ((1 - self.alpha) * self.value)
+      return self.value
+    end
+  }
+end
+
+function QuickApp:initAverages()
+  self.avg = { fast = makeEma(0.35), slow = makeEma(0.08) }
+end
+\`\`\`
+
+An EMA held in a table field is lost on restart, and an external variable write
+causes a restart. Persist the values to \`quickAppVariables\` and seed them back in
+\`initAverages\` if the smoothing matters across restarts.
+
+Promoting derived metrics (fast and slow averages) to child devices rather than
+numbers inside one QuickApp makes history graphs usable and lets other scenes
+consume them as if they were sensors.
+
+## Position equality is not an override test
+
+\`\`\`lua
+local function movedByHand(commanded, reported, tolerance)
+  return math.abs((reported or 0) - (commanded or 0)) > (tolerance or 3)
+end
+\`\`\`
+
+Comparing a commanded position against a reported one with \`==\` latches a false
+manual-override the first time a roller shutter reports 82 where you commanded 83.
+Z-Wave position reporting drifts, particularly after a power cut has cost a shutter
+its calibration.
+
+## A default scene skeleton
+
+\`\`\`lua
+checkSceneVariables()
+
+local trigger = getSourceTrigger()
+if isManualRun(trigger) then
+  log("INFO", "Manual run: draining scheduler only, no control actions")
+  schedDrain(handleScheduledJob)
+  return
+end
+
+schedDrain(handleScheduledJob)                      -- due jobs first
+
+if trigger.type == "device" and trigger.property == "value" then
+  local deviceID = tonumber(trigger.id)
+  local v = trigger.value
+  if deviceID and (v == true or v == "true" or v == 1 or v == "1") then
+    schedAdd("AUTO_OFF", os.time() + 120, { deviceID = deviceID })
+  end
+end
+\`\`\`
+
+Persist state as soon as an action has been taken, not at the end of the body.
+With \`restart = true\` a new trigger kills the instance mid-run, and anything held
+in memory but not yet written is lost while the physical action has already
+happened.
+`
+      },
+
       lighting: {
         title: 'Lighting Control Examples',
         examples: [

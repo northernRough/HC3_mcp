@@ -82,11 +82,6 @@ tested. Some items predate MCP improvements that have since landed.
 
 | Verdict | Claim | Note |
 |---|---|---|
-| **untested** | HC3 holds the timer, not the scene instance; the instance may exit with a timer pending | The reporting project's own provenance note says this was never deliberately tested. See "scene timer model" below. |
-| **untested** | When a timer fires, HC3 restarts the scene; the callback runs in a fresh instance | `scripts/probe-scene-timer.mjs` exists to settle it. |
-| **untested** | Closure captures are gone in the callback; `if token == savedToken` fails silently | The **strongest evidence offered**, and the better thing to measure — see below. |
-| **untested** | `quickApp` global is unassigned until after `onInit` returns | Cheap to probe. |
-| **untested** | `getVariable` returns `""` not nil for a missing variable | Cheap to probe; a classic nil-check bug source. |
 | **untested** | Multi-select delivers the selection nested one level: `{values={{"id1","id2"}}}` | |
 | **untested** | Manual run detection: `trigger.type == "user" and trigger.property == "execute"` | |
 | **untested** | Cron needs `matchInterval`; plain `match` with a 6-element array "does not fire reliably" | A reliability claim needs repetition, not one observation. |
@@ -102,6 +97,31 @@ tested. Some items predate MCP improvements that have since landed.
 | **confirmed** | HC3 emits an undocumented trace-level `UIEvent:` line carrying the event table, immediately before dispatch | Re-verified here independently and read-only: `UICBPROBE trace UIEvent: {"values":[],"deviceId":4950,...}`. Means the UI event path can be confirmed without instrumenting the QuickApp. Now in the `call_ui_event` description. |
 | **confirmed** | `call_ui_event` returns nothing — no ack, no echo, no indication a callback was bound | Confirmed in this repo's own source. Fixed in 4.19.0: the tool now reports the matched `uiCallbacks` entry and warns when there is none. |
 | **confirmed** | `update_multiple_quickapp_files` returns only `{name, isMain, isOpen}`, so the push result cannot serve as verification | Confirmed in source. Fixed in 4.19.0 — both file-write tools now return `bytes` + `contentHash`, taken from the verify fetch they were already doing and discarding. |
+
+#### Settled by the reporter's own testing, 14 Aug 2026
+
+Three documents arrived from the same project (`hc3-scene-execution-model.md`,
+`Useful_learnings.md`, `Some_useful_code_samples.md`), carrying results rather
+than claims. **The reporter tested the timer model themselves and refuted their
+own earlier report**, which is the single most useful thing anyone has sent this
+project. `scripts/probe-scene-timer.mjs` was then run here against a second
+gateway and agreed on every arm, which is why the timer finding is now stated in
+the server instructions rather than only in a guide. All six throwaway objects
+(three scenes, three globals) were torn down by the probe's `finally`.
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **refuted** | When a scene timer fires, HC3 restarts the scene and the callback runs in a fresh instance | **Now tested twice, on two gateways, by two people.** Field report: two scratch scenes, 5.210.12, three identical runs, a top-of-scene counter reading **1, not 2**. Re-run here 14 Aug 2026 with `scripts/probe-scene-timer.mjs` on scratch scenes 794/795: the no-timer control arm scored `tops=1`, the timer arm also scored `tops=1` with `callbacks=1`. The instance stays alive and services its own callback. |
+| **refuted** | Closure captures are gone in the callback, so `if token == savedToken` fails silently | Same field runs, and re-run here on scratch scene 796: the callback saw `INSTANCE-1`, the value captured by the run that armed it — not nil, and not a later instance's value. That third outcome mattered, because it is the one that produces the reported symptom while looking like closure loss; it did not occur. The closure-free workaround is unnecessary. |
+| **refuted (as stated)** | HC3 holds the timer, not the instance, so the instance may exit with a timer pending | The instance does not exit. What destroys a pending timer is anything that destroys the instance: reboot, saving or editing the scene, engine restart, or a new trigger arriving while `restart = true`. |
+| **confirmed** | `quickApp` is unassigned until `onInit` returns | And worse than reported: it reports `type` `userdata` with a `tostring` of `custom [luabind::detail::null_type] object: (nil)` **while being fully usable** — `quickApp:debug` worked at 0 ms, 1 s and 5 s. So `if quickApp == nil` and any `tostring` test both lie. Now in the QuickApp guide. |
+| **confirmed** | `getVariable` returns `""` rather than nil for a missing variable | And a missing variable is byte-identical to one deliberately set to `""`. The only signal is an HC3 log warning `Variable <name> not found`, which the Lua cannot see. Now in the guide and on `get_quickapp_variable`. |
+| **confirmed** | Manual run detection is `type == "user"` **and** `property == "execute"` | Both halves. Previously confirmed here read-only from a production scene's conditions block; now independently stated by the reporter too. |
+| **untested** | Scene variables have no REST API | Attributed to jgab (forum topic 79129), not tested here or by the reporter. Carried in the scenes guide **labelled as attributed**, because if true it decides where state belongs — and it decides whether the "no scene-variable tool" gap below is closable at all. |
+| **untested** | Coroutines are not available on HC3 | Attributed to jgab's QuickApps series. Included in the QuickApp guide because the failure mode is a whole class of copied `coroutine.yield` HTTP wrappers, and the cost of heeding it wrongly is nil. Worth an isolation test. |
+
+Consequence for the roadmap: the scene-variable tool listed as a gap below may be
+**unbuildable rather than unbuilt**. Settle the REST claim before promising it.
 
 #### The telemetry table above, read correctly — 13 Aug 2026
 
@@ -138,10 +158,13 @@ Also agreed as sound design rather than gateway facts: closure-free callbacks as
 
 Out of scope for this repo, not wrong: RoomManager 4742 as the control point, `config.lua` as canonical id source, the first-touch rule. Those are that project's conventions, not HC3 behaviour.
 
-### The scene timer model — how to settle it
+### The scene timer model — settled 14 Aug 2026
 
-The three timer claims are one mechanism, and the reporting project is right that
-it has never been proved. `scripts/probe-scene-timer.mjs` tests it two ways:
+**Answer: the instance survives, the top does not re-run, and closures live.**
+The three timer claims were one mechanism, and the reporting project settled it
+on their own gateway before this probe was ever run. Kept below because the
+method is what makes the answer trustworthy, and because a future firmware may
+need it re-run. `scripts/probe-scene-timer.mjs` tests it two ways:
 
 1. **Restart counting.** Two arms of the same scene body differing only in
    whether a `setTimeout` is armed; the top-level counter is sampled once
@@ -162,6 +185,8 @@ re-running the top produces the same symptom.
 
 - No push-sending tool, so the verified push routing rules have nowhere to live.
 - No scene-variable tool, despite "scene variables beat globals" being sound.
+  **May be unbuildable**: scene variables are reported to have no REST API at all
+  (jgab, forum topic 79129), untested here. Settle that before promising the tool.
 - ~~`update_quickapp_file` still echoes HC3's PUT response~~ — **closed in
   4.19.0**, which is recorded four rows up in this same file: both file-write
   tools return `bytes` + `contentHash`, taken from the verify fetch they were

@@ -2,8 +2,129 @@
 // response remains byte-identical. Do not reflow whitespace.
 
 export const programmingGuide = {
-      overview: 'Comprehensive HC3 Quick Apps programming documentation covering Lua development, networking, and device integration.',
-      
+      overview: 'HC3 Quick Apps: Lua development, networking and device integration. Read gotchas first — it holds the platform behaviours that are not guessable from the language and that Fibaro\'s documentation either omits or gets wrong.',
+
+      gotchas: {
+        title: 'QuickApp gotchas — platform behaviour, not language behaviour',
+        content: `
+## Read this first
+
+Every item here was observed on a live gateway (firmware 5.2x) or is a
+correction to widely circulated advice. They are all things an experienced Lua
+developer gets wrong, because they are platform behaviour rather than language
+behaviour.
+
+## The \`quickApp\` global lies about itself
+
+It is unassigned during \`onInit\` and assigned before any timer callback runs,
+including at 0 ms. That much is documented. What is not documented: probed on a
+scratch QuickApp, firmware 5.210.12, the variable reports \`type\` of \`userdata\`
+with a \`tostring\` of \`custom [luabind::detail::null_type] object: (nil)\` while
+being **fully usable** — \`quickApp:debug\` worked at 0 ms, 1 s and 5 s.
+
+So never test it with \`if quickApp == nil\` or via \`tostring\`: both lie. Inside
+the class, use \`self\`.
+
+## \`getVariable\` cannot tell you a variable is missing
+
+It returns \`""\` for a variable that does not exist. It also returns \`""\` for one
+deliberately set to \`""\`. The two are byte-identical and indistinguishable in
+Lua. The only signal is that HC3 logs a warning \`Variable <name> not found\`,
+which your code cannot see.
+
+\`\`\`lua
+local token = self:getVariable("TOKEN")
+if token == "" then                 -- missing OR deliberately empty; you cannot tell
+  self:error("TOKEN not set")
+  return
+end
+\`\`\`
+
+If the distinction matters, encode it: store a sentinel, or keep a separate
+"configured" flag.
+
+## Coroutines are not available
+
+HC3's Lua does not give you working coroutines. Take this seriously when reading
+any HTTP wrapper that suspends on \`coroutine.yield\` to make an async call look
+synchronous — a very common shape in copied code. It does not work here.
+\`net.HTTPClient\` is callback-based and everything around it has to be too.
+
+## Writing a QuickApp variable from outside restarts the QuickApp
+
+Once per call. Creating eight variables externally restarts it eight times
+(verified: bounced within 4 s). Two consequences:
+
+- Create every variable you need BEFORE any other call that also restarts, or a
+  write issued after a restarting call may never run.
+- Batch file changes with update_multiple_quickapp_files, which restarts once,
+  rather than N single-file writes.
+
+## Child devices: the API is not what most examples show
+
+Children are created with \`initialProperties\` and \`initialInterfaces\`, with the
+class passed as the SECOND argument. There is no caller-supplied \`id\` field and
+no flat \`properties\` table. HC3 assigns the child's device id, and
+\`self.childDevices\` is keyed by that assigned numeric id — so a logical name has
+to be mapped to it explicitly, and that map has to be persisted.
+
+\`initChildDevices\` restores existing children on every restart. **Call it before
+creating anything**, or every start creates duplicates.
+
+\`\`\`lua
+class 'BaseMeterChild' (QuickAppChild)
+
+function BaseMeterChild:__init(device)
+  QuickAppChild.__init(self, device)   -- no code before this line
+  self.metricKey = self:getVariable("metricKey")
+end
+\`\`\`
+
+Keep the suffix-to-id map in a \`quickAppVariable\` so it survives restarts and can
+be inspected over REST. See get_hc3_programming_examples({category:"patterns"})
+for the full factory.
+
+## Timer argument order depends on the function, not the container
+
+\`\`\`lua
+fibaro.setTimeout(delayMs, callback)   -- delay first, in QuickApps too
+setTimeout(callback, delayMs)          -- bare form, callback first
+\`\`\`
+
+The "QuickApps are callback-first" rule is false as stated: it is true of the
+bare form and wrong for every \`fibaro.setTimeout\` call.
+
+## In-memory state does not survive a restart
+
+A rolling average, a debounce counter or a cache held in \`self\` is gone whenever
+the QuickApp restarts — and an external variable write restarts it. If the value
+matters across restarts, persist it to \`quickAppVariables\` and seed it back in
+\`onInit\`.
+
+## Exclude children when scanning the device fleet
+
+Any discovery, audit or dead-device watchdog logic must filter with
+\`not d.parentId\`. Without it you detect things you do not manage, spam the log,
+and act on the wrong objects. find_devices_by_name already filters this way.
+
+## Notification routing takes two different kinds of id
+
+\`\`\`lua
+fibaro.alert("push", { userId }, msg)          -- USER ids
+api.post("/mobile/push", {
+  title = "Title", message = msg,
+  mobileDevices = { mobileDeviceId },          -- iOS DEVICE ids
+  category = "YES_NO"
+})
+\`\`\`
+
+Passing the wrong kind fails silently. \`category = "STANDARD"\` returns HTTP 400
+and omitting it returns 500. Never bare-\`pcall\` a notification call: capture the
+outcome and log it, or delivery failure is invisible. get_ios_devices supplies
+the device ids.
+`
+      },
+
       basic: {
         title: 'Quick Apps Basics',
         content: `
