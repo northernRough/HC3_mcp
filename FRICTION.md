@@ -521,9 +521,16 @@ re-running the top produces the same symptom.
 ### Source: report_finding, 11–15 August 2026 — twelve findings
 
 The first batch to arrive through the tool rather than as a document. Eleven
-real (one is a `statedir-check` self-test), from two projects: Irrigation QA
-4933 and the Shading migration (QA 4952/4953). They are listed in the generated
-section above and, apart from the row below, **all still need verdicts**.
+real (one is a `statedir-check` self-test), from two projects: the **Irrigation**
+QA in Gardens, and the **Shading** migration in System Devices. They are listed
+in the generated section above and, apart from the row below, **all still need
+verdicts**.
+
+Note when re-testing: two of the devices the findings name no longer exist. The
+Shading QA they were filed against was a `binarySwitch` that has since been
+replaced by the `genericDevice` now called Shading, and the scratch QA behind
+the "Resolved 13 Aug" uiCallbacks row below has been deleted. Neither can be
+re-inspected, only reproduced.
 
 #### Settled
 
@@ -544,12 +551,46 @@ compared them.
 
 | Claim | Next test |
 |---|---|
-| `manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged | Reporter isolated three variants on QA 4952. Not isolated: whether a **non**-QuickApp device also 403s, which separates "endpoint unavailable here" from "QuickApps rejected". |
+| `manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged | Reporter isolated three variants on the since-replaced Shading QA. Not isolated: whether a **non**-QuickApp device also 403s, which separates "endpoint unavailable here" from "QuickApps rejected". |
 | `create_scene` documents `content` as optional; omitting it throws a Lua-engine 400 about concatenating a nil `conditions` | Well isolated. Fix is to require `content`, or default `conditions` to a valid empty table. 4 of the recurring failures above are this. |
 | Scene variables have **no REST API**: `/scenes/{id}/variables` and three sibling paths all 501-empty, while `fibaro.setSceneVariable` works inside the run | Controls were run: known-bad paths also 501-empty, known-good return 200. If it holds, the scene-variable tool in "Gaps" below is **unbuildable**, and that gap should be struck rather than carried. |
-| `upload_icon`'s attach hint (`modify_device({properties:{deviceIcon: id}})`) leaves a QuickApp tile **blank**; what renders is `properties.icon = {path, source="HC"}` written from inside the owning QA | A/B on device 4953 vs 4933. Corroborated independently by the `modify_device` post-write verification failure on 4916 in the table above, where `properties.icon` was submitted and did not read back — this server's own guard catching the silent discard. |
+| `upload_icon`'s attach hint (`modify_device({properties:{deviceIcon: id}})`) leaves a QuickApp tile **blank**; what renders is `properties.icon = {path, source="HC"}` written from inside the owning QA | A/B on Shading versus Irrigation. Corroborated independently by the `modify_device` post-write verification failure on **Outdoor Mean** in the table above, where `properties.icon` was submitted and did not read back — this server's own guard catching the silent discard. |
 | `GET /iosDevices/{id}` returns the **entire** 15-entry collection, not one record | Anything taking the first element is wrong and looks right. Also reports `DELETE /iosDevices/{id}?udid={udid}` as the only shape that passes validation, which would make a cleanup tool buildable. |
-| Named `uiCallbacks` dispatched to `UIAction` **positionally**, not to the registered callback, for a `select` with `selectionType "multi"` | **Conflicts with the "Resolved 13 Aug" row above**, which recorded named dispatch as working after an isolation on scratch QA 4950. The reporter flags their own evidence as half-isolated. Do not adopt either way: test whether the element type is the axis (select vs button). |
+| Named `uiCallbacks` dispatched to `UIAction` **positionally**, not to the registered callback, for a `select` with `selectionType "multi"` | **Conflicts with the "Resolved 13 Aug" row above**, whose scratch QA has since been deleted. Sharper than it looks: Irrigation's own source records `UIAction` receiving a single event **table** on 7 Aug and three **positional** args on 15 Aug, same device, same firmware. See the reconciling model below. Do not adopt either way yet. |
+
+#### The uiCallbacks conflict, and a model that fits every observation
+
+Four observations, none of which has to be wrong:
+
+| When | Subject | Registered callback | What HC3 called, and how |
+|---|---|---|---|
+| 7 Aug | Irrigation, a button | `UIAction` | `UIAction`, one **table** argument (recorded in that QA's own source) |
+| 13 Aug | a scratch QA, since deleted | a **name** | the **named method**, event table (the "Resolved" row above) |
+| 15 Aug | Irrigation, `selSeedZones`, a multi `select` | a **name** | `UIAction`, three **positional** args |
+| now | Irrigation, live `uiCallbacks` | five buttons on `UIAction`, the select on `seedlingZonesChanged` | — |
+
+Two rules explain all of it:
+
+1. **A name is honoured for buttons and ignored for selects.** A select falls
+   back to `UIAction` whatever `uiCallbacks` says.
+2. **The argument shape follows the dispatch path**: an honoured binding
+   receives the event table, a fallback receives positional
+   `(eventType, elementName, values)`.
+
+`UIAction` is itself just a name under rule 1, which is why Irrigation's buttons
+get the table form and its select does not. It also explains the half-isolated
+part the reporter would not credit: adding `onChanged` and `onReleased` did not
+fix the dead picker, the QA **restart** did, because the runtime binding table is
+built at start.
+
+**The discriminating test** is a select registered directly against `UIAction`.
+Positional there means the shape belongs to the element type; a table means it
+belongs to the fallback path. One scratch QA, four elements, one variable each:
+button+named, button+`UIAction`, select+named, select+`UIAction`, with each
+handler logging its own name, the argument count and the type of each argument.
+Fire each element **both** by a real tap and by `call_ui_event`, because whether
+the tool's channel dispatches identically to the app is itself unverified, and a
+probe that only fires its own channel cannot tell you.
 
 #### Recorded, no server fix
 
