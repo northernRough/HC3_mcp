@@ -2,6 +2,56 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.25.0] - 2026-08-16
+
+### Added
+
+- `npm run firmware-check` — a firmware-change differ. Records the gateway's
+  behaviour to `scripts/test/firmware/<version>.json`, and on the next run
+  against a different firmware reports what BROKE, what was FIXED, and what
+  merely CHANGED. Not a monitor: firmware here does not arrive on a schedule,
+  so it runs when you decide to update.
+  - Tier 1 walks `KNOWN_DEAD_ENDPOINTS.md` itself rather than a copied list,
+    and reports where the gateway now disagrees with it. This is the tier that
+    catches an endpoint coming back to life, which the document explicitly
+    warns can happen across upgrades and which no other check would notice.
+  - Tier 2 records response shapes for every read-only tool.
+  - Tier 3 (`--with-writes`) re-tests the silent-write catalogue on throwaway
+    objects, so a firmware that quietly FIXES a silent write shows up as the
+    good news it is. Read-only checks can never see that.
+- `scripts/test/shape.mjs` — a structural signature that changes when the
+  firmware changes and holds still when the house changes. The previous shape
+  function folded array lengths and runtime map keys into the signature, so ten
+  of fifty-eight tools "drifted" on an ordinary day: 168 meters became 190, a
+  new manufacturer appeared in a grouping. A differ built on that reports noise
+  and hides the signal.
+- `scripts/test/credentials.mjs` — shared credential resolution for anything
+  that spawns the server against a live gateway.
+
+### Fixed
+
+- The live test phases could not authenticate. `mcp-client.mjs` spawned the
+  server with a bare `process.env`, which on a normal shell carries no
+  `FIBARO_*`, so every live phase reported "Fibaro HC3 not configured" and 53
+  of 58 tools recorded an error. It read as a broken tier for months; it was a
+  missing environment. Now falls back to the MCP client config, as probe.mjs
+  already did. The read-only sweep goes from 5/58 to 56/58.
+- `properties.icon` external-write claim corrected in both the `ui` guide topic
+  and the silent-write catalogue. It was documented flatly as "accepted and
+  silently discarded". Probed on an idle throwaway QuickApp it PERSISTS, so the
+  endpoint is not what drops it — the running QA overwriting on restart is the
+  likelier mechanism. Shipped yesterday stronger than its evidence; now stated
+  as conditional, with the untested part named.
+
+### Changed
+
+- `withQuickApp` accepts `initialView` / `initialProperties` / `roomId`. Several
+  HC3 behaviours only occur AT CREATION — the uiCallbacks rewrite among them —
+  and a probe that creates a bare QA then PUTs to it tests a different path.
+  The first run of the write tier reported three false alarms for exactly this
+  reason, one of them from two probes sharing a QuickApp and contaminating each
+  other.
+
 ## [4.24.0] - 2026-08-15
 
 ### Fixed

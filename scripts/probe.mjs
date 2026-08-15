@@ -53,11 +53,24 @@ async function tools(name) {
   return (await import(path.join(OUT, 'tools', `${name}.js`)))[name];
 }
 
-/** Throwaway QuickApp, deleted in finally. */
-export async function withQuickApp(fn, { type = 'com.fibaro.genericDevice' } = {}) {
+/**
+ * Throwaway QuickApp, deleted in finally.
+ *
+ * `initialView` / `initialProperties` / `roomId` are passed through because
+ * several HC3 behaviours only occur AT CREATION — notably the uiCallbacks
+ * rewrite — and cannot be reproduced by PUTting the same content afterwards.
+ * A probe that creates a bare QA and then writes to it is testing a different
+ * code path from the one being documented.
+ */
+export async function withQuickApp(fn, {
+  type = 'com.fibaro.genericDevice', initialView, initialProperties, roomId,
+} = {}) {
   const hc3 = await client();
   const qa = await (await tools('quickapps')).handlers.create_quickapp(hc3, {
     name: `PROBE_${stamp()}`, type,
+    ...(roomId !== undefined ? { roomId } : {}),
+    ...(initialView ? { initialView } : {}),
+    ...(initialProperties ? { initialProperties } : {}),
   });
   const id = qa?.deviceId ?? qa?.id;
   console.log(`  [probe] created QuickApp ${id} (${type})`);

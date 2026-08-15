@@ -548,8 +548,11 @@ the tile blank. What renders is a path write from INSIDE the owning QA:
 self:updateProperty("icon", { path = "/assets/userIcons/devices/User1054/User1054.svg", source = "HC" })
 \`\`\`
 
-An external \`api.put\` of \`properties.icon\` is accepted and silently discarded,
-so this one has to come from the QuickApp itself. \`deviceIcon\` IS a real write
+An external \`api.put\` of \`properties.icon\` was reported discarded on a running
+QuickApp. Probed here on an idle one it persists, so the endpoint is not the
+thing dropping it — most likely the QA overwrites the property when it starts,
+and every external write restarts it. Either way, writing it from inside the QA
+is the route that behaves predictably. \`deviceIcon\` IS a real write
 and is what drives HC3's automatic value-based state switching; the two are not
 alternatives so much as different mechanisms. See \`upload_icon\` for how icon
 state sets are shaped per device type.

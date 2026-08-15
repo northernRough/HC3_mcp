@@ -2,9 +2,14 @@
 // Spawns the compiled server, exchanges JSON-RPC over stdio.
 
 import { spawn } from 'node:child_process';
+import { serverEnv } from './credentials.mjs';
 
 export class MCPClient {
-    constructor({ serverPath, env = process.env } = {}) {
+    // Default to an environment that actually carries credentials. Passing a
+    // bare process.env is what silently turned every live phase into 53
+    // identical "Fibaro HC3 not configured" errors; an explicit `env` still
+    // wins, so a caller can still target a different gateway or none at all.
+    constructor({ serverPath, env = serverEnv().env } = {}) {
         this.proc = spawn('node', [serverPath], {
             env,
             stdio: ['pipe', 'pipe', 'pipe'],

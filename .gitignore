@@ -12,3 +12,6 @@ fibaro_api_docs/
 CLAUDE.md
 .claude/
 hc3-dashboard.html
+
+# Firmware characterisation records — per gateway, carry serial + host.
+scripts/test/firmware/

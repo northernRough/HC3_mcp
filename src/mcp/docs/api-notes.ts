@@ -102,9 +102,13 @@ get_hc3_quickapp_programming_guide({topic:"ui"}).
 ### QuickApp tile icons
 Two of them. Setting \`properties.deviceIcon\` on a freshly created QuickApp
 verifies as applied and leaves the tile **blank**, because the tile renders from
-\`properties.icon\`. And an external \`api.put\` of \`properties.icon\` is accepted
-and **silently discarded** — that one has to be written from inside the owning
-QuickApp with \`self:updateProperty\`.
+\`properties.icon\`. An external \`api.put\` of \`properties.icon\` was reported
+discarded on a **running** QuickApp — but probed here on an idle throwaway QA
+it PERSISTS, so the REST layer is not what drops it. The likely mechanism is
+the QuickApp overwriting the property when it starts, and each external write
+restarts it. Treat "write it from inside the QA with \`self:updateProperty\`" as
+the reliable route, and the discard as conditional on the QA running rather
+than as a property of the endpoint.
 
 ### Icon uploads
 Uploading a single bare image for a device type that holds a state SET (a relay
