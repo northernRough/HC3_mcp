@@ -421,7 +421,7 @@
   },
   {
     "name": "create_quickapp",
-    "description": "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.",
+    "description": "Create a new empty QuickApp on HC3 from scratch (not from a .fqa file — use import_quickapp for that). Wraps POST /api/quickApp. The new QA gets a blank Lua main file; use create_quickapp_file / update_multiple_quickapp_files to populate it afterwards. Returns the created device with its HC3-assigned deviceId. Verifies the write by refetching the device and confirming name + type match. Use get_quickapp_available_types to discover valid `type` values before calling this.\n\n**Before writing the Lua, call get_hc3_quickapp_programming_guide({topic:\"gotchas\"}).** It carries the platform behaviours that silently break QuickApps written by competent Lua developers: coroutines are unavailable (so the common `coroutine.yield` HTTP wrapper cannot work), `quickApp` reports as `userdata` with a null-type tostring while being fully usable so it must never be tested with `== nil`, `getVariable` cannot distinguish missing from empty, and `createChildDevice` takes `initialProperties`/`initialInterfaces` with the class as its second argument rather than the flat shape most examples show.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -569,7 +569,7 @@
   },
   {
     "name": "create_scene",
-    "description": "Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be \"lua\" or \"scenario\". If content is an object it is JSON.stringify'd before sending (matches update_scene_content semantics).",
+    "description": "Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be \"lua\" or \"scenario\". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `\"{ conditions = { { id = 2699, isTrigger = true, operator = \\\"==\\\", property = \\\"value\\\", type = \\\"device\\\", value = false } }, operator = \\\"any\\\" }\"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field 'conditions')`, naming a line in Fibaro's engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify'd before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:\"execution_model\"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -590,7 +590,7 @@
           "description": "Room id (required). Use get_rooms to find a valid id — HC3 rejects roomId=0 on creation."
         },
         "content": {
-          "description": "Scene body. String or object (object is JSON.stringify'd)."
+          "description": "Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify'd. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error."
         },
         "maxRunningInstances": {
           "type": "number",
@@ -1343,7 +1343,7 @@
   },
   {
     "name": "get_hc3_configuration_guide",
-    "description": "Get comprehensive HC3 configuration documentation including network settings, users, rooms, Z-Wave setup, etc.",
+    "description": "HC3 gateway configuration reference: network, users, rooms, Z-Wave inclusion and settings, time, location, VoIP. Background for administering the controller rather than programming it — for writing Lua, use get_hc3_lua_scenes_guide or get_hc3_quickapp_programming_guide instead.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1366,14 +1366,15 @@
   },
   {
     "name": "get_hc3_lua_scenes_guide",
-    "description": "Get HC3 Lua Scenes programming documentation including conditions, triggers, actions, and examples",
+    "description": "HC3 Lua scenes: the execution model, conditions, triggers, actions and the scene API.\n\n**Call this before writing or editing scene Lua**, and read `execution_model` first. Most scene advice in circulation is HC2 advice or one of two specific myths, and the corrections change what you write: a scene runs ONE instance governed by `restart` (`maxRunningInstances` is vestigial, never write it); **a firing `fibaro.setTimeout` does NOT restart the scene** — tested on two scratch scenes over three runs, the closure capture survived and the top of the scene ran exactly once, so the defensive re-read-everything pattern is optional rather than mandatory; `fibaro.setTimeout` is delay-first everywhere including inside QuickApps; a manual run is `type == \"user\" AND property == \"execute\"`, both halves; and scene variables are reported to have no REST API, which is the reason to put inspectable state in a QuickApp instead.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "topic": {
           "type": "string",
-          "description": "Specific scenes topic (optional): conditions, triggers, actions, examples, api",
+          "description": "Topic (optional). Start with \"execution_model\" — how the engine actually runs a scene, and which widely repeated claims are false. Then conditions, triggers, actions, examples, api.",
           "enum": [
+            "execution_model",
             "conditions",
             "triggers",
             "actions",
@@ -1387,14 +1388,15 @@
   },
   {
     "name": "get_hc3_programming_examples",
-    "description": "Get practical HC3 programming examples and code snippets for common automation scenarios",
+    "description": "Practical HC3 code, by category.\n\n`patterns` is the one to reach for when building something rather than looking up a scenario: self-contained, gateway-tested components that lift straight into a scene or QuickApp — trigger parsing with a manual-run guard, a scene-variable state store with safe init, structured logging enriched with room names, a restart-safe scheduler for delays that must survive a reboot, window gating, a daily computation cache, a polling loop with backoff and jitter, a callback-based HTTP wrapper (coroutines do not work on HC3), a child-device factory with the persisted id map HC3 forces on you, rolling averages, and a default scene skeleton. The other categories are scenario snippets.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "category": {
           "type": "string",
-          "description": "Example category (optional): lighting, security, climate, scenes, devices, mqtt, tcp",
+          "description": "Category (optional). Use \"patterns\" for reusable building blocks; the rest are scenario snippets: lighting, security, climate, scenes, devices, mqtt, tcp.",
           "enum": [
+            "patterns",
             "lighting",
             "security",
             "climate",
@@ -1410,14 +1412,15 @@
   },
   {
     "name": "get_hc3_quickapp_programming_guide",
-    "description": "Get HC3 Quick Apps programming documentation including Lua syntax, methods, HTTP/TCP/UDP clients, etc.",
+    "description": "HC3 QuickApp programming: Lua syntax, QuickApp methods, HTTP/TCP/UDP/MQTT clients, child devices.\n\n**Call this before writing or editing QuickApp Lua**, and read `gotchas` first even if you know Lua. That topic carries platform behaviour that is not guessable from the language and that the official docs omit or state wrongly — the `quickApp` global reporting as `userdata` with a null-type tostring while being fully usable, `getVariable` returning \"\" for a missing variable indistinguishably from an empty one, coroutines being unavailable (so any wrapper that fakes synchronous HTTP with `coroutine.yield` cannot work), external variable writes restarting the QuickApp once per call, and the real `createChildDevice` signature. Every item was observed on a live gateway.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "topic": {
           "type": "string",
-          "description": "Specific programming topic (optional): basic, methods, http, tcp, udp, websocket, mqtt, child_devices",
+          "description": "Topic (optional). Start with \"gotchas\" — the platform behaviours that produce silent bugs. Then basic, methods, http, tcp, udp, websocket, mqtt, child_devices.",
           "enum": [
+            "gotchas",
             "basic",
             "methods",
             "http",
@@ -1725,7 +1728,7 @@
   },
   {
     "name": "get_quickapp_variable",
-    "description": "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.",
+    "description": "Read a single QuickApp variable, returning its declared type and current value. Use this instead of parsing quickAppVariables from get_device_info when you only need one.\n\nNote for the Lua you write against it: inside the QuickApp, `self:getVariable(name)` returns \"\" for a variable that does not exist AND for one deliberately set to \"\", with no way to tell them apart — HC3 logs `Variable <name> not found`, which your code cannot see. This tool CAN tell them apart, which is one reason to check configuration from here rather than inferring it from QuickApp logs.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2204,7 +2207,7 @@
   },
   {
     "name": "modify_scene",
-    "description": "Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.",
+    "description": "Modify top-level scene metadata (name, enabled, maxRunningInstances, restart, hidden, stopOnAlarm, protectedByPin, mode, roomId, icon, description, categories). Does not modify scene content (conditions/actions) — use update_scene_content for that.\n\n**`restart` is the concurrency control.** A scene runs one instance at a time; `restart: true` means an incoming trigger kills the running instance, `false` means the running instance is protected and the trigger is dropped. **`maxRunningInstances` is vestigial** — an HC2 leftover that reads a constant 2 on every scene and is not exposed in the HC3 UI. It is accepted here because HC3 accepts it, but writing it does nothing; do not design around it.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2440,7 +2443,7 @@
   },
   {
     "name": "report_finding",
-    "description": "Record a finding about this MCP server — a tool that surprised you, a description that was wrong or missing, or a case where a call reported success and the gateway disagreed. Stored **locally only** (nothing is transmitted), redacted, and surfaced in the hc3://friction resource for triage.\n\n**A reproduction is required, and it must vary ONE thing.** That is not bureaucracy: in the last field report received here, two claims were wrong and one was right about the symptom but wrong about the cause, because two variables had been changed at once and the wrong one was credited. A finding with a single-variable reproduction can be re-tested in minutes; one without cannot be told apart from a coincidence, and adopting it risks shipping a regression.\n\nIf you cannot isolate it, say so in `reproduction`. \"Tile was blank; the layout contained a select AND was installed externally; I have not isolated which mattered\" is honest, useful, and costs nothing — far more valuable than a confident wrong claim.",
+    "description": "Record a defect in this MCP server. Stored **locally only** (nothing is transmitted), redacted, and surfaced in the hc3://friction resource for triage.\n\n**Call this the moment you hit one of these — in the SAME TURN, before moving on:**\n- a tool that worked before becomes unavailable\n- a documented path, parameter or shape turns out to be wrong\n- a write reports success and a read-back disagrees\n- you find a working method this server does not document\n- **you conclude a capability is impossible**\n- you build a workaround because a tool was missing or refused you\n\nNot at the end of the session: by then the exact error text and the sequence that produced it are gone, and a problem you worked around feels resolved when it is only hidden. Do not ask permission first — this is local, reversible and cheap, and the only case worth raising with the user is a wrong negative conclusion, because only they know what was abandoned on your say-so.\n\nThat impossible-capability trigger is the expensive one. A wrong negative gets recorded as settled and steers every later session away from something that works: this server once concluded user icons could not render, which was false, and it stood until someone tested it.\n\n**A reproduction is required, and it must vary ONE thing.** That is not bureaucracy: in the last field report received here, two claims were wrong and one was right about the symptom but wrong about the cause, because two variables had been changed at once and the wrong one was credited. A finding with a single-variable reproduction can be re-tested in minutes; one without cannot be told apart from a coincidence, and adopting it risks shipping a regression.\n\nIf you cannot isolate it, say so in `reproduction`. \"Tile was blank; the layout contained a select AND was installed externally; I have not isolated which mattered\" is honest, useful, and costs nothing — far more valuable than a confident wrong claim.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3048,7 +3051,7 @@
   },
   {
     "name": "update_scene_content",
-    "description": "Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.",
+    "description": "Update the Lua content (actions and/or conditions) of a Lua-type scene. If only one of actions/conditions is supplied, the other is preserved.\n\n**Response size.** This tool used to return the previous body, the current body AND the full scene record — three copies of a body that is routinely 75 KB on a real scene, so a one-line change cost ~225 KB of response. It now returns lengths and md5 hashes instead, and strips `content` from the scene record. Set returnContent=true to get the bodies back (the old shape) when you specifically want a last-known-good copy inline; otherwise read the scene before writing if you need one, because this tool no longer hands you one by default.\n\nWriting scene Lua from scratch or reworking control flow? get_hc3_lua_scenes_guide({topic:\"execution_model\"}) first — one instance governed by `restart`, and a firing `fibaro.setTimeout` does not restart the scene or lose its closure, which is the opposite of what most forum advice says.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3105,17 +3108,17 @@
   },
   {
     "name": "upload_icon",
-    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). HC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\n**category \"device\" additionally requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it on a device upload returns HTTP 400 MISSING_PARAMETER. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n\nPNG payloads have one hard constraint: dimensions must be exactly **128×128** (HC3 answers 400 INVALID_ICON_SIZE otherwise), Colour type does **not** matter: RGBA uploads fine and is what every user icon already on a live gateway uses. Resize with e.g. `magick input.png -resize 128x128 output.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**How many images a device icon holds depends on the device TYPE** — verified on 5.210.12 by listing the files HC3 actually wrote, and matching what its Web UI offers:\n\n| deviceTemplate | Images | Pass |\n|---|---|---|\n| `com.fibaro.genericDevice` (a QuickApp tile) | 1, stored bare | `base64` |\n| `com.fibaro.binarySwitch` (relay) | 2 — states 0, 100 | `states` |\n| `com.fibaro.multilevelSwitch` (dimmer) | 11 — states 0,10,…,100 | `states` |\n\nWhere a set applies, HC3 stores `/assets/userIcons/devices/User<N>/User<N><state>.png` and **switches between them itself from the device value** — on/off comes free, no code. The multi-file form is undocumented (HC3's spec lists only a single `icon` part) but is what its own UI sends. Supplying the wrong shape is not an error HC3 reports: a single bare image on a relay registers and attaches, then renders **blank**, because the lookup asks for `User<N>0.png`. This tool refuses the mismatches it can recognise, and an incomplete set (e.g. a dimmer missing state 40) too. Types not listed above are accepted as given.\n\nAttach with `modify_device({deviceId, properties:{deviceIcon: <newId>}})`. To drive the tile beyond the value-based switch — e.g. a QuickApp showing mode rather than on/off — write the property directly from Lua with `self:updateProperty(\"deviceIcon\", id)`, verified working at runtime; `deviceIcon` is a real write, not one of HC3's silent-cache paths. For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, states, hint}`.",
+    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). **Two things decide whether the call is accepted, and both follow from `category`:**\n\n1. **`category: \"device\"` requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it is refused here, and returns 400 MISSING_PARAMETER at HC3. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n2. **Pass `states` or `base64`, never both.** Which one is a property of the device type (table below): a type holding a state set takes `states`, a type holding one image takes `base64`. Room and scene icons are always a single `base64` image.\n\nHC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\nPNG payloads have one hard constraint: dimensions must be exactly **128×128** (HC3 answers 400 INVALID_ICON_SIZE otherwise), Colour type does **not** matter: RGBA uploads fine and is what every user icon already on a live gateway uses. Resize with e.g. `magick input.png -resize 128x128 output.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**How many images a device icon holds depends on the device TYPE** — verified on 5.210.12 by listing the files HC3 actually wrote, and matching what its Web UI offers:\n\n| deviceTemplate | Images | Pass |\n|---|---|---|\n| `com.fibaro.genericDevice` (a QuickApp tile) | 1, stored bare | `base64` |\n| `com.fibaro.binarySwitch` (relay) | 2 — states 0, 100 | `states` |\n| `com.fibaro.multilevelSwitch` (dimmer) | 11 — states 0,10,…,100 | `states` |\n\nWhere a set applies, HC3 stores `/assets/userIcons/devices/User<N>/User<N><state>.png` and **switches between them itself from the device value** — on/off comes free, no code. The multi-file form is undocumented (HC3's spec lists only a single `icon` part) but is what its own UI sends. Supplying the wrong shape is not an error HC3 reports: a single bare image on a relay registers and attaches, then renders **blank**, because the lookup asks for `User<N>0.png`. This tool refuses the mismatches it can recognise, and an incomplete set (e.g. a dimmer missing state 40) too. Types not listed above are accepted as given.\n\nAttach with `modify_device({deviceId, properties:{deviceIcon: <newId>}})`. To drive the tile beyond the value-based switch — e.g. a QuickApp showing mode rather than on/off — write the property directly from Lua with `self:updateProperty(\"deviceIcon\", id)`, verified working at runtime; `deviceIcon` is a real write, not one of HC3's silent-cache paths. For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, states, hint}`.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "base64": {
           "type": "string",
-          "description": "Base64-encoded image bytes (no data URL prefix) — for **room and scene** icons, which are single images. Device icons use `states` instead. For PNG: must be 128×128 in palette mode (8-bit colormap, color type 3). For SVG: as-is."
+          "description": "Base64-encoded image bytes (no data URL prefix). The right field for **room and scene** icons, and for **device** types that hold a single image (com.fibaro.genericDevice, i.e. a QuickApp tile). Device types that hold a state set take `states` instead. PNG must be exactly 128×128; colour type does not matter, RGBA is what most icons already on a live gateway use. SVG is uploaded as-is."
         },
         "states": {
           "type": "object",
-          "description": "For **device** icons: a map of device state → base64 image, e.g. { \"0\": \"<off>\", \"100\": \"<on>\" }. HC3 stores these as User<N>0.png / User<N>100.png and picks one by the device's value. Keys must be integers. At minimum supply \"0\" and \"100\" — multilevel devices may also use intermediates such as \"50\". A device upload without states is refused, because a single unsuffixed image registers and attaches but renders blank."
+          "description": "For **device** icons whose type holds a state set: a map of device state → base64 image, e.g. { \"0\": \"<off>\", \"100\": \"<on>\" }. HC3 stores these as User<N>0.png / User<N>100.png and picks one by the device's value. Keys must be integers, and the set must be complete for the type (binarySwitch 0/100, multilevelSwitch 0,10,…,100). A state-set type uploaded as one bare image registers and attaches, then renders blank."
         },
         "mime": {
           "type": "string",
@@ -3136,10 +3139,41 @@
         }
       },
       "required": [
-        "base64",
         "mime",
         "category"
-      ]
+      ],
+      "if": {
+        "properties": {
+          "category": {
+            "const": "device"
+          }
+        },
+        "required": [
+          "category"
+        ]
+      },
+      "then": {
+        "required": [
+          "deviceTemplate"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "base64"
+            ]
+          },
+          {
+            "required": [
+              "states"
+            ]
+          }
+        ]
+      },
+      "else": {
+        "required": [
+          "base64"
+        ]
+      }
     }
   },
   {
