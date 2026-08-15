@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.20.1] - 2026-08-14
+
+### Fixed
+- **`create_scene` handed a structured `conditions` block straight to HC3, which stored it and then died on it.** Raised by live telemetry rather than by anyone reporting it: a real call on the deployed server drew `400 SceneValidationError` with `engine.lua:623: attempt to concatenate a table value (field 'conditions')`. That message names a line in **Fibaro's** engine and says nothing about which argument was wrong, so the caller is left debugging someone else's Lua.
+
+  Reproduced first, on 5.2x: conditions as a structure fails exactly so, the same scene with a Lua source string is accepted and stores cleanly. The cause was this tool's own convenience path — `content` given as an object is `JSON.stringify`'d, so a caller who supplies the conditions **table** as JSON (the natural reading, since every conditions example in circulation is a Lua table) produces `{"conditions":{...}}` where HC3 wants Lua source text.
+
+  Both blocks are now validated before the request, on **both** ways in: an object `content`, and a JSON-string `content` — the latter being the path the telemetry actually arrived by. `update_scene_content` gets the same guard, where `conditions?: string` was a TypeScript annotation with no runtime check behind it.
+
+  The refusal prints the Lua the caller meant, rendered by a new `toLuaSource` helper. It deliberately does **not** convert on their behalf: a scene that validates but behaves subtly differently from what was intended is worse than a refusal on a controller wired to a real house.
+
+- **`create_scene`'s description now states the shape instead of implying the opposite.** It previously said only that an object `content` is JSON.stringify'd, which reads as an invitation to pass the structure. It now shows a conditions block as the quoted Lua string it has to be.
+
+### Added
+- **`scripts/probe-scene-conditions.mjs`** — the three-arm reproduction (Lua source string, JS object, JSON string), with scene teardown in `finally`.
+- **`unit-scene-conditions.mjs`** replays the live failure through both tools and both content forms, and asserts the guard lets a valid scene and a plain Lua body through untouched. The fake client throws on any request, so a case that should be refused locally cannot pass by silently reaching the gateway.
+
 ## [4.20.0] - 2026-08-14
 
 ### Added

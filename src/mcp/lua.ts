@@ -232,3 +232,41 @@ export function luaWarningSummary(warnings: LuaWarning[]): string | undefined {
     warnings.map(w => (w.line ? `line ${w.line}: ${w.message}` : w.message)).join(' | ')
   );
 }
+
+/**
+ * Render a JS value as Lua table source.
+ *
+ * Exists for one job: telling a caller what they should have sent. HC3 stores a
+ * scene's `conditions` and `actions` as Lua SOURCE STRINGS inside a JSON
+ * string, and a structured value put in either slot is accepted by the REST
+ * layer and then killed by HC3's own engine at subscribe time with
+ * `attempt to concatenate a table value (field 'conditions')`. Since the
+ * structure a caller means is unambiguous, the refusal can carry the exact Lua
+ * to send instead of merely naming the mistake.
+ *
+ * Deliberately NOT used to convert on the caller's behalf. A scene that
+ * validates but behaves subtly differently from what was meant is worse than a
+ * refusal, and this is a live home automation controller.
+ */
+export function toLuaSource(value: unknown, indent = ''): string {
+  const next = indent + '  ';
+  if (value === null || value === undefined) return 'nil';
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);   // Lua accepts JSON string escapes
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '{}';
+    const items = value.map(v => `${next}${toLuaSource(v, next)}`);
+    return `{\n${items.join(',\n')}\n${indent}}`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return '{}';
+    const items = entries.map(([k, v]) => {
+      // A bare identifier key is idiomatic Lua; anything else needs bracketing.
+      const key = /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : `[${JSON.stringify(k)}]`;
+      return `${next}${key} = ${toLuaSource(v, next)}`;
+    });
+    return `{\n${items.join(',\n')}\n${indent}}`;
+  }
+  return 'nil';
+}

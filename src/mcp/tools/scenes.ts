@@ -3,7 +3,49 @@
 import { ToolModule } from './registry';
 import { verifyWrite, contentHash } from '../util';
 import { applyEdits, unifiedDiff, excerpt, wantsExcerpt, PatchEdit } from '../patch';
-import { luaLint, luaWarningSummary } from '../lua';
+import { luaLint, luaWarningSummary, toLuaSource } from '../lua';
+
+/**
+ * HC3 stores `conditions` and `actions` as Lua SOURCE STRINGS. A structured
+ * value in either slot is accepted by the REST layer, stored, and then killed
+ * by HC3's own Lua engine at subscribe time:
+ *
+ *   400 SceneValidationError
+ *   engine.lua:623: attempt to concatenate a table value (field 'conditions')
+ *
+ * Which names a line number in Fibaro's engine and not the argument at fault.
+ * Reproduced against 5.2x: an object in `conditions` fails exactly so, the same
+ * scene with a Lua source string is accepted. It reached live telemetry because
+ * the mistake is the natural one — every conditions example in circulation is a
+ * TABLE, and passing that table as JSON looks equivalent.
+ *
+ * The refusal carries the Lua the caller almost certainly meant. It does not
+ * convert on their behalf: a scene that validates but behaves subtly
+ * differently is worse than a refusal on a live controller.
+ */
+function assertLuaSourceBlock(tool: string, field: 'conditions' | 'actions', value: unknown): void {
+  if (value === undefined || value === null || typeof value === 'string') return;
+  const rendered = toLuaSource(value);
+  throw new Error(
+    `${tool}: \`${field}\` must be a Lua source STRING, not a ${Array.isArray(value) ? 'array' : typeof value}. ` +
+    `HC3 would store it and then fail at subscribe time with ` +
+    `"attempt to concatenate a table value (field '${field}')", which names a line in Fibaro's engine rather than this argument. ` +
+    `Send this instead:\n\n${rendered}\n\n` +
+    `(as a string — the Lua table is the VALUE of ${field}, not a JSON object in its place).`
+  );
+}
+
+/** Validate the two Lua blocks inside a `content` argument, in either accepted form. */
+function assertSceneContentBlocks(tool: string, content: unknown): void {
+  let obj: any = content;
+  if (typeof content === 'string') {
+    // A JSON string is the other way in, and the one live telemetry arrived by.
+    try { obj = JSON.parse(content); } catch { return; }   // plain Lua/scenario body, nothing to check
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+  assertLuaSourceBlock(tool, 'conditions', obj.conditions);
+  assertLuaSourceBlock(tool, 'actions', obj.actions);
+}
 
 /**
  * A lua scene's `content` is a JSON string holding {conditions, actions} —
@@ -158,14 +200,14 @@ export const scenes: ToolModule = {
       },
       {
         name: 'create_scene',
-        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:"execution_model"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.',
+        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `"{ conditions = { { id = 2699, isTrigger = true, operator = \\"==\\", property = \\"value\\", type = \\"device\\", value = false } }, operator = \\"any\\" }"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field \'conditions\')`, naming a line in Fibaro\'s engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:"execution_model"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.',
         inputSchema: {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Scene name (1–50 chars).' },
             type: { type: 'string', enum: ['lua', 'scenario'], description: 'Scene type.' },
             roomId: { type: 'number', description: 'Room id (required). Use get_rooms to find a valid id — HC3 rejects roomId=0 on creation.' },
-            content: { description: 'Scene body. String or object (object is JSON.stringify\'d).' },
+            content: { description: 'Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify\'d. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error.' },
             maxRunningInstances: { type: 'number', description: 'Default 1.' },
             enabled: { type: 'boolean', description: 'Default true.' },
             hidden: { type: 'boolean', description: 'Default false.' },
@@ -416,6 +458,7 @@ export const scenes: ToolModule = {
         categories: args.categories && args.categories.length > 0 ? args.categories : [1]
       };
       if (args.content !== undefined) {
+        assertSceneContentBlocks('create_scene', args.content);
         body.content = typeof args.content === 'string' ? args.content : JSON.stringify(args.content);
       }
       const created: any = await hc3.request('/api/scenes', 'POST', body);
@@ -569,6 +612,8 @@ export const scenes: ToolModule = {
     },
 
     async update_scene_content(hc3, args: { sceneId: number; actions?: string; conditions?: string; returnContent?: boolean }): Promise<any> {
+      assertLuaSourceBlock('update_scene_content', 'conditions', args.conditions);
+      assertLuaSourceBlock('update_scene_content', 'actions', args.actions);
       if (args.actions === undefined && args.conditions === undefined) {
         throw new Error('update_scene_content requires at least one of actions or conditions.');
       }
