@@ -110,11 +110,34 @@ await check('the SPA index.html is refused too', async () => {
   );
 });
 
-await check('the user-device gap is called out in the error', async () => {
+// This check used to assert the opposite: that the error told the caller user
+// device icons are "not served under any known /assets path". That claim was
+// false — the paths tried were missing the "devices/" segment — and the test
+// held it in place. Verified against 5.210.12 on 15 Aug 2026:
+//   /assets/userIcons/devices/User1072/User1072.svg → 200 image/svg+xml
+//   /assets/userIcons/User1072/User1072.svg         → 200 text/html (SPA index)
+await check('user device icons resolve under the devices/ segment', async () => {
+  stubFetch({ '/assets/userIcons/devices/User1025/User1025.png': { mime: 'image/png', body: REAL_PNG } });
+  const userDevice = await getIcon({ config: CONFIG }, { category: 'device', name: 'User1025', extension: 'png', userIcon: true });
+  assert.equal(userDevice.path, '/assets/userIcons/devices/User1025/User1025.png');
+
+  // State sets are suffixed per state, under the same segment.
+  stubFetch({ '/assets/userIcons/devices/User1030/User10300.png': { mime: 'image/png', body: REAL_PNG } });
+  const stateFile = await getIcon({ config: CONFIG }, { category: 'device', name: 'User1030', extension: 'png', userIcon: true, state: 0 });
+  assert.equal(stateFile.path, '/assets/userIcons/devices/User1030/User10300.png');
+
+  // Built-in device icons must NOT gain the segment: /assets/icon/fibaro/devices/
+  // answers with the 1888-byte placeholder.
+  stubFetch({ '/assets/icon/fibaro/zraszacz/zraszacz0.png': { mime: 'image/png', body: REAL_PNG } });
+  const builtIn = await getIcon({ config: CONFIG }, { category: 'device', name: 'zraszacz', extension: 'png', state: 0 });
+  assert.equal(builtIn.path, '/assets/icon/fibaro/zraszacz/zraszacz0.png');
+});
+
+await check('the error no longer claims user device icons are unfetchable', async () => {
   stubFetch({});
   await assert.rejects(
     () => getIcon({ config: CONFIG }, { category: 'device', name: 'User1025', extension: 'png', userIcon: true }),
-    /not served under any known/,
+    err => !/not served under any/.test(err.message) && /userIcons\/devices/.test(err.message),
   );
 });
 

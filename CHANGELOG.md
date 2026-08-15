@@ -2,6 +2,24 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.21.2] - 2026-08-15
+
+### Fixed
+- **`get_icon` could not fetch user-uploaded device icons, and then told the caller they were unfetchable.** The candidate paths omitted one segment. User device icons live at `/assets/userIcons/devices/User<N>/User<N>[state].<ext>`; the tool tried `/assets/userIcons/User<N>/...`, which HC3 answers with its SPA index rather than a 404, so every attempt failed the placeholder guard and fell through to an error asserting *"user-uploaded device icons are not served under any known /assets path on 5.210.12 — not fetchable as a file."*
+
+  That claim was false, and 4.21.0's own release note already named this defect in the abstract ("user icons were concluded unrenderable on 12 August, which was false") without the path ever being corrected. It cost the reporting project three days of abandoned custom artwork. Re-probed against 5.210.12 on 15 August, unauthenticated, since `/assets` needs no credentials:
+
+  ```
+  /assets/userIcons/devices/User1072/User1072.svg → 200 image/svg+xml 2969   (the icon)
+  /assets/userIcons/User1072/User1072.svg         → 200 text/html    13047   (SPA index)
+  ```
+
+  The segment is user-only: `/assets/icon/fibaro/devices/zraszacz/zraszacz0.png` returns the 1888-byte placeholder, so built-in device icons keep the layout they had. Both state-suffixed and bare files sit under it, matching what `upload_icon` has documented as HC3's storage model all along — the two halves of the same file disagreed.
+
+  The false claim is removed from the error text and the tool description, and the error now names the path family it tried plus the two things that actually go wrong (a wrong `fileExtension`, or a state set needing `state`).
+
+- **`unit-icon-paths.mjs` was asserting the wrong claim**, requiring the error to match `/not served under any known/`. A test that pins a defect in place is worse than no test, so it is replaced by one that fetches a user device icon under the correct segment, checks the state-suffixed form, and asserts the built-in layout does *not* gain the segment. Reported via `report_finding` against `get_icon` and `upload_icon` on 15 August; both are now confirmed.
+
 ## [4.21.1] - 2026-08-15
 
 No runtime change. `src/` is untouched since 4.21.0, so the published tarball is functionally identical; this release exists to carry the test-harness fix below through the release path that should have caught it.

@@ -67,7 +67,7 @@ export const icons: ToolModule = {
       },
       {
         name: 'get_icon',
-        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Returns {name, extension, mime, sizeBytes, path, base64}.\n\nPath layouts (verified against firmware 5.210.12): room → `rooms/{name}.{ext}`; scene → `scena/{name}.{ext}` built-in, `scenes/{name}.{ext}` user; **device → `{iconSetName}/{iconSetName}[state].{ext}`** — each device icon set is its own directory holding one file per state, and `deviceType` is NOT part of the path despite what list_icons might suggest. Built-in icons sit under /assets/icon/fibaro, user icons under /assets/userIcons.\n\nHC3 answers **200 with a placeholder** for missing icons rather than 404 (a 1888-byte "unknown icon" SVG, or its web UI index.html), so this tool inspects the content and raises rather than handing back a plausible-looking wrong image. Known gap: user-uploaded *device* icons are not served under any known /assets path on 5.210.12 — they work as `deviceIcon` ids but cannot be fetched back as files.\n\nThe MCP itself does not manipulate images — decode, edit (e.g. ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
+        description: 'Fetch an icon\'s binary content from HC3, base64-encoded. Returns {name, extension, mime, sizeBytes, path, base64}.\n\nPath layouts (verified against firmware 5.210.12): room → `rooms/{name}.{ext}`; scene → `scena/{name}.{ext}` built-in, `scenes/{name}.{ext}` user; **device → `{iconSetName}/{iconSetName}[state].{ext}`** — each device icon set is its own directory holding one file per state, and `deviceType` is NOT part of the path despite what list_icons might suggest. Built-in icons sit under /assets/icon/fibaro, user icons under /assets/userIcons — and user *device* icons take one extra segment, `/assets/userIcons/devices/User<N>/User<N>[state].{ext}`, which built-in device icons do not.\n\nHC3 answers **200 with a placeholder** for missing icons rather than 404 (a 1888-byte "unknown icon" SVG, or its web UI index.html), so this tool inspects the content and raises rather than handing back a plausible-looking wrong image. This is what previously made user device icons look unfetchable, and the resulting "they are not served under any /assets path" claim was wrong: the `devices/` segment was simply missing from the paths tried. Re-verified 15 Aug 2026 on 5.210.12.\n\nThe MCP itself does not manipulate images — decode, edit (e.g. ImageMagick or sips for PNGs, text edits for SVGs), then upload via upload_icon under a new name. Built-in icons cannot be replaced in place; uploads always create user icons.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -172,19 +172,30 @@ export const icons: ToolModule = {
       const base = args.userIcon ? '/assets/userIcons' : '/assets/icon/fibaro';
 
       // Path layouts, all established by probing the live gateway (5.210.12).
-      // Device icons are NOT under a "device" or {deviceType} segment: each
-      // icon set is its own directory holding one file per state, e.g.
+      // Device icons are NOT under a {deviceType} segment: each icon set is its
+      // own directory holding one file per state, e.g.
       // /assets/icon/fibaro/zraszacz/zraszacz0.png. Some sets also carry an
       // unsuffixed file, so both are tried. Room/scene user icons live under
       // different segment names than their built-in counterparts ("scenes"
       // vs "scena"), which is why a user scene icon never resolved before.
+      //
+      // USER device icons take one extra segment that built-in ones do not:
+      // /assets/userIcons/devices/User<N>/User<N>[state].<ext>. Omitting it is
+      // why this tool used to report user device icons as unfetchable, and that
+      // claim then sat in its own error text for weeks, steering at least one
+      // project off custom artwork entirely. Re-probed 15 Aug 2026:
+      //   /assets/userIcons/devices/User1072/User1072.svg → 200 image/svg+xml
+      //   /assets/userIcons/User1072/User1072.svg         → 200 text/html (SPA)
+      // The same segment is wrong for built-in icons, which 404 to the 1888-byte
+      // placeholder under /assets/icon/fibaro/devices/..., so it is user-only.
+      const deviceDir = args.userIcon ? `${base}/devices` : base;
       const candidates: string[] = [];
       if (args.category === 'device') {
         if (typeof args.state === 'number') {
-          candidates.push(`${base}/${name}/${name}${args.state}.${ext}`);
+          candidates.push(`${deviceDir}/${name}/${name}${args.state}.${ext}`);
         } else {
-          candidates.push(`${base}/${name}/${name}.${ext}`);
-          candidates.push(`${base}/${name}/${name}0.${ext}`);
+          candidates.push(`${deviceDir}/${name}/${name}.${ext}`);
+          candidates.push(`${deviceDir}/${name}/${name}0.${ext}`);
         }
       } else if (args.category === 'room') {
         candidates.push(`${base}/rooms/${name}.${ext}`);
@@ -236,7 +247,7 @@ export const icons: ToolModule = {
       }
 
       const userDeviceNote = args.category === 'device' && args.userIcon
-        ? ' NOTE: user-uploaded *device* icons are not served under any known /assets path on 5.210.12 — they are addressable by numeric id via a device\'s deviceIcon property, but not fetchable as a file. Built-in device icons work.'
+        ? ' NOTE: user device icons are served, under /assets/userIcons/devices/User<N>/User<N>[state].<ext>, which is what this tool tried. If that missed, the likely causes are a wrong fileExtension (check list_icons — sets are often .png where a QuickApp tile is .svg) or a state set, whose files are suffixed: pass `state` to fetch one.'
         : '';
       throw new Error(
         `get_icon: could not fetch '${args.name}' (${args.category}, .${ext}). HC3 returns 200 with a placeholder for missing icons rather than 404, so each candidate was checked for content and rejected:\n  ${tried.join('\n  ')}\n` +
