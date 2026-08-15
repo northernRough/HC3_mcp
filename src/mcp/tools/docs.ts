@@ -8,6 +8,7 @@ import { configurationGuide } from '../docs/configuration';
 import { programmingGuide } from '../docs/quickapp-programming';
 import { scenesGuide } from '../docs/lua-scenes';
 import { examples } from '../docs/programming-examples';
+import { apiNotes } from '../docs/api-notes';
 
 export const docs: ToolModule = {
   schemas: [
@@ -68,9 +69,49 @@ export const docs: ToolModule = {
           }
         }
       },
+      {
+        name: 'get_hc3_api_notes',
+        description: 'Gateway-wide REST behaviour that cuts across every tool: endpoints that are dead despite being documented, and **writes that report success without doing anything**.\n\n`silent_writes` is the one to read if you read either. It is the catalogue behind this server\'s first instruction — a call that does not throw has not necessarily worked — with every known instance and, importantly, the limit of the defence: this server verifies each write by reading it back, which cannot catch the case where HC3 stores your value faithfully and never acts on it. A Z-Wave parameter PUT is exactly that, and the read-back agrees with you while the physical device never hears about it.\n\n`dead_endpoints` is served from KNOWN_DEAD_ENDPOINTS.md itself rather than a copy, so it cannot drift from the file the repository maintains. Consult it before hand-building any REST path: several documented endpoints return 501/500/404 here, and two return a misleading 200 carrying the wrong body entirely.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            topic: {
+              type: 'string',
+              description: 'Topic (optional). "silent_writes" — the catalogue of writes that lie about succeeding. "dead_endpoints" — documented endpoints that do not work on 5.2x, and the ones that answer 200 with the wrong thing.',
+              enum: ['silent_writes', 'dead_endpoints', 'all']
+            }
+          }
+        }
+      },
   ],
 
   handlers: {
+    async get_hc3_api_notes(_hc3, args: any): Promise<any> {
+      const topic = args?.topic || 'all';
+
+      // `dead_endpoints` is a getter that reads the shipped markdown, so spread
+      // rather than hand back the object: an `all` response must contain the
+      // resolved content, not a lazy accessor that never fires over JSON-RPC.
+      if (topic === 'all') {
+        return {
+          title: 'HC3 API notes',
+          sections: {
+            overview: apiNotes.overview,
+            silent_writes: apiNotes.silent_writes,
+            dead_endpoints: apiNotes.dead_endpoints,
+          },
+        };
+      } else if (topic === 'silent_writes' || topic === 'dead_endpoints') {
+        return { title: 'HC3 API notes', section: apiNotes[topic as 'silent_writes' | 'dead_endpoints'] };
+      } else {
+        return {
+          title: 'HC3 API notes',
+          available_topics: ['silent_writes', 'dead_endpoints'],
+          overview: apiNotes.overview,
+        };
+      }
+    },
+
     async get_hc3_configuration_guide(_hc3, args: any): Promise<any> {
       const topic = args.topic || 'all';
 

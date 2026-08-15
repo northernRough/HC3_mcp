@@ -2,6 +2,23 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.23.0] - 2026-08-15
+
+### Added
+- **`get_hc3_api_notes`** — two cross-cutting references that belonged to neither the QuickApp nor the scenes guide, and were unreachable from a client.
+
+  **`silent_writes`** is the catalogue behind this server's first instruction, collected for the first time: `setGlobalVariable` on a variable that does not exist; a Z-Wave parameter PUT that caches without transmitting; the `select` that blanks a tile; `create_quickapp` discarding `uiCallbacks`; `deviceIcon` set on a QuickApp leaving the tile blank; an external `properties.icon` put being discarded; a bare image where a state set was required; variable writes restarting the QA out from under a later call; and 200-with-a-placeholder for missing assets. Individually these read as trivia. Collected, they teach the reflex.
+
+  It also states the thing the individual entries cannot: **read-back verification has a limit**. Every mutating tool here re-fetches and compares, which catches a field ignored, coerced, or written elsewhere. It cannot catch HC3 storing your value faithfully and never acting on it — the Z-Wave parameter cache is exactly that, and the device record agrees with you while the node never hears. Read-back proves the record; only the world proves the effect.
+
+  **`dead_endpoints`** is served from `KNOWN_DEAD_ENDPOINTS.md` itself at call time, not copied into TypeScript. The file already ships in the package, so there is no second copy to drift — which matters given this week produced two separate cases of one source file contradicting itself.
+
+### Fixed
+- **The server instructions pointed every session at a file no client can read.** They said "KNOWN_DEAD_ENDPOINTS.md lists them" for four releases. That file is in the git repository; a client talking to a deployed unit has no way to open it. The line now names the tool, and `unit-api-notes.mjs` fails if anyone reverts it to a bare filename.
+
+### Changed
+- **The silent-write instruction was shortened to fund the new pointer**, per the rule `unit-instructions.mjs` states in its own comment: a new fact is funded by cutting one, not by lifting the 4,200-character cap. The enumerated examples moved into the catalogue where they can be complete; the instruction keeps the rule, the one instance that defeats read-back, and the pointer.
+
 ## [4.22.0] - 2026-08-15
 
 ### Added

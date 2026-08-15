@@ -1342,6 +1342,24 @@
     }
   },
   {
+    "name": "get_hc3_api_notes",
+    "description": "Gateway-wide REST behaviour that cuts across every tool: endpoints that are dead despite being documented, and **writes that report success without doing anything**.\n\n`silent_writes` is the one to read if you read either. It is the catalogue behind this server's first instruction — a call that does not throw has not necessarily worked — with every known instance and, importantly, the limit of the defence: this server verifies each write by reading it back, which cannot catch the case where HC3 stores your value faithfully and never acts on it. A Z-Wave parameter PUT is exactly that, and the read-back agrees with you while the physical device never hears about it.\n\n`dead_endpoints` is served from KNOWN_DEAD_ENDPOINTS.md itself rather than a copy, so it cannot drift from the file the repository maintains. Consult it before hand-building any REST path: several documented endpoints return 501/500/404 here, and two return a misleading 200 carrying the wrong body entirely.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Topic (optional). \"silent_writes\" — the catalogue of writes that lie about succeeding. \"dead_endpoints\" — documented endpoints that do not work on 5.2x, and the ones that answer 200 with the wrong thing.",
+          "enum": [
+            "silent_writes",
+            "dead_endpoints",
+            "all"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "get_hc3_configuration_guide",
     "description": "HC3 gateway configuration reference: network, users, rooms, Z-Wave inclusion and settings, time, location, VoIP. Background for administering the controller rather than programming it — for writing Lua, use get_hc3_lua_scenes_guide or get_hc3_quickapp_programming_guide instead.",
     "inputSchema": {
