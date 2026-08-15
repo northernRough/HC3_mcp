@@ -16,7 +16,7 @@ import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
 import { listResources, readResource } from './resources';
-import { recordFailure } from './friction';
+import { recordFailure, invitesAFinding, FINDING_NUDGE } from './friction';
 import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
 import { alarm } from './tools/alarm';
 import { sprinklers } from './tools/sprinklers';
@@ -75,16 +75,20 @@ const SERVER_INSTRUCTIONS = [
   '',
   '- HC3 does not 404 a missing asset. It answers **200 with a placeholder**: a 1888-byte "unknown icon" SVG under /assets/icon, or its web UI index.html elsewhere. HTTP status alone never proves an asset exists — check the content.',
   '- Device icons are state SETS, and the set size is a property of the DEVICE TYPE: com.fibaro.genericDevice holds 1 image, binarySwitch 2 (states 0/100), multilevelSwitch 11 (0,10,...,100). HC3 switches between them from the device value on its own. Supplying the wrong shape fails silently: it registers, attaches, and renders blank.',
-  '- Icon PNGs must be exactly 128x128 (HC3 answers 400 INVALID_ICON_SIZE). Colour type does NOT matter; RGBA is fine.',
-  '- Icon names (User<N>) are unique only WITHIN a bucket, and freed ids are reused. Never match an icon across buckets by name.',
+  '- Icon PNGs must be exactly 128x128 (HC3 answers 400 INVALID_ICON_SIZE); colour type does NOT matter, RGBA is fine. Icon names (User<N>) are unique only WITHIN a bucket and freed ids are reused, so never match an icon across buckets by name.',
   '- Writing scene or QuickApp Lua? Call get_hc3_lua_scenes_guide / get_hc3_quickapp_programming_guide first: they correct Fibaro\'s docs and widely repeated forum advice. Verified here: a firing scene timer does NOT restart the scene and closures survive.',
   '- Bodies are large: get_scenes returns every scene in full (~1.9 MB) — use get_scene, with startLine/endLine or contains to read part of one. patch_scene_content/patch_quickapp_file send only the change and refuse one that no longer fits.',
   '- Several documented endpoints return 501 here; KNOWN_DEAD_ENDPOINTS.md lists them. Prefer a tool over a hand-built path.',
   '- **A call that does not throw has not necessarily worked.** HC3 stores requests it will not act on, and reports success. Verified: fibaro.setGlobalVariable writes an EXISTING global fine but **silently does nothing** for one that does not exist — a heartbeat went into a void for a day. Likewise a QuickApp `select` missing `selectionType`, or with `values` as `{}` not `[]`, is stored and reported verified, then blanks the **entire** tile. After any write, read back what you care about, not the return code.',
   '- Writing a QuickApp variable from outside **restarts that QuickApp**, once per call — eight variables means eight restarts. Use update_multiple_quickapp_files for several files (one restart), and order variable writes before anything else that restarts.',
   '- Mutating tools read back and verify; errors are specific, so read them rather than retrying blind.',
-  '- Surprised by a tool, or saw a success the gateway disagreed with? report_finding records it (local only; needs a one-variable reproduction).',
   '- Tool schemas cache at connect; a reconnect may not refresh them, so start a NEW SESSION after a redeploy. get_server_info shows the live version even when yours are stale.',
+  '',
+  '**This server collects its own defects, and expects you to file them.** report_finding is not a courtesy — it is how the facts above got here, and how the next wrong one gets removed.',
+  '- File it in the SAME TURN you discover it. Not at the end of the session: by then the exact error text and the sequence that produced it are gone, and a problem you worked around feels resolved when it is only hidden. Do not ask permission and do not wait to be asked.',
+  '- Call it when: a tool that worked becomes unavailable; a documented path or parameter turns out to be wrong; a write reports success and a read-back disagrees; you find a working method this server does not document; **you conclude a capability is impossible**; or you build a workaround because a tool was missing or refused.',
+  '- That impossible-capability case is the expensive one. A wrong negative conclusion is recorded as settled and steers every later session away from something that works. It is also the ONLY case worth raising with the user, because only they know what was abandoned on your say-so.',
+  '- Unsure findings are wanted: write "not isolated" in the reproduction and file it anyway. Local only, redacted, nothing transmitted. A postponed finding is a lost one.',
   '',
   'At-a-glance read-only resources: hc3://health (anything broken), hc3://watchdog (automation alive), hc3://binder (bindings resolved), hc3://globals (automation state).',
 ].join('\n');
@@ -309,14 +313,20 @@ class HC3MCPServer {
       // HC3's response body all along. As isError content the message
       // reaches the model and the user verbatim.
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const toolName = (request.params as any)?.name ?? 'unknown';
       // Local, redacted, best-effort. Never allowed to affect the response.
-      recordFailure((request.params as any)?.name ?? 'unknown', errorMessage);
+      recordFailure(toolName, errorMessage);
+      // An error is the moment a finding is cheapest to write and likeliest to
+      // be skipped, so ask for it here rather than hoping it is remembered.
+      const text = invitesAFinding(toolName, errorMessage)
+        ? errorMessage + FINDING_NUDGE
+        : errorMessage;
       return {
         jsonrpc: '2.0',
         id: request.id,
         result: {
           isError: true,
-          content: [{ type: 'text', text: errorMessage }],
+          content: [{ type: 'text', text }],
         },
       };
     }

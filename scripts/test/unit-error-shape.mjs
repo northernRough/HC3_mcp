@@ -78,5 +78,44 @@ check('a malformed resources/read IS still a protocol error', () => {
 });
 
 await new Promise(r => setTimeout(r, 300));
+// ---------------------------------------------------------------------------
+// 4.21.0 — the finding nudge, and where it must NOT appear.
+//
+// An error is the moment a finding is cheapest to write and likeliest to be
+// skipped. But firing the prompt on every refusal would fill the friction log
+// with the guards working correctly and train everyone to ignore the line.
+// ---------------------------------------------------------------------------
+
+const { invitesAFinding } = await import('../../out/mcp/friction.js');
+
+check('a gateway error invites a finding', () => {
+  assert.ok(invitesAFinding('create_scene', 'HTTP 400: Bad Request - {"reason":"SceneValidationError"}'));
+  assert.ok(invitesAFinding('get_device_info', 'HTTP 500: Internal Server Error'));
+});
+
+check('a post-write verification failure invites one, despite naming its tool', () => {
+  // The case that must not be missed: the write said yes, the read-back said
+  // no. This server phrases it, so it looks local, but it is exactly the class
+  // the whole server exists to catch.
+  assert.ok(invitesAFinding('create_scene', 'create_scene: post-create name mismatch. Submitted "a", stored "b".'));
+  assert.ok(invitesAFinding('modify_device', 'modify_device: write did not verify — properties.icon still reads the old value.'));
+});
+
+check('a deliberate refusal does NOT invite one', () => {
+  // These are the tool working: it saw a call it knew was wrong and said so.
+  assert.ok(!invitesAFinding('upload_icon', 'upload_icon: category "device" requires deviceTemplate — the Fibaro device type...'));
+  assert.ok(!invitesAFinding('create_scene', 'create_scene: `conditions` must be a Lua source STRING, not a object.'));
+  assert.ok(!invitesAFinding('patch_quickapp_file', 'patch_quickapp_file: `old` matched 3 times, expected 1. Nothing was written.'));
+});
+
+check('configuration and routing errors do NOT invite one', () => {
+  assert.ok(!invitesAFinding('get_devices', 'Fibaro HC3 not configured.'));
+  assert.ok(!invitesAFinding('nope', 'Unknown tool: nope'));
+});
+
+check('an unexpected internal error invites one', () => {
+  assert.ok(invitesAFinding('get_scene', 'Cannot read properties of undefined (reading \'content\')'));
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll error-shape checks passed');
 process.exit(failures ? 1 : 0);

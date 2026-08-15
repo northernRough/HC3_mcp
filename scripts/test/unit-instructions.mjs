@@ -35,8 +35,38 @@ check('initialize returns an instructions string', () => {
 });
 
 check('it stays within a sane context budget', () => {
-  // Injected into every session. Past ~3 KB it stops being a summary.
-  assert.ok(text.length < 3000, `${text.length} chars — trim it`);
+  // Injected into every session, so the cap is a real cost, not a style rule.
+  //
+  // Raised from 3000 to 4200 in 4.21.0 for the reporting protocol, and that
+  // raise was argued rather than drifted into. Everything else here is a FACT,
+  // and a fact competes with other facts for the budget — the icon rules were
+  // consolidated rather than the cap lifted, twice. The protocol is not a fact
+  // but the mechanism that keeps the facts true: four defects were found by
+  // this server's own telemetry in one night while none were reported by the
+  // sessions that hit them, because a problem you work around feels resolved.
+  // Fixing that is worth more per character than any single gateway fact.
+  //
+  // Fund a new FACT by cutting one. Only argue for the cap again if the
+  // mechanism itself changes.
+  assert.ok(text.length < 4200, `${text.length} chars — trim it`);
+});
+
+check('sets a standing expectation to report defects, not a passive offer', () => {
+  assert.match(text, /report_finding/);
+  // The failure this fixes: findings noticed mid-session, worked around, and
+  // never filed, because nothing said when to file them.
+  assert.match(text, /SAME TURN/);
+  assert.match(text, /[Dd]o not ask permission/);
+  assert.match(text, /not isolated/);
+});
+
+check('names the triggers, because "surprised you" does not fire reliably', () => {
+  assert.match(text, /becomes unavailable/);
+  assert.match(text, /read-back disagrees/);
+  assert.match(text, /workaround/);
+  // The expensive one: a wrong negative conclusion is recorded as settled and
+  // steers every later session away from something that works.
+  assert.match(text, /capability is impossible/);
 });
 
 check('carries the placeholder-not-404 rule', () => {
@@ -120,9 +150,14 @@ check('does NOT claim a QuickApp must install its own view', () => {
   assert.ok(!/install its own view|must install.*viewLayout/i.test(text));
 });
 
-check('invites findings, with the one-variable bar stated', () => {
-  assert.match(text, /report_finding/);
-  assert.match(text, /one-variable reproduction/);
+check('expects a reproduction without demanding certainty', () => {
+  // The one-variable bar itself now lives in report_finding's own description,
+  // where the format detail belongs. Putting it here too cost characters and,
+  // worse, read as a hurdle — which is the opposite of what these lines are
+  // for. What the instructions must carry is that a reproduction is expected
+  // and that an un-isolated one is still wanted.
+  assert.match(text, /reproduction/);
+  assert.match(text, /not isolated/);
 });
 
 check('makes no claim this session did not verify', () => {

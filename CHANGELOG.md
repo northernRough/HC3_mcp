@@ -2,6 +2,24 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.21.0] - 2026-08-14
+
+### Changed
+- **report_finding is now an expectation, not an offer.** Its description explained the format well and never said *when* to call it, so it read as available rather than expected. The cost is measurable: four defects were found in one night by this server's own telemetry, and **not one was reported by the session that hit it** — each was noticed, worked around, and left behind, because working around a problem feels like resolving it.
+
+  Three changes, in descending order of effect.
+
+  **1. The server instructions now set a standing expectation.** They are the only channel that lands before a tool is chosen, so it is the only place that can ask for something rather than wait to be discovered. The load-bearing instruction is *same turn*: file it when you find it, not at the end of the session, by which time the exact error text and the sequence that produced it are gone. It also says not to ask permission and not to wait to be asked, and that an un-isolated finding marked "not isolated" is wanted, because a postponed finding is a lost one.
+
+  **2. The triggers are named, because "surprised you" does not fire reliably.** A tool that worked becomes unavailable; a documented path or parameter turns out wrong; a write reports success and a read-back disagrees; you find a working method this server does not document; **you conclude a capability is impossible**; you build a workaround because a tool was missing or refused. That fifth one is the expensive case and nothing previously prompted it: a wrong negative conclusion is recorded as settled and steers every later session away from something that works. This project has already shipped one — user icons were concluded unrenderable on 12 August, which was false. It is also the only case worth raising with the user, since only they know what was abandoned on the agent's say-so.
+
+  **3. Errors now ask for the finding at the point of pain**, which is where one is cheapest to write and likeliest to be skipped. The prompt is **selective**: `invitesAFinding` fires on gateway errors, post-write verification failures and unexpected internal errors, and stays silent on this server's own deliberate refusals. Firing on every refusal would fill the friction log with the guards working correctly and train everyone to ignore the line. A verification failure is the case that must not be missed — it is phrased like a local refusal because this server raises it, but it means the write said yes and the read-back said no.
+
+- **The instructions cap is raised from 3000 to 4200 characters, and the argument is recorded in the test.** Every previous addition was funded by cutting an existing fact, twice by consolidating the icon rules rather than lifting the cap. This one is different in kind: the protocol is not a fact competing with other facts, it is the mechanism by which the facts get corrected. `unit-instructions.mjs` now carries that reasoning next to the assertion, so the next person to add a line knows the rule is still "fund a new fact by cutting one".
+
+### Added
+- **`invitesAFinding` and `FINDING_NUDGE` in `friction.ts`**, with `unit-error-shape.mjs` asserting both sides: a 400 from the gateway and a `post-create name mismatch` invite a finding; `upload_icon: category "device" requires deviceTemplate`, a patch refusing a non-unique `old`, and `Fibaro HC3 not configured` do not. Kept in `friction.ts` rather than the server module so a test can import the predicate without booting a server.
+
 ## [4.20.1] - 2026-08-14
 
 ### Fixed
