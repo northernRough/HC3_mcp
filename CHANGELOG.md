@@ -2,6 +2,21 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.21.1] - 2026-08-15
+
+No runtime change. `src/` is untouched since 4.21.0, so the published tarball is functionally identical; this release exists to carry the test-harness fix below through the release path that should have caught it.
+
+### Fixed
+- **The golden-snapshot check could not see description drift, and four releases shipped a stale snapshot straight through it.** `phase0-parity.mjs` compared `inputSchema` and never `description`. Every drift in 4.19.2, 4.20.0, 4.20.1 and 4.21.0 was description-only, so the check reported `Parity: PASS` on all four. Verified by hand rather than assumed: replacing a tool's description with `WRONG` and running without `--update` still exits 0.
+
+  CI caught the staleness only because its hygiene job regenerates with `--update` and diffs with git, which is a workaround for the check not doing its own job. A tool's description is its interface to the model, so drift there is drift. The comparison now covers both fields and names which of the two moved (`drift: create_scene (description)`).
+
+- **`release.yml` re-ran lint, `npm test` and `check-release-hygiene.mjs` under the comment "Same gates as CI", but not the golden step.** That is how 4.19.2, 4.20.0 and 4.21.0 published green while CI had been red on master since 13 August. Fixed indirectly and permanently by the `npm test` change below, rather than by adding a step that can fall out of sync again.
+
+### Added
+- **`--check` mode on `phase0-parity.mjs`.** Total equality against the committed snapshot, with a tool added since the snapshot counted as staleness too, and it never writes. `--update` and `--check` together are refused as contradictory. Because it no longer needs git to detect drift, the gate can run anywhere.
+- **`npm test` runs `phase0-parity.mjs --check` first**, inside the existing `MCP_FRICTION_DISABLE=true` scope so it cannot pollute the friction log. One line puts the gate in the local loop before a push, in CI's four-version node matrix, and in the release, since `release.yml` already runs `npm test`.
+
 ## [4.21.0] - 2026-08-14
 
 ### Changed
