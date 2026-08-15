@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireCredentials } from './test/credentials.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'out/mcp');
@@ -35,11 +36,14 @@ const OUT = path.join(ROOT, 'out/mcp');
 export async function client() {
   const { HC3Client } = await import(path.join(OUT, 'hc3-client.js'));
   if (process.env.FIBARO_HOST) return HC3Client.fromEnv();
-  // Fall back to the MCP client config so a probe works without exporting
-  // credentials into the shell.
-  const cfgPath = path.join(os.homedir(), '.claude.json');
-  const env = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))?.mcpServers?.hc3?.env;
-  if (!env) throw new Error('No FIBARO_HOST in env and no hc3 MCP config found.');
+  // Delegate to the shared loader rather than keeping a second copy of this.
+  // The copy that used to live here looked only in ~/.claude.json, so on the
+  // deployed unit — where credentials are in an EnvironmentFile and the
+  // service user's home has no client config — every probe died with a raw
+  // ENOENT for a file it should never have wanted. Found by running it there
+  // rather than reasoning about it.
+  const { env, source } = requireCredentials();
+  if (process.env.PROBE_VERBOSE) console.log(`  [probe] credentials: ${source}`);
   return new HC3Client({
     host: env.FIBARO_HOST, port: Number(env.FIBARO_PORT || 80),
     username: env.FIBARO_USERNAME, password: env.FIBARO_PASSWORD,
