@@ -17,6 +17,9 @@ No runtime change. `src/` is untouched since 4.21.0, so the published tarball is
 - **`--check` mode on `phase0-parity.mjs`.** Total equality against the committed snapshot, with a tool added since the snapshot counted as staleness too, and it never writes. `--update` and `--check` together are refused as contradictory. Because it no longer needs git to detect drift, the gate can run anywhere.
 - **`npm test` runs `phase0-parity.mjs --check` first**, inside the existing `MCP_FRICTION_DISABLE=true` scope so it cannot pollute the friction log. One line puts the gate in the local loop before a push, in CI's four-version node matrix, and in the release, since `release.yml` already runs `npm test`.
 
+### Changed
+- **`README.md` corrected where this change made it wrong.** It described phase 0 as checking "name parity" and the CI golden step as catching "a schema edit", both of which understated the check and neither of which would have caught the drift that actually shipped. It also told the reader to run phase 0 manually before a merge, which `npm test` now does for them; it now points at `--update` as the thing to run after an intentional tool change, which is the step that was actually being missed.
+
 ## [4.21.0] - 2026-08-14
 
 ### Changed

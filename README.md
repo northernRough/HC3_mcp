@@ -138,7 +138,7 @@ on disposable resources.
 
 | Phase | What it catches | Mutating? |
 |---|---|---|
-| 0 | tool count / schema validity / name parity vs golden | no |
+| 0 | tool count / schema validity / full parity vs golden (names, descriptions, schemas) | no |
 | 1 | every read tool returns expected response shape | no |
 | 2 | create / update / delete round-trips end-to-end | YES — gated |
 | 3 | known-bitten regressions (UTF-8, 501, content shape, validation) | partial |
@@ -150,6 +150,14 @@ on disposable resources.
 npm run compile
 node scripts/test/phase0-parity.mjs
 node scripts/test/phase1-readonly-sweep.mjs
+```
+
+Phase 0 needs no gateway and runs automatically as the first step of
+`npm test`, in `--check` mode. After an intentional tool change,
+regenerate the snapshot it checks against and commit the result:
+
+```bash
+node scripts/test/phase0-parity.mjs --update
 ```
 
 The harness reads `FIBARO_HOST` / `FIBARO_USERNAME` / `FIBARO_PASSWORD`
@@ -182,16 +190,21 @@ over stdio with stub env:
 - **release hygiene** — `package.json`, the newest `CHANGELOG.md` entry
   and `src/mcp/version.ts` must agree on the version
   (`scripts/check-release-hygiene.mjs`)
-- **golden snapshot freshness** — `tools.golden.json` is regenerated and
-  the build fails if it moved, so a schema edit cannot land without the
-  snapshot that documents it
+- **golden snapshot freshness**, checked twice. `npm test` runs
+  `phase0-parity.mjs --check`, which fails if the committed
+  `tools.golden.json` differs from what the server registers in any
+  name, description or schema. The hygiene job additionally regenerates
+  the file and fails if it moved, which catches the case `--check`
+  cannot: a snapshot hand-edited to match nothing. Since `release.yml`
+  also runs `npm test`, a release cannot ship a stale snapshot either
 - `npm pack --dry-run`, so a broken `files` list is caught before publish
   rather than after a bad tarball reaches the registry
 
-The phases that need a live gateway are not in CI and stay manual. Per
-`CLAUDE.md` ("Test before commit"): at minimum run phase 0 and phase 1
-before merging anything that touches MCP protocol or HC3 API code.
-Phase 2 is worth running before any release that touches CRUD tools.
+The phases that need a live gateway are not in CI and stay manual. Phase
+0 no longer needs remembering, since `npm test` runs it; per `CLAUDE.md`
+("Test before commit"), run phase 1 before merging anything that touches
+MCP protocol or HC3 API code. Phase 2 is worth running before any
+release that touches CRUD tools.
 
 See `scripts/test/README.md` for per-phase detail.
 
