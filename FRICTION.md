@@ -585,7 +585,7 @@ The axis is not the element, it is **who fired the event**:
 | trace emitted | `UIEvent:` | `onAction:` |
 
 Twelve cells through the tool, every one a table dispatched to the registered
-name, buttons and selects alike. Nineteen taps, every one positional to
+name, buttons and selects alike. Eighteen taps, every one positional to
 `UIAction`, buttons and selects alike, including on the QA whose callbacks were
 still HC3's generated `ui<Element>On<Event>` names. Both directions clean, no
 mixed cells.

@@ -13,7 +13,7 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
   | arguments | ONE table `{eventType, elementName, values, deviceId}` | **positional** — `(eventType, elementName[, values])` |
   | trace emitted | `UIEvent:` | `onAction:` |
 
-  Twelve tool-fired cells were table-to-the-registered-name, buttons and selects alike; nineteen taps were positional-to-`UIAction`, buttons and selects alike. No mixed cells in either direction.
+  Twelve tool-fired cells were table-to-the-registered-name, buttons and selects alike; eighteen taps were positional-to-`UIAction`, buttons and selects alike. No mixed cells in either direction.
 
   The tool is the more generous path on both axes, which makes it a trap precisely where its own description recommended it: **as a verification step**. A QuickApp verified through it can be completely dead under a finger. Both descriptions now carry the table, and `call_ui_event`'s says plainly what it is and is not evidence for.
 
