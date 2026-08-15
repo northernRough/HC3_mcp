@@ -534,7 +534,7 @@ cheap insurance.
 ## A multi-select delivers its whole selection, nested
 
 Every toggle sends the FULL current selection, one level deep:
-\`{values = {{"4503","4504"}}}\` in the table form. An empty selection arrives as
+\`{values = {{"1001","1002"}}}\` in the table form. An empty selection arrives as
 \`{values = {{}}}\` and is MEANINGFUL — it means the user cleared it, not that
 nothing happened. Do not treat it as a no-op.
 

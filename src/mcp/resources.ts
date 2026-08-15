@@ -9,10 +9,10 @@
 // Every resource is READ-ONLY and renders Markdown, so the output is
 // legible to a person and to an agent without further parsing.
 //
-// SAFETY: QuickApp variable arrays can hold credentials — deviceBinder 4826
-// carries HC3_USER / HC3_PASS next to its binding cache. Resources here read
-// named variables individually and never emit a whole quickAppVariables
-// array. See redactedVarLookup().
+// SAFETY: QuickApp variable arrays routinely hold credentials — a binder QA
+// observed in the field kept HC3_USER / HC3_PASS in the same array as its
+// binding cache. Resources here read named variables individually and never
+// emit a whole quickAppVariables array. See redactedVarLookup().
 
 import { HC3Client } from './hc3-client';
 import { parseBindBlocks } from './tools/audit';
