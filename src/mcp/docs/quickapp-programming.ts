@@ -413,6 +413,157 @@ end)
         `
       },
 
+      ui: {
+        title: 'QuickApp UI — the tile, its callbacks, and why it goes dead',
+        content: `
+## Read this before building a tile
+
+A QuickApp UI fails in a particular way on HC3: it renders, it accepts input,
+and nothing happens. There is no error in any layer. Every trap below was
+measured on firmware 5.210.12, and most of them cost somebody weeks.
+
+The single most important fact is at the bottom of this page, under "Two
+dispatch paths". If you read nothing else, read that.
+
+## Order of operations
+
+1. \`create_quickapp\` with an \`initialView\`.
+2. Write the callbacks you actually want with \`modify_device\`. You must do
+   this: see below.
+3. Push the Lua with \`update_quickapp_file\` / \`update_multiple_quickapp_files\`.
+4. Read the view back and read \`uiCallbacks\` back. Both writes can succeed and
+   still be wrong.
+
+## The view: one malformed select destroys the whole tile
+
+A \`select\` missing \`selectionType\`, or carrying \`values\` as a JSON object
+rather than an array, makes HC3 store the layout, report the write verified,
+and then serve an EMPTY view — every other component gone, no error anywhere.
+
+- \`selectionType\` is required on EVERY select, \`"single"\` or \`"multi"\`.
+- \`values\` and \`selectedItems\` must be ARRAYS. In Lua \`{}\` encodes as \`{}\`
+  and not \`[]\`, so use \`json.array()\`.
+- After ANY view write, call \`get_plugin_view\` and confirm the components are
+  still there. A verified write does not mean a rendered tile.
+
+\`modify_device\` refuses the two known-bad shapes outright, so the trap is only
+reachable if you write the layout by some other route.
+
+An externally-PUT \`viewLayout\` DOES render. A QuickApp does not have to install
+its own view from Lua.
+
+## uiCallbacks: what you supply at creation is not what you get
+
+\`create_quickapp\` DISCARDS a supplied \`uiCallbacks\` and regenerates the table
+from the view. It rewrites two things, not one:
+
+- the callback, to a generated \`ui<ElementName>On<EventType>\` method, and
+- **the eventType**, normalising it to \`onReleased\` — a select registered
+  \`onToggled\` comes back \`onReleased\`.
+
+The layout still renders, so this is easy to miss. Worse, the generated method
+name is one your QuickApp does not implement, so every event lands on a method
+that does not exist and NOTHING RUNS. A tile that has never had its callbacks
+written back is deaf, and looks identical to one that works.
+
+Fix it with a \`modify_device\` write of the complete array:
+
+\`\`\`lua
+-- uiCallbacks is array-valued: HC3 REPLACES it wholesale, so submit every
+-- entry, not just the one you are changing.
+{ { name = "btnGo",   eventType = "onReleased", callback = "UIAction" },
+  { name = "selZones", eventType = "onToggled",  callback = "UIAction" } }
+\`\`\`
+
+That write sticks, survives a later file push with the modified timestamp
+unchanged, and **needs no restart** to take effect. A restart was long assumed
+necessary here and is not; measured both ways.
+
+## Two dispatch paths, and they disagree
+
+This is the one that costs weeks. **How the event reaches your code depends on
+who fired it.**
+
+| | \`call_ui_event\` (this MCP) | a real tap in the app |
+|---|---|---|
+| handler called | the name registered in \`uiCallbacks\` | **always \`UIAction\`** |
+| arguments | ONE table \`{eventType, elementName, values, deviceId}\` | **positional** |
+| button args | — | \`(eventType, elementName)\` |
+| select args | — | \`(eventType, elementName, values)\` |
+| trace emitted | \`UIEvent:\` | \`onAction:\` |
+
+Measured by \`scripts/probe-uicallbacks.mjs\`: twelve cells through the tool,
+every one a table to the registered name; eighteen taps, every one positional
+to \`UIAction\`. Buttons and selects alike, in both directions, no mixed cells.
+
+Two consequences:
+
+1. **A named callback is not honoured under a finger.** Register whatever you
+   like; a tap calls \`UIAction\`. Do not build on the name.
+2. **\`call_ui_event\` is the more generous path on both axes**, so a QuickApp
+   verified only through it can be completely dead in the app. Use it to prove
+   the event path is live, then TAP THE TILE before believing it.
+
+So write one handler that accepts both shapes:
+
+\`\`\`lua
+function QuickApp:UIAction(a1, a2, a3)
+  local eventType, element, values
+  if type(a1) == "table" then          -- call_ui_event, and any future firmware
+    eventType, element, values = a1.eventType, a1.elementName, a1.values
+  else                                  -- a real tap
+    eventType, element, values = a1, a2, a3
+  end
+  -- ... dispatch on \`element\` here
+end
+\`\`\`
+
+## The eventType guard that eats your events
+
+A guard like \`if eventType ~= "onReleased" then return end\` is common, and it
+silently discards every select event, because a select fires \`onToggled\`. That
+single line is what killed a production multi-select picker for two weeks: the
+trace showed the event arriving and the QA's own log showed it being handled,
+one line before the guard dropped it.
+
+Dispatch on the element name and treat the eventType as information, not as a
+filter. Which eventType HC3 emits for a given element is not contractual, so
+registering an element under \`onToggled\`, \`onChanged\` AND \`onReleased\` is
+cheap insurance.
+
+## A multi-select delivers its whole selection, nested
+
+Every toggle sends the FULL current selection, one level deep:
+\`{values = {{"4503","4504"}}}\` in the table form. An empty selection arrives as
+\`{values = {{}}}\` and is MEANINGFUL — it means the user cleared it, not that
+nothing happened. Do not treat it as a no-op.
+
+## Icons on the tile
+
+The tile renders from \`properties.icon\`, not from \`deviceIcon\`. Setting
+\`deviceIcon\` alone on a freshly created QuickApp verifies as written and leaves
+the tile blank. What renders is a path write from INSIDE the owning QA:
+
+\`\`\`lua
+self:updateProperty("icon", { path = "/assets/userIcons/devices/User1054/User1054.svg", source = "HC" })
+\`\`\`
+
+An external \`api.put\` of \`properties.icon\` is accepted and silently discarded,
+so this one has to come from the QuickApp itself. \`deviceIcon\` IS a real write
+and is what drives HC3's automatic value-based state switching; the two are not
+alternatives so much as different mechanisms. See \`upload_icon\` for how icon
+state sets are shaped per device type.
+
+## What to verify, and how
+
+- view written → \`get_plugin_view\`, confirm components are present
+- callbacks written → read \`uiCallbacks\` back, confirm names AND eventTypes
+- event path live → \`call_ui_event\`, then \`get_debug_messages(type:"trace")\`
+  and look for the \`UIEvent:\` line
+- the thing actually works → **tap it on a phone**. Nothing else substitutes.
+        `,
+      },
+
       child_devices: {
         title: 'Child Device Management',
         content: `

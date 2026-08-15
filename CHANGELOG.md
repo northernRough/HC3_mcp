@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.22.0] - 2026-08-15
+
+### Added
+- **A `ui` topic in `get_hc3_quickapp_programming_guide`** — the QuickApp UI lifecycle in one place, because the knowledge existed and was effectively unreachable. There were ~9,750 characters of it spread across four tool descriptions (`modify_device` 3,112, `upload_icon` 3,078, `call_ui_event` 2,471, `create_quickapp` 1,091) and almost none in the guides: `quickapp-programming.ts` mentioned `viewLayout`/`uiCallbacks`/`UIAction`/`selectionType` **twice in 469 lines**, `programming-examples.ts` **not once in 880**. A tool description is only visible to someone who already chose that tool, so the trap that blanks an entire tile lived in `modify_device`, where nobody building their first tile has any reason to look.
+
+  Covers, in the order you hit them: the order of operations; the malformed-`select` trap that serves an empty view with no error; `create_quickapp` discarding supplied `uiCallbacks` and rewriting the eventType as well as the callback, which leaves a tile deaf because events land on a generated method the QA does not implement; writing them back with `modify_device` and needing no restart; **the two dispatch paths and their measured differences**; the eventType guard that silently eats every select event; multi-select payload nesting, where an empty selection is meaningful; and why a QuickApp tile needs `properties.icon` and not just `deviceIcon`.
+
+- **A `patterns` entry: a UI handler that survives both dispatch shapes.** The one piece of this that is liftable code rather than a constraint, and it is now mandatory rather than stylistic. Normalises table and positional forms, dispatches on the element instead of the eventType, and unwraps the nested multi-select payload.
+
+- **Pointers to the `ui` topic from the four tools that touch a UI** — `modify_device`, `call_ui_event`, `create_quickapp`'s `initialView`, and `upload_icon` — because the guide only helps if it is found at the moment of need. This follows the same reasoning as 4.19.2: prose buried in a long description does not get read, so the description's job is to route.
+
+### Fixed
+- **`upload_icon` still told people to attach a QuickApp icon with `deviceIcon` alone**, which verifies as applied and leaves the tile blank. Corrected to state both mechanisms and which one a QuickApp tile actually renders from: `properties.icon`, written from inside the owning QA, since an external `api.put` of it is accepted and discarded. This was reported through `report_finding` on 15 August and fixed in `get_icon` the same day; the sibling tool kept the wrong advice until now.
+
 ## [4.21.3] - 2026-08-15
 
 ### Fixed

@@ -389,6 +389,59 @@ Persist state as soon as an action has been taken, not at the end of the body.
 With \`restart = true\` a new trigger kills the instance mid-run, and anything held
 in memory but not yet written is lost while the physical action has already
 happened.
+
+## QuickApp: a UI handler that survives both dispatch paths
+
+HC3 delivers a UI event in two different shapes depending on who fired it, so a
+handler written against either one alone is half-dead. Measured on 5.210.12: a
+real tap always calls \`UIAction\` **positionally**, while \`call_ui_event\` calls
+the callback registered in \`uiCallbacks\` with a **single event table**. A tile
+verified only through the MCP can therefore be completely dead under a finger.
+
+\`\`\`lua
+-- Normalise both shapes, then dispatch on the ELEMENT, never on the eventType.
+local function uiEvent(a1, a2, a3)
+  if type(a1) == "table" then                 -- call_ui_event / event-table form
+    return a1.eventType, a1.elementName, a1.values
+  end
+  return a1, a2, a3                            -- a real tap: positional
+end
+
+-- A multi-select delivers its FULL current selection, nested one level:
+--   table form     {values = {{"4503","4504"}}}
+--   positional arg {"4503","4504"}
+-- An empty selection is MEANINGFUL — the user cleared it — so never treat it
+-- as "no event".
+local function selection(values)
+  if type(values) ~= "table" then return nil end
+  if type(values[1]) == "table" then return values[1] end
+  return values
+end
+
+function QuickApp:UIAction(a1, a2, a3)
+  local eventType, element, values = uiEvent(a1, a2, a3)
+  self:debug(("UI %s on %s"):format(tostring(eventType), tostring(element)))
+
+  if element == "btnRun" then
+    self:runNow()
+  elseif element == "selZones" then
+    local picked = selection(values)
+    if picked then self:applyZones(picked) end
+  end
+end
+\`\`\`
+
+Two things that look like defensive noise and are not. Dispatching on the
+element rather than the eventType matters because a guard such as
+\`if eventType ~= "onReleased" then return end\` silently eats every select event
+— a select fires \`onToggled\` — and that single line killed a production picker
+for two weeks while the logs showed the event arriving. And registering an
+element under \`onToggled\`, \`onChanged\` AND \`onReleased\` is cheap insurance,
+because which one HC3 emits for a given element is not contractual.
+
+Register the callbacks with \`modify_device\` after creation: \`create_quickapp\`
+discards supplied \`uiCallbacks\` and rewrites both the callback name and the
+eventType. See get_hc3_quickapp_programming_guide({topic:"ui"}).
 `
       },
 

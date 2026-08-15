@@ -455,7 +455,7 @@ export const quickappsExtSchemas: MCPTool[] = [
             },
             initialView: {
               type: "object",
-              description: "Optional initial UI view definition (see HC3 QuickApp view schema)."
+              description: "Optional initial UI view definition. Read get_hc3_quickapp_programming_guide({topic:'ui'}) before composing one: a select missing `selectionType`, or with `values` as an object rather than an array, makes HC3 serve an EMPTY view — the whole tile, no error. The view supplied here does take, but the `uiCallbacks` generated from it do not survive as written (see initialProperties)."
             }
           },
           required: ["name", "type"]

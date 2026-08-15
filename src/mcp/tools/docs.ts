@@ -28,14 +28,14 @@ export const docs: ToolModule = {
       },
       {
         name: 'get_hc3_quickapp_programming_guide',
-        description: 'HC3 QuickApp programming: Lua syntax, QuickApp methods, HTTP/TCP/UDP/MQTT clients, child devices.\n\n**Call this before writing or editing QuickApp Lua**, and read `gotchas` first even if you know Lua. That topic carries platform behaviour that is not guessable from the language and that the official docs omit or state wrongly — the `quickApp` global reporting as `userdata` with a null-type tostring while being fully usable, `getVariable` returning "" for a missing variable indistinguishably from an empty one, coroutines being unavailable (so any wrapper that fakes synchronous HTTP with `coroutine.yield` cannot work), external variable writes restarting the QuickApp once per call, and the real `createChildDevice` signature. Every item was observed on a live gateway.',
+        description: 'HC3 QuickApp programming: Lua syntax, QuickApp methods, HTTP/TCP/UDP/MQTT clients, child devices.\n\n**Call this before writing or editing QuickApp Lua**, and read `gotchas` first even if you know Lua. That topic carries platform behaviour that is not guessable from the language and that the official docs omit or state wrongly — the `quickApp` global reporting as `userdata` with a null-type tostring while being fully usable, `getVariable` returning "" for a missing variable indistinguishably from an empty one, coroutines being unavailable (so any wrapper that fakes synchronous HTTP with `coroutine.yield` cannot work), external variable writes restarting the QuickApp once per call, and the real `createChildDevice` signature. Every item was observed on a live gateway.\n\n**Building a tile? Read `ui` first.** QuickApp UIs fail by rendering correctly, accepting input and doing nothing at all, with no error anywhere: one malformed `select` serves an EMPTY view, `create_quickapp` discards the callbacks you supply and rewrites the eventType too, and — measured — a real tap always dispatches `UIAction` positionally while `call_ui_event` dispatches the registered name with an event table, so a tile can test green through this MCP and be dead under a finger.',
         inputSchema: {
           type: 'object',
           properties: {
             topic: {
               type: 'string',
-              description: 'Topic (optional). Start with "gotchas" — the platform behaviours that produce silent bugs. Then basic, methods, http, tcp, udp, websocket, mqtt, child_devices.',
-              enum: ['gotchas', 'basic', 'methods', 'http', 'tcp', 'udp', 'websocket', 'mqtt', 'child_devices', 'all']
+              description: 'Topic (optional). Start with "gotchas" — the platform behaviours that produce silent bugs. Read "ui" BEFORE building any tile: a QuickApp UI fails by rendering, accepting input and doing nothing, with no error in any layer. Then basic, methods, http, tcp, udp, websocket, mqtt, child_devices.',
+              enum: ['gotchas', 'ui', 'basic', 'methods', 'http', 'tcp', 'udp', 'websocket', 'mqtt', 'child_devices', 'all']
             }
           }
         }
@@ -56,7 +56,7 @@ export const docs: ToolModule = {
       },
       {
         name: 'get_hc3_programming_examples',
-        description: 'Practical HC3 code, by category.\n\n`patterns` is the one to reach for when building something rather than looking up a scenario: self-contained, gateway-tested components that lift straight into a scene or QuickApp — trigger parsing with a manual-run guard, a scene-variable state store with safe init, structured logging enriched with room names, a restart-safe scheduler for delays that must survive a reboot, window gating, a daily computation cache, a polling loop with backoff and jitter, a callback-based HTTP wrapper (coroutines do not work on HC3), a child-device factory with the persisted id map HC3 forces on you, rolling averages, and a default scene skeleton. The other categories are scenario snippets.',
+        description: 'Practical HC3 code, by category.\n\n`patterns` is the one to reach for when building something rather than looking up a scenario: self-contained, gateway-tested components that lift straight into a scene or QuickApp — trigger parsing with a manual-run guard, a scene-variable state store with safe init, structured logging enriched with room names, a restart-safe scheduler for delays that must survive a reboot, window gating, a daily computation cache, a polling loop with backoff and jitter, a callback-based HTTP wrapper (coroutines do not work on HC3), a child-device factory with the persisted id map HC3 forces on you, rolling averages, a default scene skeleton, and a QuickApp UI handler that survives both of HC3\'s dispatch shapes (a real tap calls `UIAction` positionally; `call_ui_event` calls the registered callback with an event table, so a handler written against either alone is half-dead). The other categories are scenario snippets.',
         inputSchema: {
           type: 'object',
           properties: {
