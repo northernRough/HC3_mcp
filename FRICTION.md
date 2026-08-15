@@ -417,7 +417,7 @@ tested. Some items predate MCP improvements that have since landed.
 
 | Verdict | Claim | Resolution |
 |---|---|---|
-| **confirmed** | Named `uiCallbacks` dispatch as `method(self, event)` with `{eventType, elementName, values, deviceId}` | **Resolved 13 Aug 2026 — both records were true.** HC3 rewrites named callbacks *at creation only*. Writing the named array back with `modify_device` afterwards sticks, survives a later `update_multiple_quickapp_files` push (modified timestamp unchanged), and dispatches the named method. Isolated by the reporting project on scratch QA 4950. The dispatch was re-verified here read-only from the `UIEvent:` trace line that probe left behind. |
+| **superseded 15 Aug** | Named `uiCallbacks` dispatch as `method(self, event)` with `{eventType, elementName, values, deviceId}` | Recorded 13 Aug as resolved: writing the named array back with `modify_device` sticks, survives a later `update_multiple_quickapp_files` push, and dispatches the named method. **The sticking is confirmed and the dispatch claim is not.** It was established with `call_ui_event`, which dispatches to the registered name; a real tap always calls `UIAction` positionally. See "The uiCallbacks conflict" below — this row is the one that put a tool-only result into `modify_device`'s description as an end-to-end guarantee. Kept rather than rewritten, because the failure was in the method, not the observation. |
 | **confirmed** | HC3 emits an undocumented trace-level `UIEvent:` line carrying the event table, immediately before dispatch | Re-verified here independently and read-only: `UICBPROBE trace UIEvent: {"values":[],"deviceId":4950,...}`. Means the UI event path can be confirmed without instrumenting the QuickApp. Now in the `call_ui_event` description. |
 | **confirmed** | `call_ui_event` returns nothing — no ack, no echo, no indication a callback was bound | Confirmed in this repo's own source. Fixed in 4.19.0: the tool now reports the matched `uiCallbacks` entry and warns when there is none. |
 | **confirmed** | `update_multiple_quickapp_files` returns only `{name, isMain, isOpen}`, so the push result cannot serve as verification | Confirmed in source. Fixed in 4.19.0 — both file-write tools now return `bytes` + `contentHash`, taken from the verify fetch they were already doing and discarding. |
@@ -569,28 +569,51 @@ Four observations, none of which has to be wrong:
 | 15 Aug | Irrigation, `selSeedZones`, a multi `select` | a **name** | `UIAction`, three **positional** args |
 | now | Irrigation, live `uiCallbacks` | five buttons on `UIAction`, the select on `seedlingZonesChanged` | — |
 
-Two rules explain all of it:
+**SETTLED 15 Aug 2026 by `scripts/probe-uicallbacks.mjs`.** A model was proposed
+here first — names honoured for buttons but not selects, argument shape
+following the dispatch path — and the probe **refuted it**. It is left in the
+history rather than quietly replaced, because it was wrong in the specific way
+worth remembering: it explained every observation available at the time. All of
+them had come through one channel.
 
-1. **A name is honoured for buttons and ignored for selects.** A select falls
-   back to `UIAction` whatever `uiCallbacks` says.
-2. **The argument shape follows the dispatch path**: an honoured binding
-   receives the event table, a fallback receives positional
-   `(eventType, elementName, values)`.
+The axis is not the element, it is **who fired the event**:
 
-`UIAction` is itself just a name under rule 1, which is why Irrigation's buttons
-get the table form and its select does not. It also explains the half-isolated
-part the reporter would not credit: adding `onChanged` and `onReleased` did not
-fix the dead picker, the QA **restart** did, because the runtime binding table is
-built at start.
+| | `call_ui_event` | a real tap in the app |
+|---|---|---|
+| handler called | the name registered in `uiCallbacks` | **always `UIAction`**, whatever is registered |
+| arguments | ONE table `{eventType, elementName, values, deviceId}` | **positional**: `(eventType, elementName)` for a button, `(eventType, elementName, values)` for a select |
+| trace emitted | `UIEvent:` | `onAction:` |
 
-**The discriminating test** is a select registered directly against `UIAction`.
-Positional there means the shape belongs to the element type; a table means it
-belongs to the fallback path. One scratch QA, four elements, one variable each:
-button+named, button+`UIAction`, select+named, select+`UIAction`, with each
-handler logging its own name, the argument count and the type of each argument.
-Fire each element **both** by a real tap and by `call_ui_event`, because whether
-the tool's channel dispatches identically to the app is itself unverified, and a
-probe that only fires its own channel cannot tell you.
+Twelve cells through the tool, every one a table dispatched to the registered
+name, buttons and selects alike. Nineteen taps, every one positional to
+`UIAction`, buttons and selects alike, including on the QA whose callbacks were
+still HC3's generated `ui<Element>On<Event>` names. Both directions clean, no
+mixed cells.
+
+So **the 15 Aug field report was right and this file's own model was wrong**.
+Irrigation's source comment saying the name "is NOT honoured" is correct for the
+only path its users take.
+
+Consequences, all now applied:
+
+- **`call_ui_event`'s description understated this to the point of being a
+  trap.** It is recommended in its own text as a verification step, and it is
+  more generous than reality on *both* axes: it will show a named callback
+  working when no tap will reach it, and hand a table where a tap hands strings.
+- **`modify_device`'s description asserted the named method "is dispatched"**,
+  which was only ever true through the tool. That is how a claim verified on 13
+  Aug through `call_ui_event` became a shipped end-to-end guarantee.
+- **A restart is NOT required** for a written-back binding to take effect,
+  which settles the variable the reporter could not isolate: their write was
+  sufficient and the restart incidental. Recorded on `modify_device`.
+- **`create_quickapp` normalises the eventType as well as the callback**: a
+  select registered `onToggled` comes back `onReleased`. Only the callback half
+  was documented.
+
+The general lesson is worth more than the specific fact. Every record that
+disagreed with the field report had been produced with `call_ui_event`, so they
+agreed with each other and with nothing a user does. **A tool that simulates an
+event is evidence about the tool until something outside it agrees.**
 
 #### Recorded, no server fix
 

@@ -385,9 +385,37 @@ if (HOLD_SECONDS > 0) {
       process.stdout.write(`\r  ...${Math.max(0, left - 15)}s remaining   `);
     }
     console.log('\n');
-    const tapped = parseProbeLines(await messagesSince(hc3, tapSince));
-    table('BY REAL TAP (both arms pooled)', tapped);
-    if (!tapped.length) console.log('    Nothing arrived from taps. Either none landed, or the app was not used.');
+    const tapMsgs = await messagesSince(hc3, tapSince);
+    const tapped = parseProbeLines(tapMsgs);
+    const tapTraces = traceLines(tapMsgs);
+    table('BY REAL TAP (arms pooled)', tapped);
+
+    // The raw lines are the evidence; the table is a convenience. Print both,
+    // because the whole question is a signature and a table flattens it.
+    console.log(`\n  RAW handler lines from taps (${tapped.length}):`);
+    for (const t of tapped) console.log(`    ${t.raw.slice(0, 160)}`);
+    console.log(`\n  RAW HC3 traces during the tap window (${tapTraces.length}):`);
+    for (const t of tapTraces.slice(0, 20)) console.log(`    ${t.slice(0, 160)}`);
+
+    const onAction = tapTraces.filter(t => t.includes('onAction:'));
+    const positional = tapped.filter(r => r.shape === 'positional');
+    console.log('\n  TAP VERDICT');
+    if (!tapped.length && !tapTraces.length) {
+      console.log('    Nothing arrived at all. Either no taps landed, or the app was not used.');
+    } else {
+      console.log(`    onAction: traces from taps : ${onAction.length}`);
+      console.log(`    positional dispatches      : ${positional.length} of ${tapped.length}`);
+      if (positional.length) {
+        console.log('    => a real tap DOES dispatch positionally where call_ui_event does not.');
+        console.log('       call_ui_event is not a faithful proxy for a tap, and its description');
+        console.log('       recommends it as a verification step. That needs fixing.');
+      } else if (tapped.length) {
+        console.log('    => a real tap dispatches the SAME way call_ui_event does: one table.');
+        console.log('       The 15 Aug positional claim is refuted as stated. Its onAction: line');
+        console.log('       was HC3\'s transport envelope, not the Lua call signature, and the');
+        console.log('       picker symptom is fully explained by the onReleased guard instead.');
+      }
+    }
   } finally {
     delete process.env.PROBE_KEEP;
     for (const a of ids) {

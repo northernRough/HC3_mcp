@@ -2,6 +2,31 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.21.3] - 2026-08-15
+
+### Fixed
+- **`call_ui_event` does not dispatch the way a finger does, and two tool descriptions presented its behaviour as HC3's.** Measured by the new `scripts/probe-uicallbacks.mjs`: twelve cells fired through the tool, then the same elements tapped in the iOS app.
+
+  | | `call_ui_event` | a real tap |
+  |---|---|---|
+  | handler called | the name registered in `uiCallbacks` | **always `UIAction`** |
+  | arguments | ONE table `{eventType, elementName, values, deviceId}` | **positional** — `(eventType, elementName[, values])` |
+  | trace emitted | `UIEvent:` | `onAction:` |
+
+  Twelve tool-fired cells were table-to-the-registered-name, buttons and selects alike; nineteen taps were positional-to-`UIAction`, buttons and selects alike. No mixed cells in either direction.
+
+  The tool is the more generous path on both axes, which makes it a trap precisely where its own description recommended it: **as a verification step**. A QuickApp verified through it can be completely dead under a finger. Both descriptions now carry the table, and `call_ui_event`'s says plainly what it is and is not evidence for.
+
+- **`modify_device` claimed a written-back named callback "is dispatched".** True only through `call_ui_event`. The claim entered the description from a 13 August result established with that tool, so the record agreed with itself and with nothing a user does. Now qualified, with the workaround stated: handle the event in `UIAction` as well.
+
+### Added
+- **`scripts/probe-uicallbacks.mjs`** — crosses element kind (button/select) with registered callback (a name / `UIAction`) with binding time (at creation / written back / written back with no restart). Every handler logs its own name, argument count and argument types, so the signature is read rather than inferred. `--hold` keeps the QuickApps alive for a human to tap and compares the two channels, which is the only reason the difference was found. All QuickApps are deleted in `finally`.
+
+- **Two behaviours nobody had recorded**, both from the same run and both now on the tools that expose them: `create_quickapp` normalises the **eventType** as well as the callback (a select registered `onToggled` returns `onReleased`), and a written-back binding needs **no restart** to take effect. The second settles a variable a field report had explicitly left open, in the direction it did not guess: the write was sufficient, the restart incidental.
+
+### Changed
+- **FRICTION.md records the refuted model, not just the answer.** A reconciling model was proposed in the ledger and killed by the probe. It is left in place with the evidence, because it was wrong in the way worth remembering: it explained every observation available, and every one of those had come through the same tool.
+
 ## [4.21.2] - 2026-08-15
 
 ### Fixed
