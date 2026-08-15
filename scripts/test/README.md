@@ -8,7 +8,7 @@ runnable. All read from environment variables (or the server's own `.env`):
 
 | File | Phase | What it checks | Mutating? |
 |---|---|---|---|
-| `phase0-parity.mjs` | 0 | tool count + schema validity + name parity vs golden | no |
+| `phase0-parity.mjs` | 0 | tool count + schema validity + full parity (names, descriptions, schemas) vs golden | no |
 | `phase1-readonly-sweep.mjs` | 1 | every read tool returns expected response shape | no |
 | `phase6-endpoint-audit.mjs` | 6 | every `hc3.request(...)` URL is live (catches latent dead endpoints) | no |
 | `phase3-edge-cases.mjs` | 3 | known-bitten regressions stay fixed (UTF-8, 501, content shape, validation) | partial |
@@ -21,7 +21,9 @@ Future phases 4 (concurrency / soak) and 5 (mcp-inspector conformance) — defer
 to a later session.
 
 The `unit-*.mjs` tests need no live HC3 — they inject a fake client and run
-against the compiled handlers. `npm test` runs them.
+against the compiled handlers. `npm test` runs them, preceded by
+`phase0-parity.mjs --check`, which needs no live HC3 either: it only lists the
+server's tools over stdio.
 
 ## Run
 
@@ -31,6 +33,8 @@ Compile first, then any of:
 npm run compile
 
 node scripts/test/phase0-parity.mjs                            # parity + schema
+node scripts/test/phase0-parity.mjs --check                    # strict: golden must match exactly (what npm test runs)
+node scripts/test/phase0-parity.mjs --update                   # rewrite golden after an intentional tool change
 node scripts/test/phase1-readonly-sweep.mjs                    # read-only sweep
 node scripts/test/phase1-readonly-sweep.mjs --tools=get_devices,get_scenes
 node scripts/test/phase6-endpoint-audit.mjs                    # endpoint audit

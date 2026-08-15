@@ -3,8 +3,23 @@
 //
 // Spawns the modularised server, lists tools, and:
 //   1. validates each tool has name/description/inputSchema with required shape;
-//   2. compares against tools.golden.json (if exists) — diffs reported but not fatal;
+//   2. compares against tools.golden.json;
 //   3. writes the current tool list to tools.golden.json on first run (use --update to overwrite).
+//
+// Modes:
+//   (none)     compare and fail on removed tools or drift; a NEW tool is
+//              reported but tolerated, since the snapshot legitimately lags a
+//              tool that was just added.
+//   --check    total equality: the committed snapshot must equal what the
+//              server produces, added tools included. Never writes. This is
+//              the gate npm test and CI run.
+//   --update   overwrite the snapshot from the live server.
+//
+// Descriptions are compared, not just inputSchema. They were not, once, and
+// four releases shipped a stale snapshot through a green Phase 0: every drift
+// was description-only, so the schema comparison saw nothing and CI caught it
+// only by regenerating and diffing with git. A tool's description is its
+// interface to the model — drift there is drift.
 //
 // Exit code: 0 on success, 1 on schema/parity failure.
 //
@@ -22,7 +37,19 @@ const SERVER = resolve(PROJECT_ROOT, 'out/mcp/hc3-mcp-server.js');
 const GOLDEN = resolve(__dirname, 'tools.golden.json');
 
 const update = process.argv.includes('--update');
+const check  = process.argv.includes('--check');
 const failures = [];
+
+if (update && check) {
+    console.log('--update and --check are contradictory: one rewrites the snapshot, the other asserts it is already correct.');
+    process.exit(1);
+}
+
+// The snapshot is these three fields, sorted by name. Kept in one place so the
+// comparison below and the file written by --update can never disagree.
+const snapshotOf = tools => tools
+    .map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
 const client = new MCPClient({ serverPath: SERVER });
 try {
@@ -51,15 +78,11 @@ try {
     let goldenExists = false;
     try { await access(GOLDEN); goldenExists = true; } catch {}
 
-    if (!goldenExists || update) {
-        const snapshot = tools
-            .map(t => ({
-                name: t.name,
-                description: t.description,
-                inputSchema: t.inputSchema,
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-        await writeFile(GOLDEN, JSON.stringify(snapshot, null, 2) + '\n');
+    if (check && !goldenExists) {
+        // --check must never conjure the thing it is asserting.
+        failures.push(`no golden snapshot at ${GOLDEN} — run with --update and commit the result`);
+    } else if (!goldenExists || update) {
+        await writeFile(GOLDEN, JSON.stringify(snapshotOf(tools), null, 2) + '\n');
         console.log(`Golden ${goldenExists ? 'updated' : 'created'}: ${GOLDEN}`);
     } else {
         const golden = JSON.parse(await readFile(GOLDEN, 'utf8'));
@@ -75,25 +98,33 @@ try {
             removed.forEach(n => console.log(`  - ${n}`));
         }
         if (added.length) {
-            console.log(`ADDED tools: ${added.length}  (not a failure, but record with --update if intentional)`);
+            // Under --check an added tool IS staleness: the committed snapshot
+            // no longer describes the server.
+            if (check) failures.push(`added since golden (${added.length}): ${added.join(', ')}`);
+            console.log(`ADDED tools: ${added.length}${check ? '' : '  (not a failure, but record with --update if intentional)'}`);
             added.forEach(n => console.log(`  + ${n}`));
         }
 
-        // Schema drift on overlap
-        let schemaDrift = 0;
+        // Drift on overlap — descriptions and schemas both.
+        const drift = [];
         for (const t of tools) {
             const g = golden.find(x => x.name === t.name);
             if (!g) continue;
-            const liveJson = JSON.stringify(t.inputSchema);
-            const goldJson = JSON.stringify(g.inputSchema);
-            if (liveJson !== goldJson) {
-                schemaDrift++;
-                if (schemaDrift <= 5) failures.push(`schema drift: ${t.name}`);
-            }
+            const fields = [];
+            if (t.description !== g.description) fields.push('description');
+            if (JSON.stringify(t.inputSchema) !== JSON.stringify(g.inputSchema)) fields.push('inputSchema');
+            if (fields.length) drift.push(`${t.name} (${fields.join(', ')})`);
         }
-        if (schemaDrift > 5) failures.push(`...and ${schemaDrift - 5} more schema drifts`);
-        console.log(`Schema drift on overlap: ${schemaDrift}`);
-        console.log(`Parity: ${removed.length === 0 && schemaDrift === 0 ? 'PASS' : 'FAIL'}`);
+        drift.slice(0, 5).forEach(d => failures.push(`drift: ${d}`));
+        if (drift.length > 5) failures.push(`...and ${drift.length - 5} more drifts`);
+        console.log(`Drift on overlap: ${drift.length}`);
+
+        const stale = removed.length > 0 || drift.length > 0 || (check && added.length > 0);
+        console.log(`Parity: ${stale ? 'FAIL' : 'PASS'}`);
+        if (stale) {
+            console.log(`\ntools.golden.json no longer matches the server.`);
+            console.log(`Run: node scripts/test/phase0-parity.mjs --update   and commit the result.`);
+        }
     }
 } catch (e) {
     failures.push(`fatal: ${e.message}`);
