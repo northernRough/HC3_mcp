@@ -14,7 +14,7 @@ import { quickapps } from '../../out/mcp/tools/quickapps.js';
 import { strict as assert } from 'node:assert';
 
 const importQa = quickapps.handlers.import_quickapp;
-const CONFIG = { host: '10.0.1.3', port: 80, username: 'u', password: 'p' };
+const CONFIG = { host: '192.0.2.10', port: 80, username: 'u', password: 'p' };
 const realFetch = globalThis.fetch;
 
 const FQA = JSON.stringify({ name: 'Watering', type: 'com.fibaro.genericDevice', files: [] });

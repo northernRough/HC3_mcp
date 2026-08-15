@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.24.0] - 2026-08-15
+
+### Fixed
+- **`hc3://binder` was hardcoded to one gateway's device id.** `BINDER_DEVICE_ID = 4826` is the author's deviceBinder QuickApp. For every other user that id is an unrelated device or none, so a resource advertised to every client at connect rendered a confusing failure naming a device they have never heard of. And for its own author it was fragile in precisely the way the binder pattern exists to prevent: re-include that QuickApp, it gets a new id, and the resource silently reads whatever inherited the old one.
+
+  The QuickApp is now discovered — by name among those holding a `deviceBindings` variable, or by that variable alone when only one exists, or by name when nothing has cached yet — and `HC3_BINDER_DEVICE_ID` pins it explicitly. The rendered document states which device it settled on and how, so a wrong guess is visible rather than silently shaping the whole report.
+
+  **The first version of this fix was itself wrong, in the same style.** "First QuickApp with a `deviceBindings` variable" picked a CONSUMER on the author's gateway: roomManager hydrates its own copy under the same variable name with the same top-level shape (`history`/`cache`/`savedAt`/`version`), so the resource rendered that stale 5-role cache as though it were the binder's 275, and looked entirely healthy doing it. Caught only by reading the live output and noticing the role count was implausible. Discovery now prefers a binder-like name among candidates and, where several remain and nothing distinguishes them, **reports the ambiguity instead of choosing** — a wrong pick here does not fail, it quietly describes the wrong device.
+
+- **`hc3://globals` reported on a dead-device watcher that most gateways do not run.** The decode is keyed to a specific global name and schema, and its absence printed "absent or unparseable", which reads as a fault rather than as a pattern this gateway simply does not use. Absence is now silent; the global still appears in the structured table like any other, so nothing is hidden. Recognised by name AND shape together, so an unrelated global of that name cannot be rendered as something it is not.
+
+- **Private network addresses replaced with the documentation range.** `DEPLOYMENT.md` and six test fixtures carried a real LAN layout (`10.0.1.x`); they now use RFC 5737 TEST-NET-1 (`192.0.2.x`). Test fixtures also stopped describing themselves as pointing at "this HC3", which was true for exactly one reader. `scripts/probe-uicallbacks.mjs` discovers the default room instead of hardcoding a room id that exists on one gateway.
+
+### Changed
+- Resource-test fixtures deliberately use a binder id that is **not** the one previously hardcoded, so the suite fails if any fixed id creeps back in. Three new checks cover discovery, the consumer-copy trap, and the ambiguity report.
+
 ## [4.23.0] - 2026-08-15
 
 ### Added

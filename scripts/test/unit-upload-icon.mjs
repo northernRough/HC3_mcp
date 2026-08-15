@@ -41,7 +41,7 @@ const SVG_STATES = { '0': SVG, '100': SVG };
 function fakeHc3() {
   let listCalls = 0;
   return {
-    config: { host: '10.0.1.3', port: 80, username: 'u', password: 'p' },
+    config: { host: '192.0.2.10', port: 80, username: 'u', password: 'p' },
     async request(endpoint) {
       assert.equal(endpoint, '/api/icons');
       listCalls++;

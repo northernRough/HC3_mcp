@@ -38,9 +38,9 @@ sudo reboot   # if a kernel or libc upgrade pulled in
 
 ### Disable any host-side VPN routing for this session
 
-If your Mac (the machine you'll be `ssh`'ing from) is running **NordVPN, Tailscale exit-node mode, ProtonVPN, or any other full-tunnel VPN client**, disconnect it for the duration of this work. Those clients install a default route through their tunnel interface that takes precedence over your LAN, and `ssh wazzer@10.0.1.10` returns `No route to host` even though the Pi is right there.
+If your Mac (the machine you'll be `ssh`'ing from) is running **NordVPN, Tailscale exit-node mode, ProtonVPN, or any other full-tunnel VPN client**, disconnect it for the duration of this work. Those clients install a default route through their tunnel interface that takes precedence over your LAN, and `ssh pi@192.0.2.20` returns `No route to host` even though the Pi is right there.
 
-You can confirm with `netstat -rn -f inet | head` on macOS — if you see two `default` lines and the first one is `link#NN ... utunNN`, your VPN is hijacking LAN traffic. Quit the VPN app, the second `default` line (via `10.0.1.1` on `en0`) takes over.
+You can confirm with `netstat -rn -f inet | head` on macOS — if you see two `default` lines and the first one is `link#NN ... utunNN`, your VPN is hijacking LAN traffic. Quit the VPN app, the second `default` line (via `192.0.2.1` on `en0`) takes over.
 
 This is not a problem on the Pi itself — only on the machine you're using to set the Pi up.
 
@@ -146,7 +146,7 @@ The `tee` heredoc method is fine if you paste the whole block in one go. If your
 
 ```bash
 sudo tee /etc/hc3-mcp/.env > /dev/null <<'EOF'
-FIBARO_HOST=10.0.1.3
+FIBARO_HOST=192.0.2.10
 FIBARO_PORT=80
 FIBARO_USERNAME=your_admin_user
 FIBARO_PASSWORD=your_admin_password
@@ -176,7 +176,7 @@ MCP_HTTP_ALLOW_UNAUTH=true
 On your **Mac**, in a plain text editor (not Word, not Pages — TextEdit only after `Format → Make Plain Text`):
 
 ```
-FIBARO_HOST=10.0.1.3
+FIBARO_HOST=192.0.2.10
 FIBARO_PORT=80
 FIBARO_USERNAME=your_admin_user
 FIBARO_PASSWORD=your_admin_password
@@ -274,7 +274,7 @@ You should see in the logs (Shape A):
 
 ```
 Fibaro HC3 MCP server running on HTTP at http://127.0.0.1:3000/mcp (bearer auth required)
-HC3 reachable at 10.0.1.3:80 — softVersion 5.202.54, serial HC3-XXXXXX
+HC3 reachable at 192.0.2.10:80 — softVersion 5.202.54, serial HC3-XXXXXX
 ```
 
 Or (Shape B):
@@ -282,7 +282,7 @@ Or (Shape B):
 ```
 WARNING: HTTP transport running WITHOUT bearer authentication ...
 Fibaro HC3 MCP server running on HTTP at http://127.0.0.1:3000/mcp (NO AUTH — external auth layer required)
-HC3 reachable at 10.0.1.3:80 — softVersion 5.202.54, serial HC3-XXXXXX
+HC3 reachable at 192.0.2.10:80 — softVersion 5.202.54, serial HC3-XXXXXX
 ```
 
 If the **HC3 reachable** line says **FAILED**, your HC3 credentials or network are wrong. Fix the `.env` and `sudo systemctl restart hc3-mcp`.

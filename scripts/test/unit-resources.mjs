@@ -5,10 +5,16 @@
 // tools:{} in its capabilities. These four read-only views are the first
 // resources on the surface.
 //
-// The security check matters most: deviceBinder 4826 carries HC3_USER /
+// The security check matters most: a binder QuickApp carries HC3_USER /
 // HC3_PASS in the same quickAppVariables array as its binding cache, so a
 // resource that dumped the array would publish credentials into a document
 // the client renders. The binder resource must read one named variable.
+//
+// The binder id in these fixtures is deliberately NOT the 4826 this resource
+// used to hardcode. That id was one gateway's, which made the resource inert
+// or misleading for everyone else and fragile for its own author, since
+// re-including the QuickApp would renumber it. Using a different id here means
+// these tests fail if anything ever assumes a fixed one again.
 //
 //   node scripts/test/unit-resources.mjs
 
@@ -29,25 +35,36 @@ bind("Guest.blinds", {
 })
 `;
 
-function fakeHc3({ devices, globals, binderVars, binderFiles } = {}) {
+/** Not 4826, on purpose. See the header. */
+const BINDER_ID = 5150;
+
+function fakeHc3({ devices, globals, binderVars, binderFiles, quickApps } = {}) {
   const asked = [];
   const files = binderFiles ?? { config: BINDER_CONFIG };
+  // The QuickApp list the resource discovers from. `quickApps: []` simulates a
+  // gateway that runs no binder at all.
+  const qas = quickApps ?? [{
+    id: BINDER_ID,
+    name: 'deviceBinder',
+    properties: { quickAppVariables: binderVars ?? [] },
+  }];
   return {
     asked,
-    config: { host: '10.0.1.3', port: 80, username: 'u', password: 'p' },
+    config: { host: '192.0.2.10', port: 80, username: 'u', password: 'p' },
     async request(endpoint) {
       asked.push(endpoint);
       if (endpoint === '/api/settings/info') return { timestamp: NOW, softVersion: '5.210.12', serialNumber: 'HC3-1', hcName: 'HC3-Test' };
       if (endpoint === '/api/devices') return devices ?? [];
+      if (endpoint === '/api/devices?interface=quickApp') return qas;
       if (endpoint === '/api/globalVariables') return globals ?? [];
-      if (endpoint === '/api/devices/4826') {
-        return { id: 4826, properties: { quickAppVariables: binderVars ?? [] } };
+      if (endpoint === `/api/devices/${BINDER_ID}`) {
+        return { id: BINDER_ID, properties: { quickAppVariables: binderVars ?? [] } };
       }
-      if (endpoint === '/api/quickApp/4826/files') {
+      if (endpoint === `/api/quickApp/${BINDER_ID}/files`) {
         if (files === 'unreadable') throw new Error('files endpoint down');
         return Object.keys(files).map(name => ({ name }));
       }
-      const m = endpoint.match(/^\/api\/quickApp\/4826\/files\/(.+)$/);
+      const m = endpoint.match(new RegExp(`^/api/quickApp/${BINDER_ID}/files/(.+)$`));
       if (m) return { name: m[1], content: files[decodeURIComponent(m[1])] ?? '' };
       throw new Error(`unexpected endpoint ${endpoint}`);
     },
@@ -239,6 +256,95 @@ await check('binder degrades honestly when its cache is unreadable', async () =>
   const text = await read(fakeHc3({ globals: GLOBALS, binderVars: [] }), 'hc3://binder');
   assert.match(text, /Could not read `deviceBindings`/);
   assert.ok(!/Resolver cache — \d+ roles/.test(text), 'must not claim a role count it does not have');
+});
+
+await check('the binder QuickApp is discovered, not assumed', async () => {
+  const hc3 = fakeHc3({ globals: GLOBALS, binderVars: BINDER_VARS });
+  const text = await read(hc3, 'hc3://binder');
+  // Found by the variable that carries what this resource renders, and it
+  // reports which device it settled on, so a wrong guess is visible rather
+  // than silently shaping the whole document.
+  assert.match(text, new RegExp(`Binder QuickApp ${BINDER_ID}`));
+  assert.match(text, /deviceBindings` variable on "deviceBinder"/);
+  assert.ok(hc3.asked.includes('/api/devices?interface=quickApp'), 'never attempted discovery');
+  assert.ok(!hc3.asked.some(e => /4826/.test(e)), 'still reaching for the old hardcoded id');
+});
+
+await check('a consumer\'s hydrated copy does not win over the binder itself', async () => {
+  // The bug this pins, found on a live gateway: a CONSUMER QuickApp had
+  // hydrated its own `deviceBindings` copy — same variable name, same
+  // top-level shape — so "first QuickApp with the variable" picked the
+  // consumer and rendered its stale 5-role cache as though it were the
+  // binder's 275. Nothing failed; it just described the wrong device.
+  const hc3 = fakeHc3({
+    globals: GLOBALS,
+    binderVars: BINDER_VARS,
+    quickApps: [
+      // Deliberately first in the list, and holding the same variable.
+      { id: 4742, name: 'roomManager', properties: { quickAppVariables: [{ name: 'deviceBindings', value: '{"cache":{}}' }] } },
+      { id: BINDER_ID, name: 'deviceBinder', properties: { quickAppVariables: BINDER_VARS } },
+    ],
+  });
+  const text = await read(hc3, 'hc3://binder');
+  assert.match(text, new RegExp(`Binder QuickApp ${BINDER_ID}`));
+  assert.ok(!/4742/.test(text), 'picked the consumer that merely holds a copy');
+  // If it had chosen the consumer, the fake would have been asked for it.
+  assert.ok(!hc3.asked.includes('/api/devices/4742'), 'read the consumer instead of the binder');
+});
+
+await check('two plausible binders: reports the ambiguity instead of guessing', async () => {
+  const text = await read(fakeHc3({
+    globals: GLOBALS,
+    quickApps: [
+      { id: 11, name: 'deviceBinder', properties: { quickAppVariables: [{ name: 'deviceBindings', value: '{}' }] } },
+      { id: 12, name: 'deviceBinder OLD', properties: { quickAppVariables: [{ name: 'deviceBindings', value: '{}' }] } },
+    ],
+  }), 'hc3://binder');
+  assert.match(text, /More than one QuickApp/);
+  assert.match(text, /11/);
+  assert.match(text, /12/);
+  assert.match(text, /HC3_BINDER_DEVICE_ID/);
+  // Must not invent a report about whichever it happened to see first.
+  assert.ok(!/Resolver cache — \d+ roles/.test(text));
+});
+
+await check('a gateway with no binder is told so, and it does not read as a fault', async () => {
+  const text = await read(fakeHc3({ globals: GLOBALS, quickApps: [] }), 'hc3://binder');
+  assert.match(text, /No binder QuickApp found/);
+  assert.match(text, /not a fault/i);
+  // It must explain what the pattern IS, or the reader cannot tell whether
+  // they ought to have one.
+  assert.match(text, /HC3_BINDER_DEVICE_ID/);
+  // And it must not invent findings from a gateway it never read.
+  assert.ok(!/Resolver cache/.test(text));
+  assert.ok(!/Hardware missing/.test(text));
+});
+
+await check('HC3_BINDER_DEVICE_ID overrides discovery', async () => {
+  const prev = process.env.HC3_BINDER_DEVICE_ID;
+  process.env.HC3_BINDER_DEVICE_ID = String(BINDER_ID);
+  try {
+    // No discoverable QuickApp at all: the env var alone must get there.
+    const hc3 = fakeHc3({ globals: GLOBALS, binderVars: BINDER_VARS, quickApps: [] });
+    const text = await read(hc3, 'hc3://binder');
+    assert.match(text, /HC3_BINDER_DEVICE_ID/);
+    assert.match(text, /Resolver cache/);
+    assert.ok(!hc3.asked.includes('/api/devices?interface=quickApp'), 'an explicit id should not need a search');
+  } finally {
+    if (prev === undefined) delete process.env.HC3_BINDER_DEVICE_ID;
+    else process.env.HC3_BINDER_DEVICE_ID = prev;
+  }
+});
+
+await check('the globals resource stays silent about a watcher that is not there', async () => {
+  // Absence of a community pattern is not a finding. The global still shows up
+  // in the structured table like any other; what must not appear is a section
+  // implying something is missing or broken.
+  const withoutWatcher = GLOBALS.filter(g => g.name !== 'DeadDeviceWatch_State');
+  const text = await read(fakeHc3({ globals: withoutWatcher }), 'hc3://globals');
+  assert.ok(!/Dead-device watcher/.test(text), 'reported on a watcher this gateway does not run');
+  assert.ok(!/absent or unparseable/.test(text));
+  assert.match(text, /isDark/, 'should still render the ordinary globals');
 });
 
 await check('globals splits scalars from structured and decodes the dead-device watcher', async () => {

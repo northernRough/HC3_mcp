@@ -49,8 +49,10 @@ function ago(seconds: number): string {
 
 /**
  * Read one named QuickApp variable. Deliberately returns only the requested
- * variable's value — never the array — so credential-bearing siblings
- * (HC3_USER / HC3_PASS on 4826) cannot leak into a rendered resource.
+ * variable's value — never the array — so credential-bearing siblings cannot
+ * leak into a rendered resource. QuickApp variables routinely hold API keys,
+ * OAuth tokens and gateway passwords, and a resource is rendered to whoever
+ * asked for it.
  */
 async function redactedVarLookup(hc3: HC3Client, deviceId: number, varName: string): Promise<string | null> {
   const device: any = await hc3.request(`/api/devices/${deviceId}`);
@@ -194,17 +196,135 @@ const watchdog: ResourceDef = {
 
 // --- hc3://binder ------------------------------------------------------
 
-const BINDER_DEVICE_ID = 4826;
+// The binder QuickApp is DISCOVERED, never assumed.
+//
+// This id used to be hardcoded to the author's own gateway (4826), which was
+// wrong twice over. For anyone else it named an unrelated device or none at
+// all, so a resource advertised to every client rendered a confusing failure.
+// And for the author it was vulnerable to exactly the fault the binder exists
+// to prevent: re-include that QuickApp, it gets a new id, and this silently
+// reads whatever device inherited the old one.
+//
+// Discovery order, strongest signal first:
+//   1. HC3_BINDER_DEVICE_ID, for a gateway that wants to be explicit.
+//   2. among QuickApps carrying a `deviceBindings` variable, one whose name
+//      says binder.
+//   3. exactly one QuickApp carrying that variable, whatever it is called.
+//   4. a QuickApp named like a binder that has not ticked yet, so has no cache.
+//
+// Step 2 exists because "has the variable" is NOT sufficient on its own, which
+// the first version of this got wrong on the author's own gateway: a CONSUMER
+// QuickApp had hydrated a copy of `deviceBindings` under the same name and the
+// same top-level shape (history/cache/savedAt/version), so the resource picked
+// it and rendered a stale 5-role cache as if it were the binder's 275. It looked
+// entirely healthy. That is the silent-success failure this server exists to
+// catch, committed by the code meant to prevent a related one.
+//
+// When several candidates remain and nothing distinguishes them, this reports
+// the ambiguity rather than choosing. A wrong pick here does not fail, it just
+// quietly describes the wrong device.
+//
+// Resolved per read rather than memoised: the QuickApp list is small, and a
+// cached id is the very thing that went wrong before.
+interface BinderTarget { id: number; how: string; }
+interface BinderAmbiguity { ambiguous: { id: number; name: string }[]; }
+type BinderResolution = BinderTarget | BinderAmbiguity | null;
+
+function looksLikeBinder(name: unknown): boolean {
+  return /binder/i.test(String(name ?? ''));
+}
+
+async function resolveBinderDevice(hc3: HC3Client): Promise<BinderResolution> {
+  const explicit = Number(process.env.HC3_BINDER_DEVICE_ID);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return { id: explicit, how: 'HC3_BINDER_DEVICE_ID' };
+  }
+  const qas: any[] = await hc3.request('/api/devices?interface=quickApp').catch(() => null) as any[];
+  if (!Array.isArray(qas)) return null;
+
+  const withCache = qas.filter(d =>
+    (d?.properties?.quickAppVariables ?? []).some((v: any) => v?.name === 'deviceBindings'));
+
+  const named = withCache.filter(d => looksLikeBinder(d?.name));
+  if (named.length === 1) {
+    return { id: named[0].id, how: `\`deviceBindings\` variable on "${named[0].name}"` };
+  }
+  if (named.length > 1) {
+    return { ambiguous: named.map(d => ({ id: d.id, name: String(d.name ?? '') })) };
+  }
+  if (withCache.length === 1) {
+    return { id: withCache[0].id, how: `the only \`deviceBindings\` variable on this gateway, on "${withCache[0].name}"` };
+  }
+  if (withCache.length > 1) {
+    return { ambiguous: withCache.map(d => ({ id: d.id, name: String(d.name ?? '') })) };
+  }
+
+  // Nothing holds a cache yet. A binder that has never ticked still counts.
+  const byName = qas.filter(d => looksLikeBinder(d?.name));
+  if (byName.length === 1) {
+    return { id: byName[0].id, how: `QuickApp named "${byName[0].name}" (no cache written yet)` };
+  }
+  if (byName.length > 1) return { ambiguous: byName.map(d => ({ id: d.id, name: String(d.name ?? '') })) };
+
+  return null;
+}
+
+/** Several plausible binders and no way to choose: say so, render nothing. */
+function ambiguousBinder(candidates: { id: number; name: string }[]): string {
+  return [
+    '# Device binder status\n',
+    '\nMore than one QuickApp here looks like the binder, and picking the wrong one',
+    ' would render a plausible report about the wrong device rather than fail:\n\n',
+    ...candidates.map(c => `- ${c.id} — "${c.name}"\n`),
+    '\nSet `HC3_BINDER_DEVICE_ID` to the one that OWNS resolution. Note that a',
+    ' consumer QuickApp which hydrates from the binder can hold a `deviceBindings`',
+    ' copy of its own, under the same name and the same shape, so the variable',
+    ' alone does not identify the owner.\n',
+  ].join('');
+}
+
+/**
+ * What to say on a gateway that does not run this pattern.
+ *
+ * Not an error: nothing is broken, the resource simply does not apply. It stays
+ * in the advertised list because `listResources()` is synchronous and has no
+ * gateway access, and because clients cache that list at connect — a resource
+ * that appeared and vanished with gateway state would be less predictable than
+ * one that explains itself.
+ */
+function noBinderHere(): string {
+  return [
+    '# Device binder status\n',
+    '\nNo binder QuickApp found on this gateway, so there is nothing to report.',
+    ' **This is not a fault.**\n',
+    '\nThis resource supports an optional pattern rather than an HC3 feature: a',
+    ' QuickApp that owns device-id resolution for every other QuickApp, publishes',
+    ' a `BinderBindings` global for consumers to hydrate from, and keeps its',
+    ' resolver cache in a `deviceBindings` QuickApp variable. It exists because a',
+    ' Z-Wave device that is re-included gets a NEW id, silently breaking every',
+    ' hardcoded reference to it.\n',
+    '\nIf you do run one under a different name, point this resource at it with',
+    ' the `HC3_BINDER_DEVICE_ID` environment variable. Otherwise ignore this',
+    ' resource; nothing else here depends on it.\n',
+  ].join('');
+}
 
 const binder: ResourceDef = {
   uri: 'hc3://binder',
   name: 'Device binder status',
-  description: 'Published bindings plus the resolver cache decoded: how many roles sit at L0_cached versus healed, anything missing or ambiguous, and recent heal history. Otherwise only readable by parsing 150+ KB of JSON by hand.',
+  description: 'OPTIONAL — for gateways running a device-binder QuickApp (one that owns id resolution, publishes a `BinderBindings` global and caches in a `deviceBindings` variable). Decodes the published bindings and the resolver cache: how many roles sit at L0_cached versus healed, anything missing or ambiguous, and recent heal history, which is otherwise only readable by parsing 150+ KB of JSON by hand. The QuickApp is discovered, or named by HC3_BINDER_DEVICE_ID; on a gateway without one this says so and reports nothing.',
   mimeType: 'text/markdown',
   async read(hc3) {
+    const resolved = await resolveBinderDevice(hc3);
+    if (!resolved) return noBinderHere();
+    if ('ambiguous' in resolved) return ambiguousBinder(resolved.ambiguous);
+    const target = resolved;
+    const BINDER_DEVICE_ID = target.id;
+
     const now = await hc3Now(hc3);
     const out: string[] = [];
     out.push('# Device binder status\n');
+    out.push(`\n_Binder QuickApp ${BINDER_DEVICE_ID}, found via ${target.how}._\n`);
 
     // Published bindings: the flat Stem.group -> {field: deviceId} map that
     // consumers hydrate from.
@@ -336,7 +456,7 @@ const binder: ResourceDef = {
 const globalsResource: ResourceDef = {
   uri: 'hc3://globals',
   name: 'Globals and automation state',
-  description: 'Scalar globals (isDark, debug levels) at a glance, with the large JSON globals decoded to a summary rather than dumped — including the dead-device watcher state.',
+  description: 'Every global variable at a glance: scalars (flags, modes, debug levels) in full, and the large JSON ones summarised by size and shape rather than dumped, since several run to thousands of bytes. Where a dead-device watcher global is present it is decoded properly; where it is not, nothing is reported.',
   mimeType: 'text/markdown',
   async read(hc3) {
     const [globals, now] = await Promise.all([
@@ -381,14 +501,18 @@ const globalsResource: ResourceDef = {
       ];
     })));
 
-    // Dead-device watcher gets a real decode: it is the one whose contents
-    // are routinely worth acting on.
+    // Dead-device watcher gets a real decode: where one exists its contents are
+    // routinely worth acting on. This is a community pattern rather than an HC3
+    // feature, so its ABSENCE is silent — a gateway that does not run one is not
+    // missing anything, and a "not found" line here would read as a fault. The
+    // global still appears in the table above like any other, so nothing is
+    // hidden. Recognised by name and shape together, so an unrelated global of
+    // the same name cannot be rendered as something it is not.
     const ddRaw = all.find(v => v?.name === 'DeadDeviceWatch_State')?.value;
-    const dd = parseJson(ddRaw ? String(ddRaw) : null);
-    out.push('\n## Dead-device watcher\n');
-    if (!dd) {
-      out.push('\n`DeadDeviceWatch_State` absent or unparseable.\n');
-    } else {
+    const ddParsed = parseJson(ddRaw ? String(ddRaw) : null);
+    const dd = ddParsed && typeof ddParsed === 'object' && ddParsed.devices ? ddParsed : null;
+    if (dd) {
+      out.push('\n## Dead-device watcher\n');
       const devices: Record<string, any> = dd.devices ?? {};
       const ids = Object.keys(devices);
       const currentlyDead = ids.filter(id => devices[id]?.lastSeenDead === true);

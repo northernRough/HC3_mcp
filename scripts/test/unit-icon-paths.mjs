@@ -18,7 +18,7 @@ import { strict as assert } from 'node:assert';
 
 const getIcon = icons.handlers.get_icon;
 const deleteIcon = icons.handlers.delete_icon;
-const CONFIG = { host: '10.0.1.3', port: 80, username: 'u', password: 'p' };
+const CONFIG = { host: '192.0.2.10', port: 80, username: 'u', password: 'p' };
 const realFetch = globalThis.fetch;
 
 const UNKNOWN_ICON_SVG = Buffer.alloc(1888);   // HC3's placeholder, exact size

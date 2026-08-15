@@ -13,7 +13,7 @@ import { icons } from '../../out/mcp/tools/icons.js';
 import { strict as assert } from 'node:assert';
 
 const uploadIcons = icons.handlers.upload_icons;
-const CONFIG = { host: '10.0.1.3', port: 80, username: 'u', password: 'p' };
+const CONFIG = { host: '192.0.2.10', port: 80, username: 'u', password: 'p' };
 const realFetch = globalThis.fetch;
 
 function makePng() {

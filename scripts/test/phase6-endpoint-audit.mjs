@@ -23,7 +23,7 @@ if (!HOST || !USER || !PASS) {
 const AUTH = 'Basic ' + Buffer.from(`${USER}:${PASS}`).toString('base64');
 
 // Fixtures used to substitute ${...} placeholders in URL templates.
-// Pulled from known-good entities on the originating HC3 (10.0.1.3).
+// Pulled from known-good entities on the gateway these were captured from.
 const FIXTURES = {
     deviceId:     4742,    quickAppId: 4742,   devId:    4742,
     sceneId:      670,     roomId:     367,

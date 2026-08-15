@@ -58,8 +58,20 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'out/mcp');
 const tools = async name => (await import(path.join(OUT, 'tools', `${name}.js`)))[name];
 
-const DEFAULT_ROOM = 219;         // "Default Room", as asked for
 const SETTLE_MS = 2500;
+
+/**
+ * The gateway's default room, discovered rather than hardcoded — room ids are
+ * per-gateway, so a literal here works on exactly one HC3 and silently drops
+ * throwaway QuickApps into some unrelated room everywhere else.
+ */
+async function defaultRoomId(hc3) {
+  const rooms = await hc3.request('/api/rooms').catch(() => null);
+  if (!Array.isArray(rooms) || rooms.length === 0) {
+    throw new Error('probe-uicallbacks: no rooms found, cannot place a throwaway QuickApp.');
+  }
+  return (rooms.find(r => r?.isDefault) ?? rooms[0]).id;
+}
 
 const holdArg = process.argv.find(a => a.startsWith('--hold'));
 const HOLD_SECONDS = holdArg ? Number(holdArg.split('=')[1] ?? 240) : 0;
@@ -205,7 +217,7 @@ async function runArm(hc3, bindAt, { fire = true } = {}) {
   const created = await qaTools.create_quickapp(hc3, {
     name: `PROBE_uicb_${bindAt}`,
     type: 'com.fibaro.genericDevice',
-    roomId: DEFAULT_ROOM,
+    roomId: await defaultRoomId(hc3),
     initialView: viewLayout(),
     ...(bindAt === 'creation' ? { initialProperties: { uiCallbacks: namedCallbacks() } } : {}),
   });

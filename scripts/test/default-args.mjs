@@ -1,5 +1,6 @@
 // Default arguments for read-only tools, keyed by tool name.
-// Fixtures point at known-good entities on this HC3 (10.0.1.3):
+// Fixtures point at known-good entities on the gateway these were captured
+// from. Ids are that gateway's; adjust them before running against another.
 //   - QA 4742 = roomManager (modular file structure with 18 files)
 //   - Scene 670 = roomManager Heartbeat Watchdog
 //   - Scene 645 = Watering (production scene with cron triggers)
