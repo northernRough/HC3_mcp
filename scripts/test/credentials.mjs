@@ -17,6 +17,34 @@ import { join } from 'node:path';
 
 const KEYS = ['FIBARO_HOST', 'FIBARO_PORT', 'FIBARO_USERNAME', 'FIBARO_PASSWORD'];
 
+/**
+ * Read FIBARO_* from a systemd EnvironmentFile.
+ *
+ * On a deployed unit the credentials are in /etc/hc3-mcp/.env (the path
+ * DEPLOYMENT.md sets up) and are read by systemd, not by any shell — so a
+ * maintainer sshing in and running a probe has no FIBARO_* and no
+ * ~/.claude.json either. Without this, every tool here works on a laptop and
+ * fails on the machine actually talking to the gateway.
+ *
+ * HC3_ENV_FILE overrides, so this is not tied to one layout.
+ */
+function fromEnvFile() {
+  const candidates = [process.env.HC3_ENV_FILE, '/etc/hc3-mcp/.env'].filter(Boolean);
+  for (const file of candidates) {
+    let raw;
+    try { raw = readFileSync(file, 'utf8'); } catch { continue; }
+    const picked = {};
+    for (const line of raw.split('\n')) {
+      const m = /^\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.*)\s*$/.exec(line);
+      if (!m) continue;
+      const [, k, v] = m;
+      if (KEYS.includes(k)) picked[k] = v.replace(/^["']|["']$/g, '');
+    }
+    if (picked.FIBARO_HOST) return { source: file, env: picked };
+  }
+  return null;
+}
+
 /** Read FIBARO_* from an MCP client config, whatever the server is named. */
 function fromClientConfig() {
   for (const file of [join(homedir(), '.claude.json')]) {
@@ -42,7 +70,7 @@ function fromClientConfig() {
  */
 export function serverEnv(base = process.env) {
   if (base.FIBARO_HOST) return { env: { ...base }, source: 'shell environment' };
-  const found = fromClientConfig();
+  const found = fromEnvFile() ?? fromClientConfig();
   if (!found) return { env: { ...base }, source: null };
   return { env: { ...base, ...found.env }, source: found.source };
 }
@@ -57,11 +85,13 @@ export function requireCredentials() {
   const { env, source } = serverEnv();
   if (!env.FIBARO_HOST) {
     throw new Error(
-      'No HC3 credentials found.\n' +
-      '  Looked in: the shell environment (FIBARO_HOST), then ~/.claude.json for an\n' +
-      '  MCP server entry carrying FIBARO_HOST.\n\n' +
-      '  Either export FIBARO_HOST / FIBARO_USERNAME / FIBARO_PASSWORD, or run this\n' +
-      '  on a machine whose MCP client config already has them.'
+      'No HC3 credentials found. Looked in, in order:\n' +
+      '  1. the shell environment (FIBARO_HOST)\n' +
+      `  2. ${process.env.HC3_ENV_FILE ?? '/etc/hc3-mcp/.env'} — the deployed unit's EnvironmentFile\n` +
+      '  3. ~/.claude.json, for an MCP server entry carrying FIBARO_HOST\n\n' +
+      '  On a deployed unit the env file is usually mode 0750 and owned by the\n' +
+      '  service user, so run as that user (e.g. sudo -u hc3mcp), or point\n' +
+      '  HC3_ENV_FILE at a readable copy, or export the three variables.'
     );
   }
   return { env, source };
