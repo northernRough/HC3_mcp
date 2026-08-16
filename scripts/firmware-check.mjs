@@ -387,15 +387,25 @@ async function main() {
   record.paceMs = PACE_MS;
 
   mkdirSync(RECORD_DIR, { recursive: true });
-  const file = join(RECORD_DIR, `${String(firmware).replace(/[^\w.]/g, '_')}.json`);
+  // Keyed by SERIAL and firmware, not firmware alone. Two gateways on one
+  // network are normally updated together, so a firmware-only name would have
+  // them overwriting each other's baseline silently — and the diff would then
+  // compare two different houses and report the difference as a firmware
+  // change. The record carried the serial all along; only the filename did not.
+  const safe = s => String(s).replace(/[^\w.-]/g, '_');
+  const file = join(RECORD_DIR, `${safe(serial)}-${safe(firmware)}.json`);
   writeFileSync(file, JSON.stringify(record, null, 2));
   console.log(`\n  recorded → ${file.replace(ROOT + '/', '')}`);
   console.log(`  took ${elapsedS}s${PACE_MS ? ` (${PACE_MS} ms pacing included)` : ''}`);
   await stampQuickApp(record);
 
-  // Diff against the newest record from a DIFFERENT firmware. Comparing two
-  // runs of the same firmware would only show house churn.
-  const prior = records().filter(r => r.firmware !== firmware).pop();
+  // Diff against the newest record from a DIFFERENT firmware ON THE SAME
+  // GATEWAY. Comparing two runs of one firmware shows only house churn, and
+  // comparing across gateways reports one house's devices as the other's
+  // firmware change.
+  const prior = records()
+    .filter(r => r.serial === serial && r.firmware !== firmware)
+    .pop();
   if (!prior) {
     console.log('\n  No earlier firmware on record, so nothing to compare yet.');
     console.log('  This run IS the baseline. Re-run it after the next firmware update.\n');
