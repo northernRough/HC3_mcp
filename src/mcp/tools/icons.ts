@@ -224,6 +224,56 @@ function assertExtMatches(sourceExt: string, declaredExt: string, where: string,
   );
 }
 
+/**
+ * What to do with the icons a batch just created.
+ *
+ * Two things were wrong with the sentence this replaces, and the second is
+ * the one worth remembering.
+ *
+ * It said "Device icons are single-image sets — HC3 has no multi-state upload
+ * — so every state change is code-driven", which DEVICE_STATE_MODEL,
+ * upload_icon's description and upload_icons' own description all contradict:
+ * a relay holds 2 images and a dimmer 11, HC3 accepts them as a set, and it
+ * switches between them from the device's value with no code at all.
+ *
+ * But it is not simply backwards. Whether it is true is a property of the
+ * device TYPE: for com.fibaro.genericDevice — a QuickApp tile, and the common
+ * case for this tool — one icon really is one image, and choosing between the
+ * variants a batch uploaded really is code-driven. So the hint is computed per
+ * template rather than flipped, and says nothing either way for a type this
+ * server does not know.
+ *
+ * It was also unconditionally device-shaped: a room or scene batch was told to
+ * call modify_device, which does not attach a room icon. upload_icon's hint has
+ * been category-aware for releases; this one never was.
+ */
+function attachHint(
+  category: 'room' | 'scene' | 'device',
+  deviceTemplate: string | undefined,
+  tableName: string,
+): string {
+  if (category !== 'device') {
+    return `Attach each with modify_${category}({${category}Id, fields:{icon: "<name>"}}) — room and scene icons attach by NAME, and \`uploaded[].name\` carries the User<N> HC3 assigned to each.`;
+  }
+
+  const attach = 'Attach with modify_device({deviceId, properties:{deviceIcon: <id>}}) — device icons attach by numeric id, not name.';
+  const switching = `Switch between the variants you just uploaded from QuickApp Lua with self:updateProperty("deviceIcon", ${tableName}.<label>).`;
+
+  const known = deviceTemplate !== undefined && deviceTemplate in DEVICE_STATE_MODEL;
+  const expected = known ? DEVICE_STATE_MODEL[deviceTemplate as string] : undefined;
+
+  if (known && expected === null) {
+    // genericDevice: one icon really is one image, so every change is code-driven.
+    return `${attach} '${deviceTemplate}' icons hold a single image, so HC3 has no value to switch on and every change is code-driven. ${switching}`;
+  }
+  if (expected) {
+    // A set type: HC3 does the state switching itself. Code is for choosing
+    // between the VARIANTS a batch uploads, e.g. a mode token.
+    return `${attach} '${deviceTemplate}' icons are sets of ${expected.length} (states ${expected.join(', ')}), and HC3 picks the state image from the device's own value — on/off needs no code. ${switching} That is for choosing between the variants themselves, e.g. a mode token, which is what HC3 cannot infer.`;
+  }
+  return `${attach} ${switching}`;
+}
+
 export const icons: ToolModule = {
   schemas: [
       {
@@ -283,7 +333,7 @@ export const icons: ToolModule = {
       },
       {
         name: 'upload_icons',
-        description: 'Upload several icons in one call — for state-variant sets where a device swaps between many images (idle / active / warning / mode tokens). Wraps `upload_icon` per image, so every guard and post-upload verify still applies.\n\nUploads run **sequentially**, not in parallel: HC3 assigns `User<N>` ids in order and concurrent posts risk interleaved assignment. Because each upload is a committed write, this is **not atomic** — if image 7 of 17 fails, the first six exist on the gateway. The result reports `uploaded` and `failed` separately so you can retry only the failures rather than re-running the batch and creating duplicates.\n\nEach device variant is itself a **state set**: pass `states: { "0": ..., "100": ... }` per image, not `base64`. HC3 then switches between the two by device value on its own; you only write `deviceIcon` from code when you need a variant it cannot infer, e.g. a mode token.\n\nEvery entry in `uploaded` carries the `md5` (or `statesMd5`) of the bytes HC3 received, so a batch of hand-transcribed payloads can be checked image by image against local hashes rather than by looking at the tiles.\n\nReturns a `labels` map (your label → assigned `User<N>` id) and, by default, a ready-to-paste Lua table of that map, which is what you need in the QuickApp for `self:updateProperty("deviceIcon", id)` — verified working at runtime on firmware 5.210.12.',
+        description: 'Upload several icons in one call — for state-variant sets where a device swaps between many images (idle / active / warning / mode tokens). Wraps `upload_icon` per image, so every guard and post-upload verify still applies.\n\nUploads run **sequentially**, not in parallel: HC3 assigns `User<N>` ids in order and concurrent posts risk interleaved assignment. Because each upload is a committed write, this is **not atomic** — if image 7 of 17 fails, the first six exist on the gateway. The result reports `uploaded` and `failed` separately so you can retry only the failures rather than re-running the batch and creating duplicates.\n\n**Which form each image takes follows the device type, exactly as in `upload_icon`** — this wrapper does not change the rule, and the previous blanket instruction to "pass states, not base64" was refused by the handler for the single-image types this tool is most used on. A type holding a set (binarySwitch 0/100, multilevelSwitch 0,10,…,100) takes `states`, or the `statesOff`/`statesOn` shorthand; a type holding one image (com.fibaro.genericDevice, i.e. a QuickApp tile) takes `base64`. Any image may instead be a `fromIcon` reference to an icon already on this gateway, which is the cheapest way to build a batch out of artwork that already exists.\n\nWhere a set applies HC3 switches between its states by device value on its own; you write `deviceIcon` from code to choose between the VARIANTS this batch uploaded, e.g. a mode token, which is the thing HC3 cannot infer. For a single-image type there is no value to switch on, so every change is code-driven.\n\nEvery entry in `uploaded` carries the `md5` (or `statesMd5`) of the bytes HC3 received, so a batch of hand-transcribed payloads can be checked image by image against local hashes rather than by looking at the tiles.\n\nReturns a `labels` map (your label → assigned `User<N>` id) and, by default, a ready-to-paste Lua table of that map, which is what you need in the QuickApp for `self:updateProperty("deviceIcon", id)` — verified working at runtime on firmware 5.210.12.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -751,7 +801,7 @@ export const icons: ToolModule = {
 
       result.hint = failed.length > 0
         ? `${uploaded.length} of ${args.images.length} uploaded; the ${failed.length} listed in \`failed\` were NOT created. Retry only those — re-running the whole batch would duplicate the successes.`
-        : `Attach with modify_device({deviceId, properties:{deviceIcon: <id>}}), and switch at runtime from QuickApp Lua with self:updateProperty("deviceIcon", ${tableNameHint(args)}.<label>). Device icons are single-image sets — HC3 has no multi-state upload — so every state change is code-driven.`;
+        : attachHint(args.category, args.deviceTemplate, tableNameHint(args));
       return result;
     },
 

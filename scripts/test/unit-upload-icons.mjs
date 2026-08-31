@@ -165,14 +165,112 @@ await check('the device deviceTemplate check fires before the first write', asyn
   assert.equal(posted, 0, `expected 0 uploads, got ${posted}`);
 });
 
-await check('hint explains that switching is code-driven', async () => {
+await check('hint is code-driven for a type that holds ONE image', async () => {
+  // genericDevice — a QuickApp tile, and the common case for this tool. One
+  // icon is one image, so HC3 has no value to switch on and choosing between
+  // the variants a batch uploaded really is code-driven.
   const r = await uploadIcons(fakeHc3(), {
     images: [img('idle')], mime: 'image/png', category: 'device',
     deviceTemplate: 'com.fibaro.genericDevice', luaTableName: 'WateringIcons',
   });
   assert.match(r.hint, /updateProperty\("deviceIcon"/);
   assert.match(r.hint, /WateringIcons/);
-  assert.match(r.hint, /single-image sets/);
+  assert.match(r.hint, /single image/);
+  assert.match(r.hint, /code-driven/);
+});
+
+await check('hint does NOT claim code-driven switching for a state-set type', async () => {
+  // The claim this replaces was flat: "Device icons are single-image sets --
+  // HC3 has no multi-state upload -- so every state change is code-driven".
+  // For a relay or a dimmer every clause of that is wrong, and it was the
+  // sentence a caller read after a successful batch.
+  const r = await uploadIcons(fakeHc3(), {
+    images: [{ label: 'idle', states: { '0': PNG, '100': PNG } }],
+    mime: 'image/png', category: 'device',
+    deviceTemplate: 'com.fibaro.binarySwitch',
+  });
+  assert.match(r.hint, /sets of 2/);
+  assert.match(r.hint, /from the device's own value/);
+  assert.match(r.hint, /needs no code/);
+  assert.ok(!/no multi-state upload/.test(r.hint), 'HC3 does accept multi-state uploads');
+  assert.ok(!/every state change is code-driven/.test(r.hint), 'HC3 switches states itself for a set type');
+});
+
+await check('hint names the dimmer set rather than generalising from the relay', async () => {
+  const r = await uploadIcons(fakeHc3(), {
+    images: [{ label: 'idle', states: Object.fromEntries(
+      ['0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100'].map(k => [k, PNG])) }],
+    mime: 'image/png', category: 'device',
+    deviceTemplate: 'com.fibaro.multilevelSwitch',
+  });
+  assert.match(r.hint, /sets of 11/);
+  assert.match(r.hint, /0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100/);
+});
+
+await check('a room batch is not told to call modify_device', async () => {
+  // The old hint was unconditionally device-shaped, so a room or scene batch
+  // was handed a call that does not attach a room icon. upload_icon's hint has
+  // been category-aware for releases; this one never was.
+  const room = await uploadIcons(fakeHc3(), { images: [img('a')], mime: 'image/png', category: 'room' });
+  assert.match(room.hint, /modify_room/);
+  assert.ok(!/modify_device/.test(room.hint), 'a room icon does not attach through modify_device');
+  assert.ok(!/deviceIcon/.test(room.hint), 'and not through deviceIcon either');
+  assert.match(room.hint, /by NAME/);
+
+  const scene = await uploadIcons(fakeHc3(), { images: [img('a')], mime: 'image/png', category: 'scene' });
+  assert.match(scene.hint, /modify_scene/);
+  assert.ok(!/modify_device/.test(scene.hint));
+});
+
+await check('an unknown device type asserts neither model', async () => {
+  // Saying the wrong one is worse than saying nothing: both claims steer real
+  // decisions about whether the caller has to write switching code.
+  const r = await uploadIcons(fakeHc3(), {
+    images: [img('a')], mime: 'image/png', category: 'device',
+    deviceTemplate: 'com.fibaro.somethingNew',
+  });
+  assert.match(r.hint, /modify_device/);
+  assert.ok(!/single image/.test(r.hint));
+  assert.ok(!/sets of/.test(r.hint));
+});
+
+await check('nothing a CLIENT can read claims HC3 has no multi-state upload', async () => {
+  // Same guard style as the properties.icon one in unit-upload-icon.mjs, and
+  // for the same reason: this claim was live in two places at once — the
+  // runtime hint AND the tool description — so fixing one copy while leaving
+  // the other is how the package ends up answering differently depending on
+  // which one the reader reaches for.
+  //
+  // Checks the surfaces a client actually sees rather than the source text, so
+  // a comment may quote the old wording as history without tripping this. That
+  // is not a loophole: a comment is not something a client can read, and the
+  // point is what reaches one.
+  //
+  // DEVICE_STATE_MODEL is the authority: a relay holds 2 images, a dimmer 11,
+  // HC3 accepts them as a set and switches between them by device value.
+  const surfaces = icons.schemas.map(s => `${s.name}: ${s.description}`);
+
+  for (const template of [undefined, 'com.fibaro.genericDevice', 'com.fibaro.binarySwitch', 'com.fibaro.multilevelSwitch']) {
+    const states = template === 'com.fibaro.binarySwitch' ? { '0': PNG, '100': PNG } : undefined;
+    const r = await uploadIcons(fakeHc3(), {
+      images: [states ? { label: 'a', states } : img('a')],
+      mime: 'image/png',
+      category: template ? 'device' : 'room',
+      ...(template ? { deviceTemplate: template } : {}),
+    });
+    surfaces.push(`hint(${template ?? 'room'}): ${r.hint}`);
+  }
+
+  for (const text of surfaces) {
+    assert.ok(
+      !/no multi-state upload/.test(text),
+      `HC3 does accept multi-state uploads, and this says otherwise — ${text.slice(0, 80)}`,
+    );
+    assert.ok(
+      !/Device icons are single-image sets/.test(text),
+      `whether an icon is one image or a set is a property of the device TYPE — ${text.slice(0, 80)}`,
+    );
+  }
 });
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll upload_icons checks passed');
