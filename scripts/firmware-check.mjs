@@ -10,8 +10,10 @@
 //   node scripts/firmware-check.mjs --with-writes   # also probe write behaviour (throwaway objects)
 //   node scripts/firmware-check.mjs --list          # what has been recorded so far
 //
-// Records are kept per firmware version in scripts/test/firmware/, so the
-// pre-update run is still there after the update — which is the whole point.
+// Records are kept per gateway AND firmware version — scripts/test/firmware/ by
+// default, elsewhere via HC3_FIRMWARE_RECORD_DIR — so the pre-update run is
+// still there after the update, which is the whole point, and two gateways
+// cannot overwrite each other's baseline.
 //
 // THREE TIERS, in descending order of how much they tell you:
 //
