@@ -3127,7 +3127,7 @@
   },
   {
     "name": "upload_icon",
-    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). **Two things decide whether the call is accepted, and both follow from `category`:**\n\n1. **`category: \"device\"` requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it is refused here, and returns 400 MISSING_PARAMETER at HC3. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n2. **Pass `states` or `base64`, never both.** Which one is a property of the device type (table below): a type holding a state set takes `states`, a type holding one image takes `base64`. Room and scene icons are always a single `base64` image.\n\nHC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\nPNG payloads are validated structurally before anything is sent: signature, a full chunk walk, **CRC32 on every chunk**, and an IDAT inflate. A corrupt payload is refused here, with the damaged chunk and its byte range named — which matters because base64 re-typed by hand corrupts at a low but real rate, and the alternative to catching it here is discovering it as a wrong tile on a phone. A CRC failure localises the damage well enough to be worth a repair attempt; a truncation or a failed inflate means re-fetch instead.\n\nBeyond that, PNG payloads have one hard constraint: dimensions must be exactly **128×128** (HC3 answers 400 INVALID_ICON_SIZE otherwise), Colour type does **not** matter: RGBA uploads fine and is what every user icon already on a live gateway uses. Resize with e.g. `magick input.png -resize 128x128 output.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**How many images a device icon holds depends on the device TYPE** — verified on 5.210.12 by listing the files HC3 actually wrote, and matching what its Web UI offers:\n\n| deviceTemplate | Images | Pass |\n|---|---|---|\n| `com.fibaro.genericDevice` (a QuickApp tile) | 1, stored bare | `base64` |\n| `com.fibaro.binarySwitch` (relay) | 2 — states 0, 100 | `states` |\n| `com.fibaro.multilevelSwitch` (dimmer) | 11 — states 0,10,…,100 | `states` |\n\nWhere a set applies, HC3 stores `/assets/userIcons/devices/User<N>/User<N><state>.png` and **switches between them itself from the device value** — on/off comes free, no code. The multi-file form is undocumented (HC3's spec lists only a single `icon` part) but is what its own UI sends. Supplying the wrong shape is not an error HC3 reports: a single bare image on a relay registers and attaches, then renders **blank**, because the lookup asks for `User<N>0.png`. This tool refuses the mismatches it can recognise, and an incomplete set (e.g. a dimmer missing state 40) too. Types not listed above are accepted as given.\n\n**Attaching it — and `deviceIcon` alone is not enough on a QuickApp.** For a Z-Wave device, `modify_device({deviceId, properties:{deviceIcon: <newId>}})` is the mechanism, and HC3 switches states from the device value on its own. On a freshly created QuickApp that same write verifies as applied and leaves the tile **BLANK**: the tile renders from `properties.icon`, which stays `{}`. What renders is a path write from inside the owning QA — `self:updateProperty(\"icon\", {path = \"/assets/userIcons/devices/User<N>/User<N>.svg\", source = \"HC\"})`. An external `api.put` of `properties.icon` persists on an idle QuickApp but was reported discarded on a **running** one, so the likely mechanism is the QA overwriting the property at start rather than the endpoint dropping it. `deviceIcon` is still a real write and is what drives the value-based state switch, so set both: `self:updateProperty(\"deviceIcon\", id)` is verified working at runtime and is how a QA shows mode rather than on/off. Full lifecycle in get_hc3_quickapp_programming_guide({topic:\"ui\"}). For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, md5 | statesMd5, states, hint}`.\n\n**`md5` (single image) or `statesMd5` (a map, per state) is the hash of the bytes HC3 actually received**, after this tool decoded your base64. Compare it against the hash of your local file — mirroring `base64` and `states` in the input — and a payload that corrupted in transit is visible here, before it becomes a tile that renders wrong on a phone. A mismatch means re-send, not repair.",
+    "description": "Upload a new user icon via POST /api/icons (multipart/form-data with type, icon, fileExtension, and — for device icons — deviceTemplate). **Two things decide whether the call is accepted, and both follow from `category`:**\n\n1. **`category: \"device\"` requires `deviceTemplate`** — the Fibaro device type the icon is filed under, e.g. \"com.fibaro.binarySwitch\". Device icons are stored per device type; room and scene icons are not, and must not pass it. Omitting it is refused here, and returns 400 MISSING_PARAMETER at HC3. Discover valid values from list_icons → device[].deviceType, or get_quickapp_available_types. To icon a QuickApp, pass that QA's own type.\n**An image can be REFERENCED instead of pasted.** Anywhere this tool takes `base64` it also takes `fromIcon: { icon: \"User1026\" }`, and `states` values may be either. The bytes are then fetched from the gateway and never enter the conversation, which removes the step where they corrupt: a base64 payload that has to be re-emitted by hand is the single largest source of bad icons here. Reuse an existing icon, or copy one state of a set into a new set, with no payload at all.\n\n**`statesOff` / `statesOn` is the shorthand for a state set.** A dimmer holds eleven images and ten of them are normally the same \"on\" frame; pasting that frame ten times is ten independent chances to corrupt it for no added information. Give two images (base64 or references) and this expands them to the set the device type requires — state 0 from `statesOff`, every other state from `statesOn`.\n\n2. **Pass `states` or `base64`, never both.** Which one is a property of the device type (table below): a type holding a state set takes `states`, a type holding one image takes `base64`. Room and scene icons are always a single `base64` image.\n\nHC3 ignores any caller-supplied filename and auto-assigns \"User<N>\". Returns the assigned `newName` and `newId` so you can attach via modify_room/modify_scene/modify_device (e.g. modify_room({roomId, fields:{icon: \"User1010\"}})).\n\nPNG payloads are validated structurally before anything is sent: signature, a full chunk walk, **CRC32 on every chunk**, and an IDAT inflate. A corrupt payload is refused here, with the damaged chunk and its byte range named — which matters because base64 re-typed by hand corrupts at a low but real rate, and the alternative to catching it here is discovering it as a wrong tile on a phone. A CRC failure localises the damage well enough to be worth a repair attempt; a truncation or a failed inflate means re-fetch instead.\n\nBeyond that, PNG payloads have one hard constraint: dimensions must be exactly **128×128** (HC3 answers 400 INVALID_ICON_SIZE otherwise), Colour type does **not** matter: RGBA uploads fine and is what every user icon already on a live gateway uses. Resize with e.g. `magick input.png -resize 128x128 output.png`. SVG is genuinely supported and is uploaded as-is with no size or colour constraints.\n\n**How many images a device icon holds depends on the device TYPE** — verified on 5.210.12 by listing the files HC3 actually wrote, and matching what its Web UI offers:\n\n| deviceTemplate | Images | Pass |\n|---|---|---|\n| `com.fibaro.genericDevice` (a QuickApp tile) | 1, stored bare | `base64` |\n| `com.fibaro.binarySwitch` (relay) | 2 — states 0, 100 | `states` |\n| `com.fibaro.multilevelSwitch` (dimmer) | 11 — states 0,10,…,100 | `states` |\n\nWhere a set applies, HC3 stores `/assets/userIcons/devices/User<N>/User<N><state>.png` and **switches between them itself from the device value** — on/off comes free, no code. The multi-file form is undocumented (HC3's spec lists only a single `icon` part) but is what its own UI sends. Supplying the wrong shape is not an error HC3 reports: a single bare image on a relay registers and attaches, then renders **blank**, because the lookup asks for `User<N>0.png`. This tool refuses the mismatches it can recognise, and an incomplete set (e.g. a dimmer missing state 40) too. Types not listed above are accepted as given.\n\n**Attaching it — and `deviceIcon` alone is not enough on a QuickApp.** For a Z-Wave device, `modify_device({deviceId, properties:{deviceIcon: <newId>}})` is the mechanism, and HC3 switches states from the device value on its own. On a freshly created QuickApp that same write verifies as applied and leaves the tile **BLANK**: the tile renders from `properties.icon`, which stays `{}`. What renders is a path write from inside the owning QA — `self:updateProperty(\"icon\", {path = \"/assets/userIcons/devices/User<N>/User<N>.svg\", source = \"HC\"})`. An external `api.put` of `properties.icon` persists on an idle QuickApp but was reported discarded on a **running** one, so the likely mechanism is the QA overwriting the property at start rather than the endpoint dropping it. `deviceIcon` is still a real write and is what drives the value-based state switch, so set both: `self:updateProperty(\"deviceIcon\", id)` is verified working at runtime and is how a QA shows mode rather than on/off. Full lifecycle in get_hc3_quickapp_programming_guide({topic:\"ui\"}). For a batch of variants use `upload_icons`.\n\nReturns `{newName, newId, category, extension, md5 | statesMd5, sourcedFrom, states, hint}`. `sourcedFrom` names any frame that came by reference rather than from base64, so the result says where the bytes came from.\n\n**`md5` (single image) or `statesMd5` (a map, per state) is the hash of the bytes HC3 actually received**, after this tool decoded your base64. Compare it against the hash of your local file — mirroring `base64` and `states` in the input — and a payload that corrupted in transit is visible here, before it becomes a tile that renders wrong on a phone. A mismatch means re-send, not repair.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3135,9 +3135,44 @@
           "type": "string",
           "description": "Base64-encoded image bytes (no data URL prefix). The right field for **room and scene** icons, and for **device** types that hold a single image (com.fibaro.genericDevice, i.e. a QuickApp tile). Device types that hold a state set take `states` instead. PNG must be exactly 128×128; colour type does not matter, RGBA is what most icons already on a live gateway use. SVG is uploaded as-is."
         },
+        "fromIcon": {
+          "type": "object",
+          "description": "Single image taken from an icon ALREADY ON THIS GATEWAY instead of pasted as base64 — A reference to an icon already on this HC3: { icon, category?, extension?, userIcon?, state? }. `icon` is the name from list_icons (device[].iconSetName). `category` defaults to \"device\", `state` picks one file out of a set, and `userIcon` is inferred from the name — User<N> is a user icon, anything else is built-in — unless you state it.",
+          "properties": {
+            "icon": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "room",
+                "scene",
+                "device"
+              ]
+            },
+            "extension": {
+              "type": "string"
+            },
+            "userIcon": {
+              "type": "boolean"
+            },
+            "state": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "icon"
+          ]
+        },
+        "statesOff": {
+          "description": "Shorthand, with statesOn, for a device state set: the image for state 0. Either a base64 string or an { icon } reference. Expanded server-side to the full set the device type requires, so a dimmer needs two images here rather than eleven."
+        },
+        "statesOn": {
+          "description": "Shorthand, with statesOff, for a device state set: the image for every non-zero state. Either a base64 string or an { icon } reference. binarySwitch fills state 100; multilevelSwitch fills 10 through 100 with the same image, which is what a dimmer icon almost always wants."
+        },
         "states": {
           "type": "object",
-          "description": "For **device** icons whose type holds a state set: a map of device state → base64 image, e.g. { \"0\": \"<off>\", \"100\": \"<on>\" }. HC3 stores these as User<N>0.png / User<N>100.png and picks one by the device's value. Keys must be integers, and the set must be complete for the type (binarySwitch 0/100, multilevelSwitch 0,10,…,100). A state-set type uploaded as one bare image registers and attaches, then renders blank."
+          "description": "For **device** icons whose type holds a state set: a map of device state → image, where each image is a base64 string OR an { icon } reference to something already on this gateway, e.g. { \"0\": \"<off>\", \"100\": { icon: \"User1026\" } }. HC3 stores these as User<N>0.png / User<N>100.png and picks one by the device's value. Keys must be integers, and the set must be complete for the type (binarySwitch 0/100, multilevelSwitch 0,10,…,100). A state-set type uploaded as one bare image registers and attaches, then renders blank."
         },
         "mime": {
           "type": "string",
@@ -3183,14 +3218,34 @@
           },
           {
             "required": [
+              "fromIcon"
+            ]
+          },
+          {
+            "required": [
               "states"
+            ]
+          },
+          {
+            "required": [
+              "statesOff",
+              "statesOn"
             ]
           }
         ]
       },
       "else": {
-        "required": [
-          "base64"
+        "anyOf": [
+          {
+            "required": [
+              "base64"
+            ]
+          },
+          {
+            "required": [
+              "fromIcon"
+            ]
+          }
         ]
       }
     }

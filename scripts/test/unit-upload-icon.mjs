@@ -409,5 +409,195 @@ await check('an SVG still bypasses the PNG structural checks', async () => {
   assert.equal(r.extension, 'svg');
 });
 
+// The reference form fetches from the gateway, so these need the asset paths
+// served as well as the /api/icons listings. stubFetch only answers the POST
+// and returns what was sent, so wrap it.
+function stubFetchWithAssets(assets = {}) {
+  const seen = stubFetch();
+  const posted = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const path = new URL(url).pathname;
+    if (path.startsWith('/assets/')) {
+      const hit = assets[path];
+      if (!hit) {
+        // What a real gateway does for a missing asset: 200 with its SPA.
+        return { ok: true, status: 200, headers: { get: () => 'text/html' },
+          async arrayBuffer() { return Buffer.alloc(13047); } };
+      }
+      return { ok: true, status: 200, headers: { get: () => hit.mime },
+        async arrayBuffer() { return hit.body; } };
+    }
+    return posted(url, opts);
+  };
+  return seen;
+}
+
+await check('fromIcon uploads bytes that never entered the conversation', async () => {
+  // The whole point of the reference form: the payload is not transcribed, so
+  // it cannot be mistyped. Verified by checking the POSTed bytes equal the
+  // served ones rather than anything the caller supplied.
+  const served = realPng({ colorType: 2 });
+  const seen = stubFetchWithAssets({
+    '/assets/userIcons/devices/User1026/User1026.png': { mime: 'image/png', body: served },
+  });
+
+  const r = await uploadIcon(fakeHc3(), {
+    fromIcon: { icon: 'User1026' }, mime: 'image/png', category: 'room',
+  });
+
+  assert.equal(r.md5, createHash('md5').update(served).digest('hex'), 'the uploaded bytes must be the served bytes');
+  assert.deepEqual(r.sourcedFrom, { image: 'User1026' }, 'the result must say where the bytes came from');
+  assert.ok(seen.body.includes(served.toString('latin1')), 'the served bytes must appear in the multipart body');
+});
+
+await check('userIcon is inferred from a User<N> name and obeyed when stated', async () => {
+  // User<N> is how HC3 names every uploaded icon, so the inference is right
+  // almost always — but a caller who says otherwise has to win.
+  const served = realPng();
+  stubFetchWithAssets({ '/assets/userIcons/devices/User77/User77.png': { mime: 'image/png', body: served } });
+  const inferred = await uploadIcon(fakeHc3(), { fromIcon: { icon: 'User77' }, mime: 'image/png', category: 'room' });
+  assert.equal(inferred.md5, createHash('md5').update(served).digest('hex'));
+
+  stubFetchWithAssets({ '/assets/icon/fibaro/light/light.png': { mime: 'image/png', body: served } });
+  const builtIn = await uploadIcon(fakeHc3(), { fromIcon: { icon: 'light' }, mime: 'image/png', category: 'room' });
+  assert.equal(builtIn.md5, createHash('md5').update(served).digest('hex'));
+});
+
+await check('a reference that resolves to a placeholder fails, naming the icon', async () => {
+  // HC3 answers 200 with its SPA for a missing asset, so an unchecked fetch
+  // would upload 13 KB of HTML as an icon.
+  stubFetchWithAssets({});
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { fromIcon: { icon: 'User9999' }, mime: 'image/png', category: 'room' }),
+    (e) => {
+      assert.match(e.message, /User9999/, 'the error must name the icon that could not be read');
+      return true;
+    },
+  );
+});
+
+await check('a referenced SVG under an image/png upload is refused', async () => {
+  // Otherwise the gateway ends up with a file whose name and content disagree.
+  stubFetchWithAssets({
+    '/assets/userIcons/devices/User1026/User1026.svg': {
+      mime: 'image/svg+xml', body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    },
+  });
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { fromIcon: { icon: 'User1026', extension: 'svg' }, mime: 'image/png', category: 'room' }),
+    /is a \.svg file, but this upload declares \.png/,
+  );
+});
+
+await check('statesOff/statesOn expands to the full multilevelSwitch set', async () => {
+  // Eleven frames from two payloads: state 0 off, 10 through 100 on. This is
+  // the case the shorthand exists for.
+  const off = realPng64({ colorType: 3 });
+  const on = realPng64({ colorType: 6 });
+  stubFetch();
+
+  const r = await uploadIcon(fakeHc3(), {
+    statesOff: off, statesOn: on,
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.multilevelSwitch',
+  });
+
+  assert.deepEqual(r.states, ['0', '10', '20', '30', '40', '50', '60', '70', '80', '90', '100']);
+  assert.equal(r.statesMd5['0'], createHash('md5').update(Buffer.from(off, 'base64')).digest('hex'));
+  for (const s of ['10', '50', '100']) {
+    assert.equal(r.statesMd5[s], createHash('md5').update(Buffer.from(on, 'base64')).digest('hex'));
+  }
+  assert.notEqual(r.statesMd5['0'], r.statesMd5['100'], 'off and on must not collapse to one image');
+});
+
+await check('statesOff/statesOn covers binarySwitch as 0 and 100', async () => {
+  stubFetch();
+  const r = await uploadIcon(fakeHc3(), {
+    statesOff: realPng64({ colorType: 3 }), statesOn: realPng64({ colorType: 6 }),
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+  });
+  assert.deepEqual(r.states, ['0', '100']);
+});
+
+await check('the shorthand accepts references, so a set can need no payload at all', async () => {
+  const offBytes = realPng({ colorType: 3 });
+  const onBytes = realPng({ colorType: 6 });
+  stubFetchWithAssets({
+    '/assets/userIcons/devices/User10/User10.png': { mime: 'image/png', body: offBytes },
+    '/assets/userIcons/devices/User11/User11.png': { mime: 'image/png', body: onBytes },
+  });
+
+  const r = await uploadIcon(fakeHc3(), {
+    statesOff: { icon: 'User10' }, statesOn: { icon: 'User11' },
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.multilevelSwitch',
+  });
+
+  assert.equal(r.statesMd5['0'], createHash('md5').update(offBytes).digest('hex'));
+  assert.equal(r.statesMd5['100'], createHash('md5').update(onBytes).digest('hex'));
+  assert.equal(r.sourcedFrom['0'], 'User10');
+  assert.equal(r.sourcedFrom['100'], 'User11');
+});
+
+await check('states may mix a pasted image and a referenced one', async () => {
+  const refBytes = realPng({ colorType: 2 });
+  const pasted = realPng64({ colorType: 3 });
+  stubFetchWithAssets({
+    '/assets/userIcons/devices/User10/User100.png': { mime: 'image/png', body: refBytes },
+  });
+
+  const r = await uploadIcon(fakeHc3(), {
+    states: { '0': pasted, '100': { icon: 'User10', state: 0 } },
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+  });
+
+  assert.equal(r.statesMd5['0'], createHash('md5').update(Buffer.from(pasted, 'base64')).digest('hex'));
+  assert.equal(r.statesMd5['100'], createHash('md5').update(refBytes).digest('hex'));
+  assert.deepEqual(r.sourcedFrom, { '100': 'User10' }, 'only the referenced frame is reported as sourced');
+});
+
+await check('half a shorthand is refused rather than leaving states blank', async () => {
+  // HC3 renders blank at any state whose file is absent and reports no error,
+  // so a half-given shorthand has to fail here.
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), {
+      statesOff: realPng64(), mime: 'image/png',
+      category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    }),
+    /statesOff and statesOn are a pair/,
+  );
+});
+
+await check('the shorthand is refused where the state list is unknown', async () => {
+  // It expands from DEVICE_STATE_MODEL, so a type not in that table has no
+  // set to expand into. Guessing would produce a silently blank tile.
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), {
+      statesOff: realPng64(), statesOn: realPng64(), mime: 'image/png',
+      category: 'device', deviceTemplate: 'com.fibaro.somethingNew',
+    }),
+    /not one this server knows/,
+  );
+});
+
+await check('the input forms are mutually exclusive', async () => {
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { base64: PNG, fromIcon: { icon: 'User1' }, mime: 'image/png', category: 'room' }),
+    /either base64 or fromIcon/,
+  );
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), {
+      states: STATES, statesOff: PNG, statesOn: PNG,
+      mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    }),
+    /either states .* or statesOff\/statesOn/,
+  );
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { statesOff: PNG, statesOn: PNG, mime: 'image/png', category: 'room' }),
+    /do not apply to category "room"/,
+  );
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll upload_icon checks passed');
 process.exit(failures ? 1 : 0);
