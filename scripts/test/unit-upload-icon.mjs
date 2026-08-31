@@ -12,6 +12,11 @@
 
 import { icons } from '../../out/mcp/tools/icons.js';
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const uploadIcon = icons.handlers.upload_icon;
 
@@ -264,6 +269,34 @@ await check('hint is category-aware (device attaches by numeric id)', async () =
   const room = await uploadIcon(fakeHc3(), { base64: PNG, mime: 'image/png', category: 'room' });
   assert.match(room.hint, /modify_room/);
   assert.ok(!('deviceTemplate' in room), 'room result must not carry deviceTemplate');
+});
+
+await check('every source states the properties.icon discard as conditional', async () => {
+  // 4.25.0 walked this claim back: an external `api.put` of `properties.icon`
+  // PERSISTS on an idle throwaway QA, so the endpoint is not what drops it.
+  // api-notes.ts and quickapp-programming.ts were corrected; upload_icon's
+  // description was missed and shipped the flat "silently discarded" claim for
+  // a release, so the package answered differently depending on which you read.
+  //
+  // Guarding the class rather than the instance: any shipped source that
+  // discusses the external write must carry the conditional with it.
+  const sources = [
+    'src/mcp/tools/icons.ts',
+    'src/mcp/docs/api-notes.ts',
+    'src/mcp/docs/quickapp-programming.ts',
+  ];
+  for (const rel of sources) {
+    const text = readFileSync(resolve(ROOT, rel), 'utf8');
+    if (!text.includes('properties.icon')) continue;
+    assert.ok(
+      /persists/i.test(text),
+      `${rel} discusses an external properties.icon write without the idle-QA finding that qualifies it`,
+    );
+    assert.ok(
+      !/silently discarded/.test(text),
+      `${rel} again claims the write is silently discarded; probed on an idle QA it persists`,
+    );
+  }
 });
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll upload_icon checks passed');
