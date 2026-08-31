@@ -33,11 +33,19 @@ EnvironmentFile=/etc/hc3-mcp/.env
 StateDirectory=hc3-mcp
 Environment=HC3_FIRMWARE_RECORD_DIR=/var/lib/hc3-mcp/firmware
 
+# Spread the load. Run flat out this walks ~65 calls back to back, several
+# pulling MB-scale bodies, which is a burst on a gateway that is also running
+# the house. Nobody is waiting for this result at 04:30, so trade minutes of
+# wall-clock for a gentler profile. Each record stores its own elapsedSeconds,
+# so the real cost is measurable rather than guessed at.
+Environment=HC3_FIRMWARE_PACE_MS=3000
+
 ExecStart=/usr/bin/node /opt/hc3-mcp/src/scripts/firmware-check.mjs
 
 # A gateway that is briefly unreachable is not a failure worth alerting on;
-# the next run picks it up. Timeout guards against a hung probe.
-TimeoutStartSec=10min
+# the next run picks it up. Timeout guards against a hung probe, with headroom
+# well beyond the paced runtime.
+TimeoutStartSec=25min
 
 # Hardening. Note the absence of MemoryDenyWriteExecute: V8 needs
 # writable+executable pages and on aarch64 that flag kills the process with

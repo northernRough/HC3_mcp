@@ -59,6 +59,27 @@ const RECORD_DIR = process.env.HC3_FIRMWARE_RECORD_DIR
 
 const withWrites = process.argv.includes('--with-writes');
 const listOnly = process.argv.includes('--list');
+
+// --json emits the verdict as a single JSON object for a caller to act on,
+// rather than a report for a human to read. The progress narration is written
+// throughout with console.log, so in this mode it is redirected wholesale to
+// stderr: stdout has to carry the JSON and nothing else, or the caller parses
+// a progress line and reports a firmware regression that never happened.
+const jsonOut = process.argv.includes('--json');
+if (jsonOut) console.log = (...a) => process.stderr.write(a.join(' ') + '\n');
+
+// Pause between probes, in milliseconds.
+//
+// Run flat out this walks ~65 calls back to back, several of which pull
+// MB-scale bodies (get_devices, get_quickapps, get_scenes). That is a burst of
+// load on a gateway that is also running the house. Interactively that is fine
+// and you want the answer quickly. On an unattended timer it is not worth any
+// risk of a stall, so the systemd unit sets a pace and the same work is spread
+// over minutes instead of seconds.
+//
+// Default 0 keeps manual runs exactly as they were.
+const PACE_MS = Math.max(0, Number(process.env.HC3_FIRMWARE_PACE_MS ?? 0) || 0);
+const pace = () => (PACE_MS ? new Promise(r => setTimeout(r, PACE_MS)) : Promise.resolve());
 const READ_ONLY = /^(get|list|find|filter|explain|audit|read|snapshot|can)_/;
 
 // --- provenance -------------------------------------------------------
@@ -178,6 +199,7 @@ async function probeDeadEndpoints() {
       detail = msg.slice(0, 140);
     }
     results.push({ ...e, observed, bodyShape, detail });
+    await pace();
   }
   return results;
 }
@@ -199,6 +221,7 @@ async function probeShapes(client, tools) {
     } catch (err) {
       errors[t.name] = String(err?.message ?? err).slice(0, 160);
     }
+    await pace();
   }
   return { shapes, errors, skipped };
 }
@@ -309,7 +332,11 @@ async function main() {
   const sys = await call('get_system_info').catch(() => ({}));
   const firmware = sys?.softVersion ?? sys?.version ?? 'unknown';
   const serial = sys?.serialNumber ?? sys?.serial ?? 'unknown';
-  console.log(`  firmware   : ${firmware}  (serial ${serial})\n`);
+  console.log(`  firmware   : ${firmware}  (serial ${serial})`);
+  console.log(PACE_MS
+    ? `  pacing     : ${PACE_MS} ms between probes (spreading the load)\n`
+    : `  pacing     : none, running flat out\n`);
+  const startedAt = Date.now();
 
   console.log('  tier 1 — documented dead endpoints…');
   const deadEndpoints = await probeDeadEndpoints();
@@ -342,10 +369,17 @@ async function main() {
     deadEndpoints, shapes, errors, skipped, writeBehaviour,
   };
 
+  // Recorded so the next run can say how long the last one took, rather than
+  // leaving "what does this cost the gateway?" as a matter of opinion.
+  const elapsedS = Math.round((Date.now() - startedAt) / 1000);
+  record.elapsedSeconds = elapsedS;
+  record.paceMs = PACE_MS;
+
   mkdirSync(RECORD_DIR, { recursive: true });
   const file = join(RECORD_DIR, `${String(firmware).replace(/[^\w.]/g, '_')}.json`);
   writeFileSync(file, JSON.stringify(record, null, 2));
   console.log(`\n  recorded → ${file.replace(ROOT + '/', '')}`);
+  console.log(`  took ${elapsedS}s${PACE_MS ? ` (${PACE_MS} ms pacing included)` : ''}`);
 
   // Diff against the newest record from a DIFFERENT firmware. Comparing two
   // runs of the same firmware would only show house churn.
@@ -353,6 +387,7 @@ async function main() {
   if (!prior) {
     console.log('\n  No earlier firmware on record, so nothing to compare yet.');
     console.log('  This run IS the baseline. Re-run it after the next firmware update.\n');
+    if (jsonOut) return emitJson(record, null, null);
     return report(record, null, null);
   }
 
@@ -365,7 +400,45 @@ async function main() {
     console.log('    the baseline commit against the new firmware to separate them.');
   }
   console.log('');
-  return report(record, prior, diff(prior, record));
+  const d = diff(prior, record);
+  if (jsonOut) return emitJson(record, prior, d);
+  return report(record, prior, d);
+}
+
+/**
+ * The same verdict the report prints, shaped for a caller.
+ *
+ * `confounded` and `notChecked` are included deliberately: a consumer that
+ * announces "nothing broke" without repeating those caveats would be making a
+ * stronger claim than the run supports, which is the failure this whole script
+ * exists to prevent.
+ */
+function emitJson(record, prior, d) {
+  process.stdout.write(JSON.stringify({
+    firmware: record.firmware,
+    serial: record.serial,
+    recordedAt: record.recordedAt,
+    gateway: record.gateway,
+    probe: record.probe,
+    baseline: prior ? {
+      firmware: prior.firmware,
+      recordedAt: prior.recordedAt,
+      probe: prior.probe ?? null,
+    } : null,
+    isBaselineRun: !prior,
+    confounded: prior ? confounded(prior.probe, record.probe) : null,
+    withWrites,
+    broken: d?.broken ?? [],
+    fixed: d?.fixed ?? [],
+    changed: d?.changed ?? [],
+    noisy: d?.noisy ?? [],
+    notChecked: [
+      'Anything requiring a human: a real tap dispatches differently from call_ui_event, so UI behaviour needs scripts/probe-uicallbacks.mjs --hold and a finger on a phone.',
+      'Endpoints whose documented path carries a {placeholder} or wildcard.',
+      ...(record.writeBehaviour ? [] : ['Write behaviour, the silent-write catalogue. Re-run with --with-writes to include it.']),
+      'Z-Wave parameter transmission, which no API read can confirm.',
+    ],
+  }, null, 2) + '\n');
 }
 
 function report(record, prior, d) {
