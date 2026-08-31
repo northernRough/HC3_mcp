@@ -40,6 +40,12 @@ Environment=HC3_FIRMWARE_RECORD_DIR=/var/lib/hc3-mcp/firmware
 # so the real cost is measurable rather than guessed at.
 Environment=HC3_FIRMWARE_PACE_MS=3000
 
+# Stamp the firmwareWatch tile with the date of this record, so it can say
+# whether a pre-upgrade safety recording exists and how stale it is. That is
+# the fact that decides whether pressing Update is safe, and it is useless if
+# maintained by hand.
+Environment=HC3_FIRMWARE_STAMP_QA=4985
+
 ExecStart=/usr/bin/node /opt/hc3-mcp/src/scripts/firmware-check.mjs
 
 # A gateway that is briefly unreachable is not a failure worth alerting on;

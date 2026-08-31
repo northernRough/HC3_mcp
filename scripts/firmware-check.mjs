@@ -380,6 +380,7 @@ async function main() {
   writeFileSync(file, JSON.stringify(record, null, 2));
   console.log(`\n  recorded → ${file.replace(ROOT + '/', '')}`);
   console.log(`  took ${elapsedS}s${PACE_MS ? ` (${PACE_MS} ms pacing included)` : ''}`);
+  await stampQuickApp(record);
 
   // Diff against the newest record from a DIFFERENT firmware. Comparing two
   // runs of the same firmware would only show house churn.
@@ -403,6 +404,44 @@ async function main() {
   const d = diff(prior, record);
   if (jsonOut) return emitJson(record, prior, d);
   return report(record, prior, d);
+}
+
+/**
+ * Tell the firmwareWatch QuickApp when this record was taken.
+ *
+ * Without it the tile can show a recommendation but not whether a pre-upgrade
+ * safety recording exists, which is the fact that actually decides whether it
+ * is safe to press Update. Hand-maintaining that date would rot within a week.
+ *
+ * Sent as an ACTION rather than a variable write: an external variable write
+ * restarts the QuickApp, an action does not.
+ *
+ * Failure here is logged and swallowed. A gateway that will not take the stamp
+ * must not cost us the record we just spent minutes gathering.
+ */
+async function stampQuickApp(record) {
+  const id = process.env.HC3_FIRMWARE_STAMP_QA;
+  if (!id) return;
+  try {
+    const { env } = requireCredentials();
+    const auth = 'Basic ' + Buffer.from(`${env.FIBARO_USERNAME}:${env.FIBARO_PASSWORD}`).toString('base64');
+    const url = `http://${env.FIBARO_HOST}:${env.FIBARO_PORT || 80}/api/devices/${id}/action/recordBaseline`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args: [{
+        firmware: record.firmware,
+        recordedAt: Math.floor(new Date(record.recordedAt).getTime() / 1000),
+        elapsedSeconds: record.elapsedSeconds,
+      }] }),
+      signal: AbortSignal.timeout(15000),
+    });
+    console.log(r.ok
+      ? `  stamped QuickApp ${id} with the record date`
+      : `  could not stamp QuickApp ${id}: HTTP ${r.status}`);
+  } catch (err) {
+    console.log(`  could not stamp QuickApp ${id}: ${err.message}`);
+  }
 }
 
 /**
