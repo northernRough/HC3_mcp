@@ -10,21 +10,16 @@
 //   node scripts/test/unit-upload-icons.mjs
 
 import { icons } from '../../out/mcp/tools/icons.js';
+import { realPng64 } from './png-fixture.mjs';
 import { strict as assert } from 'node:assert';
 
 const uploadIcons = icons.handlers.upload_icons;
 const CONFIG = { host: '192.0.2.10', port: 80, username: 'u', password: 'p' };
 const realFetch = globalThis.fetch;
 
-function makePng() {
-  const b = Buffer.alloc(40);
-  Buffer.from('89504e470d0a1a0a', 'hex').copy(b, 0);
-  b.write('IHDR', 12);
-  b.writeUInt32BE(128, 16); b.writeUInt32BE(128, 20);
-  b.writeUInt8(8, 24); b.writeUInt8(3, 25);
-  return b.toString('base64');
-}
-const PNG = makePng();
+// A real PNG: upload_icon walks chunks, checks CRCs and inflates the IDAT,
+// so a header stub would be rejected before the batch logic under test runs.
+const PNG = realPng64({ colorType: 3 });
 const img = (label) => ({ label, base64: PNG });
 
 // Each upload_icon call does: list (before), POST, list (after). Ids are

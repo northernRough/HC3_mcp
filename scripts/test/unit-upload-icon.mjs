@@ -14,6 +14,7 @@ import { icons } from '../../out/mcp/tools/icons.js';
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { realPng, realPng64, corruptOneByte } from './png-fixture.mjs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,18 +22,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const uploadIcon = icons.handlers.upload_icon;
 
-// Minimal buffer that satisfies upload_icon's PNG header pre-checks. Only the
-// signature and IHDR fields are read, so the rest can be zeroes.
-function makePng({ width = 128, height = 128, bitDepth = 8, colorType = 3 } = {}) {
-  const b = Buffer.alloc(40);
-  Buffer.from('89504e470d0a1a0a', 'hex').copy(b, 0);
-  b.write('IHDR', 12);
-  b.writeUInt32BE(width, 16);
-  b.writeUInt32BE(height, 20);
-  b.writeUInt8(bitDepth, 24);
-  b.writeUInt8(colorType, 25);
-  return b.toString('base64');
-}
+// Real PNGs, not header stubs: upload_icon now walks every chunk, checks its
+// CRC32 and inflates the IDAT, so a fixture that no decoder would accept
+// cannot tell us whether the validator accepts valid files. See png-fixture.mjs.
+const makePng = (opts = {}) => realPng64({ colorType: 3, ...opts });
 
 const PNG = makePng();
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64');
@@ -331,6 +324,89 @@ await check('differing state images produce differing hashes', async () => {
     mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
   });
   assert.notEqual(set.statesMd5['0'], set.statesMd5['100']);
+});
+
+await check('a one-byte substitution is refused, and the damaged chunk is named', async () => {
+  // The failure the whole validator exists for. Length is unchanged, so every
+  // size-based check agrees; only the chunk CRC sees it. The error has to name
+  // the chunk and its byte range, because "this PNG is corrupt" sends someone
+  // back to re-copy 15 KB while a byte range points at the part that is wrong.
+  const clean = realPng();
+  const idatOffset = clean.indexOf(Buffer.from('IDAT', 'latin1'));
+  const damaged = corruptOneByte(clean, idatOffset + 12);
+  assert.equal(damaged.length, clean.length, 'the premise: substitution does not change length');
+
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { base64: damaged.toString('base64'), mime: 'image/png', category: 'room' }),
+    (e) => {
+      assert.match(e.message, /CRC/i, 'the error must say what kind of damage this is');
+      assert.match(e.message, /IDAT/, 'and which chunk carries it');
+      assert.match(e.message, /byte/i, 'and where to look');
+      return true;
+    },
+  );
+});
+
+await check('damage is caught even when IHDR still reads a plausible 128x128', async () => {
+  // Why the structural walk runs BEFORE the dimension check: a corrupt payload
+  // usually still parses a valid-looking size out of the header, so a
+  // dimensions-only validator waves it through.
+  const clean = realPng();
+  const damaged = corruptOneByte(clean, clean.length - 12);
+
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { base64: damaged.toString('base64'), mime: 'image/png', category: 'room' }),
+    (e) => {
+      assert.ok(!/must be 128x128/.test(e.message), 'the dimension check must not be what fires here');
+      return true;
+    },
+  );
+});
+
+await check('a truncated payload is told to re-fetch, not repaired', async () => {
+  // Truncation and substitution need different advice: there is nothing to
+  // repair in a file that simply stops.
+  const truncated = realPng().subarray(0, 60);
+
+  stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), { base64: truncated.toString('base64'), mime: 'image/png', category: 'room' }),
+    (e) => {
+      assert.match(e.message, /truncat/i);
+      assert.match(e.message, /re-fetch/i);
+      return true;
+    },
+  );
+});
+
+await check('one bad frame fails the set before any of it is written', async () => {
+  // upload_icon is a committed write per call, so a state set with a corrupt
+  // frame must fail at the boundary rather than half-write a dimmer.
+  const clean = realPng64();
+  const damaged = corruptOneByte(realPng(), realPng().indexOf(Buffer.from('IDAT', 'latin1')) + 12).toString('base64');
+
+  const seen = stubFetch();
+  await assert.rejects(
+    () => uploadIcon(fakeHc3(), {
+      states: { '0': clean, '100': damaged },
+      mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+    }),
+    (e) => {
+      assert.match(e.message, /state '100'/, 'the error must name which frame');
+      return true;
+    },
+  );
+  assert.ok(!seen.body, 'nothing may be POSTed when a frame is bad');
+});
+
+await check('an SVG still bypasses the PNG structural checks', async () => {
+  // The validator is PNG-specific; SVG uploads as-is and must not be dragged
+  // through a chunk walk it has no chunks for.
+  stubFetch();
+  const r = await uploadIcon(fakeHc3(), { base64: SVG, mime: 'image/svg+xml', category: 'room' });
+  assert.equal(r.extension, 'svg');
 });
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll upload_icon checks passed');
