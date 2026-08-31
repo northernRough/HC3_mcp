@@ -1,0 +1,23 @@
+[Unit]
+# Why weekly and not on-change: a recorder that fires when it notices the
+# version changed is already too late — you are on the new firmware and the
+# baseline is gone. Recording periodically means a fresh record of the CURRENT
+# firmware always exists, so whichever week you press Update, the most recent
+# prior record IS the baseline. No discipline required at update time.
+Description=Weekly HC3 firmware behaviour baseline
+
+[Timer]
+# Sunday 04:30, clear of the Mac's 03:15 snapshot refresh and its hourly
+# catch-up poll.
+OnCalendar=Sun 04:30
+
+# The Pi is always on, but if it was down (or the SD card was out) the run
+# catches up on next boot rather than silently skipping a week.
+Persistent=true
+
+# Avoids hammering the gateway at exactly the same instant as anything else
+# that woke on a round number.
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

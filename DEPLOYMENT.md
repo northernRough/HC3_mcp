@@ -503,6 +503,57 @@ This works for `curl`-based scripts, custom integrations, and any MCP client wit
 
 ## Operations
 
+### Firmware baseline recorder (optional, 3 minutes)
+
+`scripts/firmware-check.mjs` records how the gateway's API actually behaves, so
+that after a firmware update you can diff what really changed rather than
+trusting Fibaro's release notes. The diff compares two records, which means **a
+record of the old firmware has to exist before you update**.
+
+Relying on remembering that is how you lose the baseline. The timer below keeps
+a current record on the always-on Pi, so whichever week you press Update, the
+most recent prior record is your baseline.
+
+```bash
+sudo cp /opt/hc3-mcp/src/deploy/hc3-firmware-record.service /opt/hc3-mcp/src/deploy/hc3-firmware-record.timer /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now hc3-firmware-record.timer
+```
+
+Verify it took, and force one run now so a baseline exists immediately:
+
+```bash
+systemctl list-timers hc3-firmware-record.timer --no-pager
+```
+
+```bash
+sudo systemctl start hc3-firmware-record.service && sudo journalctl -u hc3-firmware-record -n 40 --no-pager
+```
+
+Records land in `/var/lib/hc3-mcp/firmware/`, one JSON per firmware version,
+refreshed each week for the version currently running. They are deliberately
+**outside** `/opt/hc3-mcp/src`: that checkout must stay clean or `pi-update.sh`
+(`set -e`, bare `git pull`) fails the deploy and kills the hourly timer.
+
+```bash
+ls -la /var/lib/hc3-mcp/firmware/
+```
+
+Notes:
+
+- The timer runs **read-only**. The write tier (`--with-writes`) creates and
+  tears down throwaway objects on the live gateway — appropriate when you are
+  watching, not on an unattended schedule. Run it by hand for that tier.
+- Each record stamps the host, node version, MCP version and git commit that
+  produced it. Tier 2 records the shapes of *this server's* tools, so two
+  records from different commits can differ because this repo changed rather
+  than the firmware. The report prints both stamps and warns when they differ,
+  instead of letting you blame Fibaro for your own churn.
+- To read a diff after an update, run the same command by hand and it will
+  compare against the newest record from a *different* firmware.
+
 ### Logs
 
 ```bash

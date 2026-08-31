@@ -36,6 +36,8 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { hostname } from 'node:os';
 import { MCPClient } from './test/mcp-client.mjs';
 import { defaultArgsFor } from './test/default-args.mjs';
 import { shape, HETEROGENEOUS } from './test/shape.mjs';
@@ -45,12 +47,73 @@ import { client as hc3Client } from './probe.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const SERVER = resolve(ROOT, 'out/mcp/hc3-mcp-server.js');
-const RECORD_DIR = resolve(__dirname, 'test/firmware');
 const DEAD_DOC = resolve(ROOT, 'KNOWN_DEAD_ENDPOINTS.md');
+
+// Where records live. Overridable so an always-on host can keep them OUTSIDE
+// the git checkout: on the Pi, /opt/hc3-mcp/src must stay pristine because
+// pi-update.sh is `set -e` with a bare `git pull`, and DEPLOYMENT.md is
+// explicit that the checkout is never to be written to by hand.
+const RECORD_DIR = process.env.HC3_FIRMWARE_RECORD_DIR
+  ? resolve(process.env.HC3_FIRMWARE_RECORD_DIR)
+  : resolve(__dirname, 'test/firmware');
 
 const withWrites = process.argv.includes('--with-writes');
 const listOnly = process.argv.includes('--list');
 const READ_ONLY = /^(get|list|find|filter|explain|audit|read|snapshot|can)_/;
+
+// --- provenance -------------------------------------------------------
+
+/**
+ * Who produced this record.
+ *
+ * Tier 2 records the response shapes of THIS server's tools, so a record is a
+ * statement about the gateway AND about the code that interrogated it. Two
+ * records taken from different commits can differ because this repo changed,
+ * not because the firmware did — and without this stamp that confound is
+ * undetectable after the fact, which would let a diff blame Fibaro for our own
+ * churn. Cheap to record, impossible to reconstruct later.
+ */
+function provenance() {
+  const git = (...args) => {
+    try {
+      return execFileSync('git', ['-C', ROOT, ...args], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch { return null; }
+  };
+
+  let version = null;
+  try { version = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')).version; } catch {}
+
+  return {
+    host: hostname(),
+    node: process.version,
+    mcpVersion: version,
+    commit: git('rev-parse', '--short', 'HEAD'),
+    // A dirty tree means the commit does not describe what actually ran.
+    dirty: (() => { const s = git('status', '--porcelain'); return s === null ? null : s.length > 0; })(),
+  };
+}
+
+/**
+ * True when two records cannot be safely compared as firmware evidence.
+ * Unknown provenance counts as confounded: a record from before stamping
+ * existed cannot prove it came from the same code, and silence there would be
+ * the same false reassurance this whole script exists to avoid.
+ */
+function confounded(a, b) {
+  if (!a || !b) return true;
+  if (a.dirty || b.dirty) return true;
+  return a.commit !== b.commit || a.mcpVersion !== b.mcpVersion;
+}
+
+/** Human-readable one-liner, for the confound warning in the report. */
+function describeProbe(p) {
+  if (!p) return 'unknown (record predates provenance stamping)';
+  const bits = [p.host, p.commit ? `commit ${p.commit}${p.dirty ? '+dirty' : ''}` : null,
+    p.mcpVersion ? `v${p.mcpVersion}` : null, p.node].filter(Boolean);
+  return bits.join(', ');
+}
 
 // --- records ----------------------------------------------------------
 
@@ -275,6 +338,7 @@ async function main() {
     firmware, serial,
     recordedAt: new Date().toISOString(),
     gateway: targetHost(),
+    probe: provenance(),
     deadEndpoints, shapes, errors, skipped, writeBehaviour,
   };
 
@@ -292,7 +356,15 @@ async function main() {
     return report(record, null, null);
   }
 
-  console.log(`\n  comparing against ${prior.firmware} (recorded ${prior.recordedAt.slice(0, 10)})\n`);
+  console.log(`\n  comparing against ${prior.firmware} (recorded ${prior.recordedAt.slice(0, 10)})`);
+  console.log(`    then: ${describeProbe(prior.probe)}`);
+  console.log(`    now : ${describeProbe(record.probe)}`);
+  if (confounded(prior.probe, record.probe)) {
+    console.log('\n  ! The two records were NOT produced by the same probe. Differences');
+    console.log('    below may be this repo changing rather than the firmware. Re-run');
+    console.log('    the baseline commit against the new firmware to separate them.');
+  }
+  console.log('');
   return report(record, prior, diff(prior, record));
 }
 

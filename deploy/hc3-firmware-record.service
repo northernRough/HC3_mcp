@@ -1,0 +1,51 @@
+[Unit]
+# Record what the gateway's API actually does, so a later firmware update can be
+# diffed against it. See scripts/firmware-check.mjs.
+#
+# This runs READ-ONLY on purpose: no --with-writes. The write tier creates and
+# tears down throwaway objects on a live gateway, which is fine when a human is
+# watching and wrong on an unattended weekly timer. Run --with-writes by hand
+# when you want that tier.
+Description=Record HC3 firmware behaviour baseline
+Documentation=file:/opt/hc3-mcp/src/scripts/firmware-check.mjs
+After=network-online.target hc3-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hc3mcp
+Group=hc3mcp
+WorkingDirectory=/opt/hc3-mcp/src
+
+# Same credentials the MCP service uses. systemd reads this as root before
+# dropping privileges, which is why the service user does not need to read
+# /etc/hc3-mcp/.env itself.
+#
+# Every line in that file must start with the variable name. systemd silently
+# drops indented lines, so never write it with nano (autoindent) — see the
+# troubleshooting section of DEPLOYMENT.md.
+EnvironmentFile=/etc/hc3-mcp/.env
+
+# Records live OUTSIDE the git checkout. /opt/hc3-mcp/src must stay pristine:
+# pi-update.sh is `set -e` with a bare `git pull`, so anything that dirties the
+# tree fails the deploy and silently kills the hourly timer.
+# StateDirectory creates and chowns /var/lib/hc3-mcp for us.
+StateDirectory=hc3-mcp
+Environment=HC3_FIRMWARE_RECORD_DIR=/var/lib/hc3-mcp/firmware
+
+ExecStart=/usr/bin/node /opt/hc3-mcp/src/scripts/firmware-check.mjs
+
+# A gateway that is briefly unreachable is not a failure worth alerting on;
+# the next run picks it up. Timeout guards against a hung probe.
+TimeoutStartSec=10min
+
+# Hardening. Note the absence of MemoryDenyWriteExecute: V8 needs
+# writable+executable pages and on aarch64 that flag kills the process with
+# SIGTRAP. DEPLOYMENT.md documents this trap.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
