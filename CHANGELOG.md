@@ -2,6 +2,120 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.26.0] - 2026-08-31
+
+Icon handling, after a session that spent two hours on it and produced a
+post-mortem. The root cause was one design fact rather than a bug: `get_icon`
+hands back binary as base64, which then has to be re-emitted by hand to reach
+a file or another tool call. Transcription of an 8-15 KB payload corrupts at
+roughly one character per 10 KB, and much worse when the source is far back in
+the conversation. Everything below is either making that corruption visible or
+removing the step that causes it.
+
+### Added
+
+- **`fromIcon` — reference an icon instead of pasting its bytes.** Anywhere
+  `upload_icon` took `base64` it now also takes `fromIcon: { icon: "User1026" }`,
+  and `states` values may be either form. The bytes are fetched gateway-side
+  and never enter the conversation, so they cannot be mistyped. Reusing an
+  existing icon, or copying one state of a set into a new set, needs no payload
+  at all. `category` defaults to `device` and `userIcon` is inferred from the
+  name — HC3 names every uploaded icon `User<N>` — unless stated.
+
+  A referenced source carries its own extension, so referencing an SVG into an
+  `image/png` upload is refused: HC3 stores a file whose name and content
+  disagree without complaint, and then fails to render it.
+
+- **`statesOff` / `statesOn` — two images instead of eleven.** A dimmer's icon
+  set holds eleven frames and ten of them are normally the same "on" image.
+  Pasting that image ten times was ten independent chances to corrupt it for no
+  added information. The pair expands server-side to whatever the device type
+  requires (binarySwitch 0/100, multilevelSwitch 0,10,…,100), and either may
+  itself be a reference — so an eleven-state upload can now carry no base64 at
+  all. Refused where only one of the pair is given, or where the device type's
+  state list is unknown, because HC3 renders blank at any absent state and
+  reports no error.
+
+- **`md5` on `get_icon`, `md5` / `statesMd5` on `upload_icon`.** Icons were the
+  only surface here with no hash: `get_quickapp_file` has returned a
+  `contentHash` for releases, and `patch_quickapp_file` / `patch_scene_content`
+  refuse a patch when the file moved underneath. `sizeBytes` was all an icon
+  caller had, and it catches truncation while being blind to substitution — a
+  re-typed payload that corrupts a character is exactly as long as the
+  original. Hashes are over the DECODED bytes, so they compare with `md5`
+  against a local file. `upload_icons` propagates them per image.
+
+### Fixed
+
+- **`upload_icon` validated the first 24 bytes of a PNG and nothing else.** It
+  read the signature and the width and height out of IHDR, so damage anywhere
+  past byte 24 — nearly the whole file — reached the gateway looking intact and
+  surfaced later as a tile rendering wrong on a phone. New `src/mcp/png.ts`
+  walks every chunk, checks its CRC32, inflates the IDAT and compares the
+  raster length against what the header declares.
+
+  The ordering is the useful part. PNG carries a CRC per chunk, so damage can
+  be **named and localised** — the error reports the chunk and the byte range
+  that is implicated and states that everything before it passed, which is the
+  difference between re-copying 15 KB and repairing a few bytes. Truncation and
+  substitution get deliberately different advice: a substitution is worth a
+  repair attempt over the named range, a truncation has nothing to repair.
+
+  Deliberately not strict where strictness would cost real uploads: ancillary
+  chunks are walked rather than refused, split IDATs are concatenated before
+  inflating, trailing bytes after IEND are ignored, and interlaced files skip
+  the raster-length check instead of being rejected.
+
+- **`upload_icons` described the state-set model backwards, in both copies it
+  ships.** Its success hint said "Device icons are single-image sets — HC3 has
+  no multi-state upload — so every state change is code-driven", and its
+  description said "each device variant is itself a state set: pass `states`,
+  not `base64`". Those contradict each other, and each is wrong for half the
+  device types: whether an icon holds one image or a set is a property of the
+  device TYPE, which `DEVICE_STATE_MODEL` has recorded all along. The
+  description was the more expensive of the two, because `upload_icon` REFUSES
+  `states` for a single-image type — so following it guaranteed the failure,
+  which is the same trap the schema comment in `upload_icon` documents from
+  4.21.
+
+  The hint is now computed per template: a single-image type keeps the
+  code-driven advice, which is correct for it; a set type is told HC3 switches
+  states from the device value on its own and that `deviceIcon` chooses between
+  the uploaded VARIANTS; an unrecognised type asserts neither, because saying
+  the wrong one is worse than saying nothing.
+
+  It was also unconditionally device-shaped — a room or scene batch was told to
+  call `modify_device`, which does not attach a room icon. `upload_icon`'s hint
+  has been category-aware for releases; this one never was.
+
+  Guarded by a test that reads the surfaces a CLIENT can see — every tool
+  description plus the hint generated for each template — rather than the
+  source text, so a comment may quote the old wording as history.
+
+- **`upload_icon` still claimed an external `properties.icon` write is
+  "accepted and silently discarded".** 4.25.0 walked that claim back —
+  probed on an idle throwaway QuickApp it persists — and corrected
+  `api-notes.ts` and `quickapp-programming.ts`. The tool description was
+  missed, so the package shipped two contradictory answers depending on which
+  one the reader reached for, and the tool description is the copy someone
+  uploading an icon actually hits.
+
+### Changed
+
+- `get_icon`'s path resolution and placeholder detection moved into a shared
+  `fetchIconBytes`, because `fromIcon` needs the same logic and a second copy
+  would drift. The failure mode of a drifted placeholder check is uploading
+  HC3's SPA index as an icon, so there is one implementation rather than two.
+
+- **The PNG test fixtures were not PNGs.** They were 40-byte buffers carrying a
+  signature and an IHDR — exactly the bytes the old validator happened to read.
+  A suite whose "valid PNG" no decoder would accept cannot tell you whether
+  your validator accepts valid files, which is the risk that matters when
+  tightening one. `scripts/test/png-fixture.mjs` now builds real ones, with
+  correct per-chunk CRCs and a real deflate stream.
+
+- New `scripts/test/unit-png.mjs`, wired into `npm test`.
+
 ## [4.25.0] - 2026-08-16
 
 ### Fixed
