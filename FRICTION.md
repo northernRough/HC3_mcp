@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-08-31 23:03 UTC from 263 entries at `~/.hc3-mcp/friction.jsonl`._
+_Generated 2026-08-31 23:15 UTC from 104 entries at `~/.hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -17,7 +17,7 @@ gateway and record a verdict:
 clear to become a finding.
 
 
-## Recurring failures — 74 distinct
+## Recurring failures — 21 distinct
 
 
 A tool failing the same way repeatedly is usually a missing or wrong
@@ -30,43 +30,30 @@ cheapest wins available.
 | untested | 29 | `get_device_property` | 0d ago | HTTP 404: Not Found |
 | untested | 22 | `get_device_parameters` | 0d ago | HTTP 404: Not Found |
 | untested | 5 | `manage_plugin_interfaces` | 0d ago | HTTP 403: Forbidden |
-| untested | 3 | `get_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `filter_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `find_devices_by_name` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_device_property` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `find_device_by_endpoint` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_device_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_rooms` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_room` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_scenes` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_system_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_network_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_energy_data` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_global_variables` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_users` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `list_icons` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_diagnostics` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_zwave_mesh_health` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_refresh_states` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_event_history` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_device_parameters` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_zwave_reconfiguration_tasks` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_zwave_node_diagnostics` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_weather` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_home_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_profiles` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_climate_zones` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_alarm_partitions` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_alarm_history` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_alarm_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_sprinkler_systems` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_custom_events` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_location_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_notifications` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `can_create_backup` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_local_backup_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_remote_backup_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
-| untested | 3 | `get_backups` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_icon` | 16d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath |
+| untested | 3 | `upload_icon` | 16d ago | upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g.  |
+| untested | 2 | `filter_devices` | 0d ago | filter_devices requires filters array. |
+| untested | 2 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 2 of 2: The text was not found. It must match byte for byte, including indent |
+| untested | 2 | `get_icon` | 16d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath |
+| untested | 2 | `create_scene` | 16d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
+| untested | 2 | `create_scene` | 18d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
+| untested | 1 | `control_device` | 0d ago | Device 5002 (TEMP autooff probe) does not declare action 'setDefault'. Valid actions for this device: configur |
+| untested | 1 | `filter_devices` | 0d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"Invalid JSON","message":"get_value< string > called on null  |
+| untested | 1 | `create_scene` | 0d ago | create_scene: roomId is required and must be a valid room id (HC3 rejects roomId=0 on creation). |
+| untested | 1 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 1 of 1: The text was not found. It must match byte for byte, including indent |
+| untested | 1 | `modify_device` | 0d ago | Post-write verification failed for device 4998.
+Mismatched fields:
+  - topLevel.actions: submitted {"autoOn":2 |
+| untested | 1 | `control_device` | 0d ago | Device 4998 (towels) does not declare action 'autoOn'. Valid actions for this device: configureFavoritePositio |
+| untested | 1 | `modify_device` | 15d ago | HTTP 404: Not Found |
+| untested | 1 | `modify_device` | 16d ago | Post-write verification failed for device 4916.
+Mismatched fields:
+  - properties.uiView: submitted [{"compone |
+| untested | 1 | `modify_device` | 18d ago | Post-write verification failed for device 4916.
+Mismatched fields:
+  - properties.icon: submitted {"path":"/as |
+| untested | 1 | `create_quickapp_variable` | 18d ago | QuickApp variable 'dayLog' already exists on device 4933. Use set_quickapp_variable to update its value. |
+| untested | 1 | `modify_device` | 20d ago | modify_device requires at least one of topLevel or properties with at least one field. |
 
 
 ## Submitted findings — 21
