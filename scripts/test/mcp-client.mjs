@@ -10,8 +10,21 @@ export class MCPClient {
     // identical "Fibaro HC3 not configured" errors; an explicit `env` still
     // wins, so a caller can still target a different gateway or none at all.
     constructor({ serverPath, env = serverEnv().env } = {}) {
+        // This client speaks stdio, so the child it spawns must too — and that
+        // has to be forced, not inherited.
+        //
+        // On a deployed unit the systemd EnvironmentFile sets MCP_TRANSPORT=http
+        // for the RESIDENT server. Any script here that spawns a child inherits
+        // it, the child tries to bind the port the resident server already
+        // holds, dies with EADDRINUSE, and this side then sits out a full
+        // tools/list timeout before failing for an unrelated-looking reason.
+        // Invisible on a laptop, where none of these variables are set.
+        const {
+            MCP_TRANSPORT: _t, MCP_HTTP_PORT: _p, MCP_HTTP_HOST: _h,
+            MCP_HTTP_ALLOW_UNAUTH: _a, MCP_HTTP_TOKEN: _k, ...rest
+        } = env;
         this.proc = spawn('node', [serverPath], {
-            env,
+            env: { ...rest, MCP_TRANSPORT: 'stdio' },
             stdio: ['pipe', 'pipe', 'pipe'],
         });
         this.proc.stderr.on('data', d => process.stderr.write(`[server] ${d}`));
