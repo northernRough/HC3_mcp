@@ -140,10 +140,21 @@ function describeProbe(p) {
 
 function records() {
   if (!existsSync(RECORD_DIR)) return [];
-  return readdirSync(RECORD_DIR)
-    .filter(f => f.endsWith('.json'))
-    .map(f => ({ file: join(RECORD_DIR, f), ...JSON.parse(readFileSync(join(RECORD_DIR, f), 'utf8')) }))
-    .sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)));
+  const out = [];
+  for (const f of readdirSync(RECORD_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    const file = join(RECORD_DIR, f);
+    try {
+      out.push({ file, ...JSON.parse(readFileSync(file, 'utf8')) });
+    } catch (err) {
+      // Skip rather than throw. A record truncated by a killed run, a full
+      // disk, or anything else that drops a stray .json in here would
+      // otherwise poison EVERY later run — and on an unattended timer that
+      // failure is silent and permanent. Say so and carry on with the rest.
+      console.log(`  ignoring unreadable record ${f}: ${err.message}`);
+    }
+  }
+  return out.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)));
 }
 
 // --- tier 1: the documented dead endpoints ----------------------------

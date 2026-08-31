@@ -1,0 +1,23 @@
+[Unit]
+# Fifteen minutes is not about urgency, it is about the window. A firmware
+# update takes the hub offline for several minutes and you want the verification
+# to land while you still remember pressing the button, not the following Sunday.
+# The cost of checking is one API call, so a tight interval is close to free.
+Description=Check every 15 minutes whether the HC3 firmware changed
+
+[Timer]
+# Let the hub and the MCP service settle after a reboot before the first check.
+OnBootSec=10min
+OnUnitActiveSec=15min
+
+# A missed window (Pi down, SD card out) is caught up rather than skipped. The
+# marker file means catching up is idempotent: it acts once per version change,
+# however many ticks it missed.
+Persistent=true
+
+# Keeps the check off exact quarter-hour boundaries, where everything else in
+# the house also wakes.
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

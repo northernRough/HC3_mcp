@@ -553,6 +553,54 @@ Notes:
   instead of letting you blame Fibaro for your own churn.
 - To read a diff after an update, run the same command by hand and it will
   compare against the newest record from a *different* firmware.
+- With `HC3_FIRMWARE_STAMP_QA` set, each run tells the firmwareWatch QuickApp
+  when the record was taken, so its tile can say whether a pre-upgrade recording
+  exists and how stale it is. That is the fact that decides whether pressing
+  Update is safe, and it is useless if maintained by hand.
+
+### Post-upgrade verification (optional, 2 minutes)
+
+The recorder's counterpart. It checks every 15 minutes whether the firmware
+version has moved and does nothing at all unless it has — one call to
+`/api/settings/info`, compared against a marker file. When the version *does*
+change it runs the differ, writes a report, and alerts through the QuickApp.
+
+The two triggers are opposite on purpose. A *pre*-upgrade record can only be
+periodic: a run triggered by the change fires when you are already on the new
+firmware and the baseline is gone. A *post*-upgrade check is the reverse, since
+there the change is the signal and waiting for Sunday is pure delay.
+
+```bash
+sudo cp /opt/hc3-mcp/src/deploy/hc3-firmware-verify.service /opt/hc3-mcp/src/deploy/hc3-firmware-verify.timer /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now hc3-firmware-verify.timer
+```
+
+The first run only records which version it saw; it does not verify anything,
+because there is no evidence an upgrade happened. Check that it armed:
+
+```bash
+sudo systemctl start hc3-firmware-verify.service && sudo journalctl -u hc3-firmware-verify -n 20 --no-pager
+```
+
+You should see `first run, now watching 5.2xx.y`, then `no change` on later
+ticks. To rehearse the whole path without waiting for Fibaro, run it once with
+`--force` (it will run the differ and send a real alert):
+
+```bash
+sudo -u hc3mcp HC3_FIRMWARE_RECORD_DIR=/var/lib/hc3-mcp/firmware node /opt/hc3-mcp/src/scripts/firmware-watch-pi.mjs --force
+```
+
+Notes:
+
+- Reports land in `/var/lib/hc3-mcp/firmware/firmware-<version>-issues.md`.
+- A failed notification never blocks the marker update. If it did, every later
+  tick would re-verify and re-alert the same upgrade forever.
+- The alert says plainly what the check could **not** see: anything needing a
+  human at a phone, and whether Z-Wave devices actually received settings rather
+  than merely being told. An all-clear implying full coverage is worse than none.
 
 ### Logs
 

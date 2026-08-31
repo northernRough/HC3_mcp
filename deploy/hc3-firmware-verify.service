@@ -1,0 +1,60 @@
+[Unit]
+# Notice that the gateway's firmware changed, and verify it.
+#
+# Almost every run does nothing: one call to /api/settings/info, compare against
+# a marker file, exit. Only when the version actually moves does it run the
+# differ, write a report and alert. So this can fire often and cost nothing.
+#
+# The counterpart to hc3-firmware-record.timer, and the triggers are opposite on
+# purpose. The PRE-upgrade record can only be periodic: a run triggered by the
+# change fires when you are already on the new firmware and the baseline is gone.
+# The POST-upgrade check is the reverse — there the change IS the signal, and
+# waiting for the next weekly tick is pure delay.
+Description=Verify the HC3 after a firmware change
+Documentation=file:/opt/hc3-mcp/src/scripts/firmware-watch-pi.mjs
+After=network-online.target hc3-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hc3mcp
+Group=hc3mcp
+WorkingDirectory=/opt/hc3-mcp/src
+
+# systemd reads this as root before dropping privileges. Every line must start
+# with the variable name; indented lines are silently dropped, so never write it
+# with nano. See the troubleshooting section of DEPLOYMENT.md.
+EnvironmentFile=/etc/hc3-mcp/.env
+
+# Records and reports live outside the checkout: /opt/hc3-mcp/src must stay
+# pristine or pi-update.sh (set -e, bare git pull) fails the deploy and silently
+# kills the hourly timer. StateDirectory creates and chowns /var/lib/hc3-mcp.
+StateDirectory=hc3-mcp
+Environment=HC3_FIRMWARE_RECORD_DIR=/var/lib/hc3-mcp/firmware
+Environment=HC3_FIRMWARE_REPORT_DIR=/var/lib/hc3-mcp/firmware
+
+# Inherited by the differ when a change is detected. Same reasoning as the
+# weekly recorder: nobody is waiting, so spread the load.
+Environment=HC3_FIRMWARE_PACE_MS=3000
+
+# Both point at the firmwareWatch QuickApp. It is the notification path for the
+# whole system, because fibaro.alert targets a USER and fans out to that
+# person's own devices, which POST /api/mobile/push cannot do.
+Environment=HC3_FIRMWARE_STAMP_QA=4985
+Environment=HC3_FIRMWARE_NOTIFY_QA=4985
+
+ExecStart=/usr/bin/node /opt/hc3-mcp/src/scripts/firmware-watch-pi.mjs
+
+# Generous: the detector is instant, but the differ it triggers takes minutes
+# with pacing, and a paced run has been measured at 694s on a busy gateway.
+TimeoutStartSec=30min
+
+# Hardening. No MemoryDenyWriteExecute: V8 needs writable+executable pages and
+# on aarch64 that flag kills the process with SIGTRAP. DEPLOYMENT.md documents it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
