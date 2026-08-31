@@ -14,8 +14,9 @@
 //   node scripts/friction-triage.mjs [outfile]     # default: FRICTION.md
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 
 // Everything between these markers is written by hand — the ledger of claims
 // from field reports, with verdicts. This script regenerates the rest of the
@@ -31,6 +32,31 @@ const MANUAL_END = '<!-- END manual ledger -->';
 // local machine happens to hold, and the generated half of the file is gone
 // with no diff to explain it. Read the previous source and refuse the mismatch.
 const SOURCE_LINE = /^_Generated .*? from \d+ entries at `([^`]+)`\._/m;
+
+/**
+ * Collapse the operator's home directory to `~`.
+ *
+ * FRICTION.md is committed and ships in the package, so the header has to
+ * record WHICH log a generation came from without publishing the username and
+ * home layout of whoever ran it. `~/.hc3-mcp/friction.jsonl` carries exactly
+ * the same information as `/Users/someone/.hc3-mcp/friction.jsonl` and none of
+ * the disclosure — the same reasoning that replaced a real LAN layout with the
+ * documentation range in 4.24.0.
+ *
+ * Applied to the PREVIOUS header as well as the new one, and to the value the
+ * mismatch guard compares. Collapsing only the written form would make every
+ * run on a laptop compare `~/...` against a stored `/Users/...` and demand
+ * --force for a purely cosmetic difference, which trains people to pass
+ * --force by reflex — and that flag exists to stop one machine's telemetry
+ * silently replacing another's.
+ */
+function tildify(p) {
+  if (!p) return p;
+  const home = homedir();
+  if (!home) return p;
+  if (p === home) return '~';
+  return p.startsWith(home + sep) ? '~' + p.slice(home.length) : p;
+}
 
 function previousSource(file) {
   if (!existsSync(file)) return null;
@@ -58,8 +84,8 @@ const failures = groupFailures(entries);
 const findings = entries.filter(e => e.kind === 'finding');
 const path = frictionPath();
 
-const source = path ?? '(not recording)';
-const previous = previousSource(outFile);
+const source = tildify(path) ?? '(not recording)';
+const previous = tildify(previousSource(outFile));
 if (previous && previous !== source && !force) {
   console.error(
     `Refusing to regenerate ${outFile}.\n\n` +
@@ -77,7 +103,7 @@ const ago = ts => `${Math.round((Date.now() / 1000 - ts) / 86400)}d ago`;
 
 const lines = [];
 lines.push('# Friction triage\n');
-lines.push(`_Generated ${when} UTC from ${entries.length} entries at \`${path ?? '(not recording)'}\`._\n`);
+lines.push(`_Generated ${when} UTC from ${entries.length} entries at \`${source}\`._\n`);
 lines.push(`
 Every row below is a **candidate, not a finding**. Re-test each against a live
 gateway and record a verdict:

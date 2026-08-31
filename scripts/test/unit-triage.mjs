@@ -106,5 +106,69 @@ check('the hand-written ledger survives regeneration', () => {
   assert.equal(after.match(/BEGIN manual ledger/g).length, 1, 'the ledger was duplicated');
 });
 
+// FRICTION.md is committed and ships in the package, so the header must not
+// publish the username and home layout of whoever generated it. HOME is
+// overridden for the spawned process, so this exercises the real collapse
+// without writing anything into a real home directory.
+const runAsHome = (outFile, log, home, ...extra) => spawnSync(process.execPath, [SCRIPT, outFile, ...extra], {
+  encoding: 'utf8',
+  env: { ...process.env, MCP_FRICTION_DISABLE: '', MCP_FRICTION_LOG: log, HOME: home },
+});
+
+check('the header records ~ instead of the operator home path', () => {
+  const out = join(dir, 'tilde.md');
+  const r = runAsHome(out, logPath, dir);
+  assert.equal(r.status, 0, r.stderr);
+
+  const text = readFileSync(out, 'utf8');
+  assert.match(text, /entries at `~\/friction\.jsonl`/, 'the home prefix was not collapsed');
+  assert.ok(!text.includes(dir), 'the absolute home path is still in the file');
+});
+
+check('a path outside the home directory is left alone', () => {
+  // Only the home prefix is cosmetic. /var/lib/hc3-mcp on a deployed unit is
+  // real, shared information and must keep saying what it says.
+  const out = join(dir, 'outside.md');
+  const other = join(dir, 'elsewhere.jsonl');
+  writeFileSync(other, '');
+
+  const r = runAsHome(out, other, join(dir, 'nowhere-near'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(readFileSync(out, 'utf8').includes('entries at `' + other + '`'));
+});
+
+check('an existing absolute-home header regenerates without --force', () => {
+  // The transition case. Collapsing only the written form would make every
+  // later run compare ~/... against a stored /Users/... and demand --force for
+  // a purely cosmetic difference -- which trains people to pass --force by
+  // reflex, and that flag is the only thing stopping one machine's telemetry
+  // from silently replacing another's.
+  const out = join(dir, 'transition.md');
+  writeFileSync(out, [
+    '# Friction triage\n',
+    '_Generated 2026-01-01 00:00 UTC from 1 entries at `' + logPath + '`._\n',
+    LEDGER,
+  ].join('\n'));
+
+  const r = runAsHome(out, logPath, dir);
+  assert.equal(r.status, 0, 'expected no --force to be needed:\n' + r.stderr);
+  assert.match(readFileSync(out, 'utf8'), /entries at `~\/friction\.jsonl`/);
+});
+
+check('the different-log refusal still fires once paths are collapsed', () => {
+  // The collapse must not accidentally make two different logs compare equal,
+  // which would defeat the guard this whole file exists to protect.
+  const out = join(dir, 'still-refuses.md');
+  const other = join(dir, 'other-machine.jsonl');
+  writeFileSync(other, '');
+
+  runAsHome(out, other, dir);                       // generated on "machine A"
+  const before = readFileSync(out, 'utf8');
+
+  const r = runAsHome(out, logPath, dir);           // now "machine B"
+  assert.equal(r.status, 1, 'expected a non-zero exit');
+  assert.equal(readFileSync(out, 'utf8'), before, 'the file was modified anyway');
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll triage checks passed');
 process.exit(failures ? 1 : 0);

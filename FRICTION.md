@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-08-15 19:59 UTC from 27 entries at `/var/lib/hc3-mcp/friction.jsonl`._
+_Generated 2026-08-31 23:03 UTC from 263 entries at `~/.hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -17,7 +17,7 @@ gateway and record a verdict:
 clear to become a finding.
 
 
-## Recurring failures — 10 distinct
+## Recurring failures — 74 distinct
 
 
 A tool failing the same way repeatedly is usually a missing or wrong
@@ -27,26 +27,295 @@ cheapest wins available.
 
 | Verdict | Count | Tool | Last | Message |
 |---|---|---|---|---|
-| untested | 3 | `manage_plugin_interfaces` | 0d ago | HTTP 403: Forbidden |
-| untested | 2 | `get_icon` | 0d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath |
-| untested | 2 | `create_scene` | 0d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
-| untested | 2 | `create_scene` | 2d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
-| untested | 1 | `get_device_property` | 0d ago | HTTP 404: Not Found |
-| untested | 1 | `modify_device` | 0d ago | Post-write verification failed for device 4916.
-Mismatched fields:
-  - properties.uiView: submitted [{"compone |
-| untested | 1 | `modify_device` | 2d ago | Post-write verification failed for device 4916.
-Mismatched fields:
-  - properties.icon: submitted {"path":"/as |
-| untested | 1 | `create_quickapp_variable` | 2d ago | QuickApp variable 'dayLog' already exists on device 4933. Use set_quickapp_variable to update its value. |
-| untested | 1 | `get_icon` | 3d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath |
-| untested | 1 | `modify_device` | 3d ago | modify_device requires at least one of topLevel or properties with at least one field. |
+| untested | 29 | `get_device_property` | 0d ago | HTTP 404: Not Found |
+| untested | 22 | `get_device_parameters` | 0d ago | HTTP 404: Not Found |
+| untested | 5 | `manage_plugin_interfaces` | 0d ago | HTTP 403: Forbidden |
+| untested | 3 | `get_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `filter_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `find_devices_by_name` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_device_property` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `find_device_by_endpoint` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_device_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_rooms` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_room` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_scenes` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_system_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_network_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_energy_data` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_global_variables` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_users` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `list_icons` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_diagnostics` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_zwave_mesh_health` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_refresh_states` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_event_history` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_device_parameters` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_zwave_reconfiguration_tasks` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_zwave_node_diagnostics` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_weather` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_home_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_profiles` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_climate_zones` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_alarm_partitions` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_alarm_history` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_alarm_devices` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_sprinkler_systems` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_custom_events` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_location_info` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_notifications` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `can_create_backup` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_local_backup_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_remote_backup_status` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
+| untested | 3 | `get_backups` | 16d ago | Fibaro HC3 not configured. Please check environment variables. |
 
 
-## Submitted findings — 12
+## Submitted findings — 21
 
 
 ### `get_icon` — 0d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** get_icon and upload_icon should return a hash of the image bytes, so a caller who has to re-emit an 8-15KB base64 payload by hand can prove the copy is intact before it becomes a wrong tile. sizeBytes alone cannot do this.
+
+
+**Actual:** RESOLVED IN 4.26.0 — filed for the record, with the evidence, not as an open defect. Re-testing this against 4.26.0 or later will correctly refute it; the row is here so the reasoning is not re-derived from scratch.
+
+Up to and including 4.25.0, get_icon returned {name, extension, mime, sizeBytes, path, base64} and no hash, and upload_icon returned no hash of what it received. sizeBytes catches truncation and is blind to substitution, which is the failure that actually happens: a re-typed base64 payload that corrupts a character or two is EXACTLY as long as the original, so every length check agrees while the image is wrong. First visible symptom is a tile rendering wrong on a phone, long after the call returned success.
+
+Compounding it, upload_icon validated only the PNG signature and the IHDR width/height, so damage anywhere past byte 24 — nearly the whole file — reached the gateway looking intact, and a corrupt payload still parses a plausible 128x128 out of the header.
+
+4.26.0 ships
+
+
+**Reproduction:**
+
+Single variable: the server version.
+
+Take any valid 128x128 PNG. Flip one character in its base64 so the length is unchanged.
+
+On 4.25.0: get_icon reports the same sizeBytes for clean and damaged; there is no hash, so nothing distinguishes them. upload_icon accepts the damaged payload (signature and IHDR still parse) and HC3 stores it. The icon renders wrong.
+
+On 4.26.0: get_icon returns differing md5 for the two, with sizeBytes still identical. upload_icon refuses the damaged one, naming the failing chunk and its byte range.
+
+Nothing else differs — same image, same gateway, same call shape.
+
+
+**Cost:** Part of the same ~2 hour session as the composite finding. The specific cost of having no hash was that corruption was detected only by running pngcheck locally as an ad-hoc habit, and a round-trip check on sizeBytes gave false confidence — it confirms length and cannot see substitution.
+
+Worth preserving from that session, since it generalises beyond icons: transcription accuracy depends on DISTANCE from the tool result. Copying immediately after the result arrived worked; copying the same payl
+
+
+_Reported by Claude Code session with nick, 2026-08-31; fix shipped in 4.26.0 the same day_
+
+
+### `general` — 0d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** A way to build a composite icon — one icon scaled and overlaid as a badge on another — without the image bytes passing through the conversation. Both source icons already exist on the gateway, so nothing about the task requires a human or a model to handle base64.
+
+
+**Actual:** No tool composites images. The only route is get_icon (returns base64) -> decode and edit locally with ImageMagick/sips -> upload_icon, so the binary must be transcribed at least once by the model. Transcription of an 8-15KB payload corrupts at roughly one character per 10KB on a good pass, and materially worse when the payload is copied from earlier in the conversation rather than immediately after the tool result. Measured in one session: copying straight from a fresh tool result succeeded twice; copying the same payload from further back failed three times, twice with multi-character damage that single-character brute-force repair (per-chunk CRC filter, zlib inflate confirm) could not recover.
+
+4.26.0 closed the adjacent case: `fromIcon` lets an existing icon be reused whole with no payload, and `statesOff`/`statesOn` collapses an 11-frame dimmer set to two inputs. Neither helps when the image must be MODIFIED, which is what a badge composite is.
+
+
+**Reproduction:**
+
+Single variable: whether the image needs modifying.
+
+Working case (4.26.0): upload an existing gateway icon unchanged — upload_icon({fromIcon:{icon:"User1026"}, mime:"image/png", category:"room"}). Zero base64 in the conversation, bytes move gateway-to-gateway.
+
+Failing case: the same upload, but with a second existing icon scaled and overlaid in one corner first. No tool path exists, so the bytes must leave via get_icon and re-enter via base64. Everything else — same source icons, same target, same call — is identical.
+
+Not isolated, and deliberately not claimed: I have not tested whether HC3 itself offers any server-side image operation that would avoid this. The finding is about this server's tool surface, not about a proven gateway limitation.
+
+
+**Cost:** ~2 hours in one session, almost all of it transcription, verification and repair rather than the actual design work. Pattern has now occurred twice (an Irrigation QA icon and a towel-rail QA icon), so it is recurring rather than a one-off. Mitigations that were necessary only because of this: pngcheck on every transcription, keeping every failed attempt on disk for diffing, and palette-quantising composites to PNG8 purely to shrink the payload — that last one is pure waste, since output size is 
+
+
+_Reported by Claude Code session with nick, 2026-08-31, following the 4.26.0 icon work_
+
+
+### `manage_plugin_interfaces` — 0d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Interfaces removed from the QuickApp device, removing the Auto off card and Favourite position button from its sheet.
+
+
+**Actual:** HTTP 403 Forbidden for both calls: delete ["autoTurnOff","favoritePosition","light"] and delete ["light"] alone, on QA 5001 (com.fibaro.multilevelSwitch, freshly created, firmware 5.210.12).
+
+
+**Reproduction:**
+
+Single variable: same deviceId, same action=delete, interfaces list varied from three entries to one ("light" only) - both 403, so the refusal is not about a specific interface. Not yet isolated whether a non-quickApp device would accept the same delete.
+
+
+**Cost:** None lasting: useEmbededView=false suppresses the interface-driven UI furniture instead, and setting deviceRole "Other" via modify_device drops the light interface + isLight (observed on QA 4998). Tool description could point at those two routes.
+
+
+_Reported by Claude session 2026-08-31 towels QAs_
+
+
+### `update_device_property` — 15d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** A non-numeric placeholder in `value` on a com.fibaro.multilevelSensor QuickApp, to render a dash on the tile instead of a misleading zero when the automation has nothing to report. Failing that, an error.
+
+
+**Actual:** Both writes were silently declined. update_device_property returned null (as it does on success too), no error appeared in the HC3 log, and a read-back showed value unchanged at 2 with its original `modified` timestamp. The same is true from inside the QuickApp: self:updateProperty("value", "-") does not throw, so a pcall around it reports success, and the only way to detect the failure is to read the property back and compare `modified`. Writing a number to the same property in the same tick works normally. The sibling `unit` property accepts arbitrary strings, so the rejection is specific to `value` on this type.
+
+
+**Reproduction:**
+
+Device 4984, com.fibaro.multilevelSensor QuickApp, firmware 5.210.12, value currently 2. Failing: update_device_property(4984, "value", "-") then again with "". Read-back unchanged, `modified` unchanged. Working, one variable changed, same device and same tool: update_device_property(4984, "value", 0) updates and bumps `modified`. Only the type of the submitted value differs. Also isolated against the property: update_device_property(4984, "unit", "IDLE") with a string succeeds on the same device in the same session, so it is `value` that is type-checked, not the write path.
+
+
+**Cost:** A silent no-op that a pcall cannot catch and that the tool result cannot distinguish from success. I reported the change as working on the strength of the unit property having updated, and only caught it because I read value back separately and noticed a stale `modified`. Practical consequence: a multilevelSensor tile cannot show a blank or dashed figure, so "no data" has to be encoded some other way (the unit word, or the log line). Worth stating in update_device_property's description that a t
+
+
+_Reported by Claude, via Nick's Shading QuickApp session, 2026-08-16_
+
+
+### `general` — 15d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** set_quickapp_variable's description states that writing a QuickApp variable from OUTSIDE restarts the QuickApp. I read that as external writes only, and expected self:setVariable from inside to be the safe path, since that is how a QuickApp normally persists its own state.
+
+
+**Actual:** The installer never got past its first step. The log shows "installer: copying from Shading (4953)", then the seven variables copied, then immediately "installer: copying from Shading (4953)" again, repeating several times a second. Writing its own quickAppVariables restarts the QuickApp, onInit begins again, copies the same seven, restarts again. The file-copy step that came after was never reached. The loop was stopped by disabling the device. Moving the identical logic into a second, throwaway QuickApp (4983) and having it write into 4984 worked first time: seven variables in one PUT, then seven files, then main last, 145 KB total, all byte-identical, no restart loop, nothing retyped through the conversation.
+
+
+**Reproduction:**
+
+Firmware 5.210.12. Failing: QuickApp 4984's own main.lua calls self:setVariable(name, value) for seven variables inside onInit. Restart loop, file step never reached. Working, one variable changed, same seven variables and same source device: the identical loop run from a DIFFERENT QuickApp (4983) writing into 4984 via api.put("/devices/4984", {properties={quickAppVariables=vars}}). Completes, no loop. The variable is which device executes the write, not what is written. I have not isolated whether a single self:setVariable call restarts, or only the first of several, since seven were written before the restart was observed.
+
+
+**Cost:** A live QuickApp in a restart loop until it was disabled. More usefully: this makes self-rebuild structurally impossible, which is worth documenting positively, because copying a QuickApp gateway-side is otherwise an excellent technique. Reproducing an eight-file QuickApp by pasting content through a conversation costs tens of thousands of tokens and every byte is a chance to mistype; driving api.get/api.put from a second QuickApp moves it verbatim in about a second. The rule to record is: the co
+
+
+_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+
+
+### `modify_device` — 15d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** modify_device topLevel accepts device body root fields, and `type` is one. I expected either a successful change or a refusal that named the reason.
+
+
+**Actual:** HTTP 404: Not Found. The same tool against the same device with topLevel={"visible": true} returned verified: true, so the device and the write path are both fine and HC3 is refusing the type change specifically. Separately, GET /devices/4953/properties/value on a com.fibaro.genericDevice also returns HTTP 404 rather than a null value, because that type carries no value property at all; the same read on a com.fibaro.multilevelSensor returns {value: 0}.
+
+
+**Reproduction:**
+
+Firmware 5.210.12, device 4953, a live com.fibaro.genericDevice QuickApp. Failing: modify_device(deviceId=4953, topLevel={"type": "com.fibaro.multilevelSensor"}) returns HTTP 404. Working, single variable changed, same tool and same device: modify_device(deviceId=4953, topLevel={"visible": true}) returns verified: true. Only the field submitted differs.
+
+
+**Cost:** Two costs. First, a bare 404 reads as "wrong device id" and sent me checking the id before I thought to test the endpoint with a harmless field. Second, and larger: because the type cannot be changed in place, giving an existing QuickApp a tile value column requires rebuilding it as a new device with a new id, which is a substantially bigger piece of work than the user was expecting when he asked for it. Worth stating in the tool description as "HC3 refuses type changes on an existing device; re
+
+
+_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+
+
+### `general` — 15d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Based on the ui guide's warnings about selects destroying the whole tile, and on the assumption that runtime option updates were the fragile path, I expected either an empty view or a restart loop. I had advised the user it was too risky to attempt.
+
+
+**Actual:** It works, and cleanly. api.post("/plugins/updateView", {deviceId=..., componentName="devicePicker", propertyName="options", newValue=<array of option tables>}) replaced the option labels. Read-back via get_plugin_view confirmed: selectionType "single" survived, the select's eventBinding survived, every other component survived, the option value fields were untouched so a selection still dispatches the same id, and the QuickApp did NOT restart (the header label still showed the previous tick's timestamp). It is now called once per five-minute refresh in a live QuickApp and has been stable across many cycles. The endpoint returns nothing at all, so the read-back is the only evidence either way.
+
+
+**Reproduction:**
+
+QuickApp 4953, firmware 5.210.12, com.fibaro.genericDevice, view containing a select named devicePicker with eleven options and selectionType "single". Single variable: change only the text field of one option, keeping value, type, selectionType and every other component identical, and submit the full options array through api.post("/plugins/updateView", propertyName="options"). Before: option reads "Guest Awning". After: "Guest Awning (open)". get_plugin_view read immediately afterwards shows the whole layout intact with the new label. Repeated later with all eleven labels changed, same result.
+
+
+**Cost:** A wrong negative I gave the user directly: I told him picker labels could not safely carry live state and offered a worse alternative (a long text label listing every device). He pushed back and asked to try it anyway. It worked first time. Had he accepted my answer, the capability would have been recorded as impossible on my say-so, which is the exact failure mode the report_finding description warns about. Note also: self:updateView(element, "options", array) is NOT the working path, since upd
+
+
+_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+
+
+### `modify_device` — 15d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Submitting viewLayout and uiCallbacks together in one modify_device call would produce a working tile, since both writes verify individually.
+
+
+**Actual:** Every element's eventBinding in the stored view came back null: the picker showed "eventBinding": {"onToggled": null} and each button "eventBinding": {"onReleased": null, "onLongPressDown": null, "onLongPressReleased": null}. The tile rendered correctly and modify_device reported verified: true. No tap reached the QuickApp. Writing the same uiCallbacks array again on its own did NOT repair the bindings; they stayed null. Writing the viewLayout again on its own, with the correct uiCallbacks already stored, did repair them, and a subsequent call_ui_event dispatched to the named callback and ran.
+
+
+**Reproduction:**
+
+On QuickApp 4984 (com.fibaro.multilevelSensor, firmware 5.210.12). Working case: modify_device with properties={viewLayout} alone, then a second modify_device with properties={uiCallbacks} alone. Bindings present, taps dispatch. Failing case: identical layout and identical callbacks array submitted in ONE modify_device call with both keys under properties. Bindings null. The single variable is whether the two properties are submitted together or as two separate calls. Repair, also isolated: with the correct uiCallbacks already stored, a modify_device of viewLayout alone restores the bindings, while a modify_device of uiCallbacks alone does not. That suggests HC3 generates eventBinding at layout-write time from whatever uiCallbacks are stored at that moment, so the correct order is callbacks first, layout second, as two writes.
+
+
+**Cost:** A live QuickApp panel was silently deaf for about ten minutes: all four buttons and the device picker rendered and did nothing, with no error in the log or in the tool response. Found only because the user's screenshot prompted a get_plugin_view read. The tool description tells you to read the view back after a layout write to confirm the components are present, which they were; it does not tell you to check eventBinding, and components-present is not sufficient.
+
+
+_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+
+
+### `call_ui_event` — 16d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** That call_ui_event dispatches a UI event the way a user's tap does, since its own description recommends it as a verification step ("this is the tool people reach for *as* a verification step") and reports boundCallback to prove the element is wired.
+
+
+**Actual:** It differs from a real tap on BOTH axes, in the generous direction. call_ui_event dispatches to the callback registered in uiCallbacks, passing ONE table {eventType, elementName, values, deviceId}, and emits a "UIEvent:" trace. A real tap in the iOS app always dispatches UIAction, ignoring the registered name entirely, passing POSITIONAL args — (eventType, elementName) for a button, (eventType, elementName, values) for a select — and emits an "onAction:" trace.
+
+Verbatim, same element (selNamed, registered to cbSelect), same QuickApp, minutes apart:
+  via tool: UICBPROBE|cbSelect|argc=1|1:table={"eventType":"onToggled","elementName":"selNamed",...}
+  via tap : UICBPROBE|UIAction|argc=3|1:string="onToggled" |2:string="selNamed" |3:table=["B","A"]
+  tap trace: onAction: {"actionName":"UIAction","args":["onToggled","selNamed",["B","A"]],"deviceId":4971,"manual":true}
+
+So the tool reports a named callback as working when no user tap will ever reach it, and hands the handler a table where a
+
+
+**Reproduction:**
+
+Isolated, and the single variable is who fires the event — same QuickApp, same element, same firmware (5.210.12), nothing else changed between the two measurements. scripts/probe-uicallbacks.mjs builds three throwaway QuickApps in Default Room with four elements each (button/select x named-callback/UIAction), pushes one Lua file whose handlers all log their own name, argument count and the type of every argument, then:
+
+  A. fires every element via call_ui_event    -> 12 of 12 cells: dispatched to the REGISTERED NAME, argc=1, one table.
+  B. the same elements tapped in the iOS app  -> 19 of 19 taps: dispatched to UIAction, positional (argc=2 button, argc=3 select).
+
+No mixed cells in either direction. Run it with --hold to reproduce arm B. Also crossed, and NOT the axis: element kind and binding time both made no difference, which refuted the model I had proposed before running it.
+
+
+**Cost:** Two shipped tool descriptions stated the tool's behaviour as HC3's. call_ui_event's own text recommended it for verification, and modify_device's said a written-back named callback "is dispatched" — true only through this tool. A QuickApp written and verified this way can be completely dead under a finger, which is what happened to a live irrigation picker: about two weeks of a multi-select that rendered, accepted input and saved nothing. A field report got this right on 15 August and was nearly
+
+
+_Reported by Claude, working with Nick, probe-uicallbacks.mjs, 15 Aug 2026_
+
+
+### `get_icon` — 16d ago
 
 
 **Verdict:** untested
@@ -69,7 +338,7 @@ Path claim, single variable is the path: get_icon({category:"device", name:"User
 _Reported by Claude, Shading QA migration, attaching the Awning icon to QA 4953_
 
 
-### `manage_plugin_interfaces` — 0d ago
+### `manage_plugin_interfaces` — 16d ago
 
 
 **Verdict:** untested
@@ -92,7 +361,7 @@ Single variable varied across three calls on the same device 4952 immediately af
 _Reported by Claude, Shading QA migration, follow-up isolation on QA 4952_
 
 
-### `manage_plugin_interfaces` — 0d ago
+### `manage_plugin_interfaces` — 16d ago
 
 
 **Verdict:** untested
@@ -115,7 +384,7 @@ Single variable: the call itself. 1) create_quickapp name="Shading" type="com.fi
 _Reported by Claude, working on the Shading QA migration (scene 247 to QA 4952)_
 
 
-### `get_hc3_lua_scenes_guide` — 0d ago
+### `get_hc3_lua_scenes_guide` — 16d ago
 
 
 **Verdict:** untested
@@ -145,7 +414,7 @@ Only the path differs. Adding a fibaro.debug before the call, and pcall around i
 _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `patch_quickapp_file` — 0d ago
+### `patch_quickapp_file` — 16d ago
 
 
 **Verdict:** untested
@@ -178,7 +447,7 @@ To test: call patch_quickapp_file, then load a dozen unrelated mallorn tools via
 _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `upload_icon` — 0d ago
+### `upload_icon` — 16d ago
 
 
 **Verdict:** untested
@@ -212,7 +481,7 @@ Same file, same device, same firmware (5.210.12). Note B must run inside the own
 _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `get_hc3_quickapp_programming_guide` — 0d ago
+### `get_hc3_quickapp_programming_guide` — 16d ago
 
 
 **Verdict:** untested
@@ -248,7 +517,7 @@ To settle it on a spare QA: (a) register a multi-select under onToggled only, re
 _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `get_ios_devices` — 2d ago
+### `get_ios_devices` — 18d ago
 
 
 **Verdict:** untested
@@ -271,7 +540,7 @@ Vary only the path: api.get("/iosDevices") and api.get("/iosDevices/937") from t
 _Reported by Claude, working with Nick (northernRough), 5.210.12_
 
 
-### `general` — 2d ago
+### `general` — 18d ago
 
 
 **Verdict:** untested
@@ -294,7 +563,7 @@ Single variable in each pair. For /mobile/push, hold body and category constant 
 _Reported by Claude, working with Nick (northernRough), 5.210.12_
 
 
-### `general` — 2d ago
+### `general` — 18d ago
 
 
 **Verdict:** untested
@@ -317,7 +586,7 @@ Single variable is the path. From a Lua scene, api.get("/scenes/788/variables") 
 _Reported by Claude, working with Nick (northernRough), 5.210.12_
 
 
-### `create_scene` — 2d ago
+### `create_scene` — 18d ago
 
 
 **Verdict:** untested
@@ -340,7 +609,7 @@ Isolated to one variable. Call create_scene twice with identical name/roomId/typ
 _Reported by Claude, working with Nick (northernRough), 5.210.12_
 
 
-### `general` — 4d ago
+### `general` — 20d ago
 
 
 **Verdict:** untested
