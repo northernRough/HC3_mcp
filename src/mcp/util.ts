@@ -15,6 +15,23 @@ export function contentHash(content: string | undefined | null): string | undefi
   return createHash('md5').update(content, 'utf8').digest('hex');
 }
 
+/**
+ * The same identity for bytes rather than text.
+ *
+ * Icons are the one surface here that moves as binary, and until now the only
+ * thing said about a payload was its length. `sizeBytes` catches truncation
+ * and is blind to substitution, which is the failure that actually happens: a
+ * base64 payload re-typed by hand corrupts a character or two and stays
+ * exactly as long as it was. Hash both ends and both failures are visible.
+ *
+ * Hashes the DECODED bytes, so it is comparable with `md5` / `md5sum` run
+ * against the same file on disk. Hashing the base64 text instead would be an
+ * identity for one particular encoding of the image rather than for the image.
+ */
+export function bytesHash(bytes: Buffer): string {
+  return createHash('md5').update(bytes).digest('hex');
+}
+
 export async function tolerantFetch<T>(
   _label: string,
   promise: Promise<T>

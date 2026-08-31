@@ -15,6 +15,7 @@
 
 import { icons } from '../../out/mcp/tools/icons.js';
 import { strict as assert } from 'node:assert';
+import { createHash } from 'node:crypto';
 
 const getIcon = icons.handlers.get_icon;
 const deleteIcon = icons.handlers.delete_icon;
@@ -206,6 +207,44 @@ await check('a failed in-use scan refuses rather than assuming unused', async ()
   await assert.rejects(() => deleteIcon(hc3, DEL_ARGS), /could not verify whether/);
   const forced = await deleteIcon(fakeHc3({ throwOn: '/api/devices' }), { ...DEL_ARGS, force: true });
   assert.equal(forced.deleted, 'User1026');
+});
+
+await check('get_icon returns an md5 of the decoded bytes, not of the base64', async () => {
+  // sizeBytes catches truncation and is blind to substitution: a hand-copied
+  // payload that corrupts a character stays exactly as long as the original.
+  // The hash is of the DECODED bytes so it compares with `md5 file.png` run
+  // against whatever the caller wrote to disk.
+  const bytes = Buffer.from('89504e470d0a1a0a' + '00'.repeat(64), 'hex');
+  stubFetch({ '/assets/userIcons/devices/User1026/User1026.png': { mime: 'image/png', body: bytes } });
+
+  const r = await getIcon({ config: CONFIG }, {
+    category: 'device', name: 'User1026', extension: 'png', userIcon: true,
+  });
+
+  assert.equal(r.md5, createHash('md5').update(bytes).digest('hex'), 'md5 must hash the decoded bytes');
+  assert.notEqual(
+    r.md5,
+    createHash('md5').update(r.base64, 'utf8').digest('hex'),
+    'hashing the base64 text would be an identity for the encoding, not the image',
+  );
+  assert.equal(r.sizeBytes, bytes.length);
+});
+
+await check('a one-byte substitution moves the md5 but not sizeBytes', async () => {
+  // The exact failure mode this exists for: one corrupted character in a
+  // hand-copied payload. Length is unchanged, so only the hash sees it.
+  const clean = Buffer.from('89504e470d0a1a0a' + '00'.repeat(64), 'hex');
+  const damaged = Buffer.from(clean);
+  damaged[40] = 0xff;
+
+  stubFetch({ '/assets/icon/fibaro/light/light.png': { mime: 'image/png', body: clean } });
+  const a = await getIcon({ config: CONFIG }, { category: 'device', name: 'light', extension: 'png' });
+
+  stubFetch({ '/assets/icon/fibaro/light/light.png': { mime: 'image/png', body: damaged } });
+  const b = await getIcon({ config: CONFIG }, { category: 'device', name: 'light', extension: 'png' });
+
+  assert.equal(a.sizeBytes, b.sizeBytes, 'the premise: substitution does not change length');
+  assert.notEqual(a.md5, b.md5, 'the hash must see what sizeBytes cannot');
 });
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll icon-path checks passed');

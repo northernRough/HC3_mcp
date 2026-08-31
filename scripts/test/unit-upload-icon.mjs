@@ -13,6 +13,7 @@
 import { icons } from '../../out/mcp/tools/icons.js';
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -297,6 +298,39 @@ await check('every source states the properties.icon discard as conditional', as
       `${rel} again claims the write is silently discarded; probed on an idle QA it persists`,
     );
   }
+});
+
+await check('upload_icon hashes the bytes it actually POSTed', async () => {
+  // The hash has to be of the decoded bytes HC3 received, so a caller who
+  // hashed the same file locally sees a corrupt paste HERE rather than on a
+  // phone once the tile renders. Mirrors the input shape: md5 for base64,
+  // statesMd5 for a set.
+  stubFetch();
+  const single = await uploadIcon(fakeHc3(), { base64: PNG, mime: 'image/png', category: 'room' });
+  assert.equal(single.md5, createHash('md5').update(Buffer.from(PNG, 'base64')).digest('hex'));
+  assert.ok(!('statesMd5' in single), 'a single image must not report a state map');
+
+  stubFetch();
+  const set = await uploadIcon(fakeHc3(), {
+    states: STATES, mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+  });
+  assert.ok(!('md5' in set), 'a state set must not report a single hash');
+  assert.deepEqual(Object.keys(set.statesMd5).sort(), ['0', '100']);
+  assert.equal(
+    set.statesMd5['0'],
+    createHash('md5').update(Buffer.from(STATES['0'], 'base64')).digest('hex'),
+  );
+});
+
+await check('differing state images produce differing hashes', async () => {
+  // A hash that stayed constant across different images would satisfy every
+  // other assertion here and catch nothing, which is the whole point.
+  stubFetch();
+  const set = await uploadIcon(fakeHc3(), {
+    states: { '0': makePng({ colorType: 3 }), '100': makePng({ colorType: 6 }) },
+    mime: 'image/png', category: 'device', deviceTemplate: 'com.fibaro.binarySwitch',
+  });
+  assert.notEqual(set.statesMd5['0'], set.statesMd5['100']);
 });
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll upload_icon checks passed');
