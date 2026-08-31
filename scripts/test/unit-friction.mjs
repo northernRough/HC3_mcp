@@ -113,5 +113,71 @@ check('signature normalises ids, numbers and quoted values', () => {
   assert.notEqual(F.signature('problem A'), F.signature('problem B'));
 });
 
+// The disable-flag check above leaves the resolver CACHED as null, so anything
+// appended after it silently goes nowhere. Re-point telemetry at a fresh log
+// and prove it is live before the classification checks run -- otherwise "the
+// entry count did not change" passes for the wrong reason, and a test that
+// passes because nothing happened is worse than one that fails.
+process.env.MCP_FRICTION_LOG = join(dir, 'classify.jsonl');
+delete process.env.MCP_FRICTION_DISABLE;
+F._resetFrictionPath();
+
+check('telemetry is live for the classification checks', () => {
+  assert.notEqual(F.frictionPath(), null, 'these checks would pass vacuously');
+});
+
+check('a configuration error is NOT recorded at all', () => {
+  // The one failure class that arrives in bulk: a missing environment does not
+  // fail one call, it fails every call. 159 such entries -- 60% of this
+  // project's own log -- came from two seconds on 2026-08-15, and outranked
+  // every real fault in a table that sorts by count.
+  //
+  // A real failure is recorded first, so this cannot pass by the log being
+  // dead: the count must MOVE for one and hold for the other.
+  const before = F.readEntries().length;
+  F.recordFailure('get_devices', 'HTTP 404: Not Found');
+  assert.equal(F.readEntries().length, before + 1, 'the log is not accepting entries');
+
+  F.recordFailure('get_devices', 'Fibaro HC3 not configured. Please check environment variables.');
+  F.recordFailure('upload_icon', 'Fibaro HC3 not configured.');
+  assert.equal(F.readEntries().length, before + 1, 'configuration errors reached the log');
+});
+
+check('a routing error IS still recorded', () => {
+  // Deliberately not lumped in with configuration, despite sharing the
+  // finding-nudge exemption. A run of these is the documented stale-schema
+  // symptom after a redeploy, which is precisely what the log should show.
+  const before = F.readEntries().length;
+  F.recordFailure('does_not_exist', 'Unknown tool: does_not_exist');
+  const after = F.readEntries();
+  assert.equal(after.length, before + 1, 'a routing error was dropped');
+  assert.equal(after[after.length - 1].tool, 'does_not_exist');
+});
+
+check('an error that merely MENTIONS configuration is still recorded', () => {
+  // The predicate is anchored on purpose. Widening it to anything mentioning
+  // configuration or environment variables would swallow gateway errors that
+  // happen to use those words -- dropping a real failure costs the evidence,
+  // while keeping a boring one costs a line.
+  const before = F.readEntries().length;
+  F.recordFailure('set_device_parameter', 'HTTP 500: the device rejected the configuration parameter write');
+  F.recordFailure('get_home_status', 'Fibaro HC3 is configured but unreachable at the configured host');
+  assert.equal(F.readEntries().length, before + 2, 'an anchored-only skip swallowed a real failure');
+});
+
+check('isConfigurationError and invitesAFinding agree on the class', () => {
+  // One definition, used by both, so the recorded set and the nudged set
+  // cannot drift apart.
+  assert.equal(F.isConfigurationError('Fibaro HC3 not configured. Please check environment variables.'), true);
+  assert.equal(F.isConfigurationError('Fibaro HC3 not configured.'), true);
+  assert.equal(F.isConfigurationError('Unknown tool: nope'), false);
+  assert.equal(F.isConfigurationError('HTTP 404: Not Found'), false);
+  assert.equal(F.isConfigurationError(undefined), false);
+
+  assert.equal(F.invitesAFinding('get_devices', 'Fibaro HC3 not configured.'), false);
+  assert.equal(F.invitesAFinding('x', 'Unknown tool: x'), false);
+  assert.equal(F.invitesAFinding('get_device_info', 'HTTP 404: Not Found'), true);
+});
+
 console.log(failures ? `\n${failures} failure(s)` : '\nAll friction checks passed');
 process.exit(failures ? 1 : 0);

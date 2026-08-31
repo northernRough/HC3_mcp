@@ -2,6 +2,34 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.26.1] - 2026-09-01
+
+### Fixed
+
+- **Configuration errors were recorded as friction.** `recordFailure` logged
+  every tool failure, including the server reporting it has no credentials.
+  `invitesAFinding` already excluded that class from prompting a report, on the
+  grounds that a missing environment variable is not a defect in this server;
+  the same reasoning says it need not be written down either.
+
+  It is not merely uninteresting, it is the one failure class that arrives in
+  BULK. A misconfigured environment does not fail one call, it fails every
+  call. This project's own log carried 159 such entries from two seconds on
+  2026-08-15 -- 60% of the file -- because a test harness spawned the server
+  with a bare `process.env` and all 58 tools failed identically, twice. The
+  triage table sorts by count, so that volume outranked every real fault and
+  displaced the signal it exists to surface.
+
+  The predicate is anchored and narrow, because it decides what is NEVER
+  written down and so must fail open: a boring entry kept costs a line, a real
+  failure dropped costs the evidence. Errors that merely mention configuration
+  or environment variables are still recorded.
+
+  Routing errors (`Unknown tool` / `Unknown resource`) are deliberately still
+  recorded, though they keep their exemption from the finding nudge. A run of
+  those is the documented stale-schema symptom after a redeploy, which is
+  exactly what the log should show.
+
 ## [4.26.0] - 2026-08-31
 
 Icon handling, after a session that spent two hours on it and produced a

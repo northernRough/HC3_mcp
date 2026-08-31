@@ -126,9 +126,37 @@ function append(entry: FrictionEntry): void {
   } catch { /* rule 1: never break the call */ }
 }
 
+/**
+ * Is this the server saying it has no credentials, rather than a defect?
+ *
+ * Not friction, and not merely uninteresting: it is the ONE failure class that
+ * arrives in bulk. A misconfigured environment does not fail one call, it fails
+ * every call — the 2026-08-15 burst in this project's own log was 159 entries
+ * from two seconds, 60% of the file, because a test harness spawned the server
+ * with a bare process.env and all 58 tools failed identically, twice. That
+ * volume then outranked every real fault in the triage table, which sorts by
+ * count. So this class does not just add noise, it displaces signal.
+ *
+ * Deliberately narrow and anchored. This predicate decides what is NEVER
+ * written down, so it must fail OPEN: a boring entry kept costs a line, a real
+ * failure dropped costs the evidence. Widening it to anything mentioning
+ * configuration or environment variables would swallow gateway errors that
+ * merely say those words.
+ *
+ * Routing errors (Unknown tool / Unknown resource) are deliberately NOT here,
+ * though they share the finding-nudge exemption below. A run of them is the
+ * documented stale-schema symptom — schemas cache at connect and a reconnect
+ * may not refresh them after a redeploy — so it is exactly the kind of thing
+ * the log should show.
+ */
+export function isConfigurationError(message: string): boolean {
+  return /^Fibaro HC3 not configured/i.test(String(message ?? ''));
+}
+
 /** Record a tool failure. Called from the tools/call error path. */
 export function recordFailure(tool: string, message: string): void {
   try {
+    if (isConfigurationError(message)) return;
     const clean = redact(String(message)).slice(0, MAX_MESSAGE);
     append({
       at: Math.floor(Date.now() / 1000),
@@ -219,7 +247,10 @@ export function groupFailures(entries: FrictionEntry[]): FrictionGroup[] {
  * server exists to catch.
  */
 export function invitesAFinding(tool: string, message: string): boolean {
-  if (/^(Fibaro HC3 not configured|Unknown tool|Unknown resource)/i.test(message)) return false;
+  // Configuration errors are not recorded at all (see isConfigurationError);
+  // this keeps the nudge correct for any caller that reaches here another way.
+  if (isConfigurationError(message)) return false;
+  if (/^(Unknown tool|Unknown resource)/i.test(message)) return false;
   // Verification mismatches first: they are worth reporting even though this
   // server phrased them and even though they name the tool.
   if (/mismatch|did not (?:match|verify)|verif\w* failed|not verified|disagree/i.test(message)) return true;
