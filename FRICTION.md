@@ -807,7 +807,7 @@ compared them.
 
 | Claim | Next test |
 |---|---|
-| `manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged | Reporter isolated three variants on the since-replaced Shading QA. Not isolated: whether a **non**-QuickApp device also 403s, which separates "endpoint unavailable here" from "QuickApps rejected". |
+| ~~`manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged~~ | **Settled 1 Sep 2026 — see below.** Confirmed, the missing device-class arm was run on 3385, and the endpoint is catalogued in KNOWN_DEAD_ENDPOINTS.md. Carried by the tool in 4.30.0. |
 | ~~`create_scene` documents `content` as optional; omitting it throws a Lua-engine 400 about concatenating a nil `conditions`~~ | **Confirmed and fixed in 4.29.0, 1 Sep 2026** — see the row below. Struck rather than deleted: a stale awaiting-verdict row is the same failure as a stale open-gap row. |
 | Scene variables have **no REST API**: `/scenes/{id}/variables` and three sibling paths all 501-empty, while `fibaro.setSceneVariable` works inside the run | Controls were run: known-bad paths also 501-empty, known-good return 200. If it holds, the scene-variable tool in "Gaps" below is **unbuildable**, and that gap should be struck rather than carried. |
 | `upload_icon`'s attach hint (`modify_device({properties:{deviceIcon: id}})`) leaves a QuickApp tile **blank**; what renders is `properties.icon = {path, source="HC"}` written from inside the owning QA | A/B on Shading versus Irrigation. Corroborated independently by the `modify_device` post-write verification failure on **Outdoor Mean** in the table above, where `properties.icon` was submitted and did not read back — this server's own guard catching the silent discard. |
@@ -934,6 +934,35 @@ probe harness, load-bearing, in daily use. It had never been written down as a
 finding because it was never a surprise to anyone. A probe harness accumulates
 verified gateway behaviour as a side effect of testing other things, and it is
 worth reading before assuming a claim is untested.
+
+#### `manage_plugin_interfaces` — as far as it goes without a live write, 1 Sep 2026
+
+A third finding arrived on 31 Aug (QA 5001, `com.fibaro.multilevelSwitch`),
+which is the second device type and the fifth recorded failure. That is enough
+to settle the pattern, and not enough to settle the cause.
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | The refusal is blanket: not per-interface, not per-direction, not per-QuickApp-type | Five failures, three findings, two firmware-5.210.12 QuickApps of different types. `add` and `delete`, a three-entry list and a single entry. Device unchanged in every case, so nothing partial is written. **Recorded in the tool in 4.30.0**, which previously said only "Add or remove interfaces from a device." |
+| **confirmed** | The two workarounds were in a finding and nowhere in the code | `useEmbededView: false` suppresses the interface-driven UI furniture; `deviceRole: "Other"` via `modify_device` dropped `light` + `isLight` on QA 4998. Both observed on this gateway, neither isolated as a controlled test, and both now named in the 403 message and the tool description with that caveat attached. |
+| **confirmed** | A **non**-QuickApp device is refused too | The variable that had blocked this since 15 August, because the only candidates were live Z-Wave devices in a real house. The operator nominated **3385** (`waterproof SW`, Fibaro FGBS-222, interfaces `["notification","parameters","zwave","zwaveProtection"]`, no `quickApp`), which was usable because it is dead — `deadReason: "power"`. Two arms: `add ["energy"]` → 403, `delete ["energy"]` → 403. `add` was chosen over `delete` because adding is reversible where removing a real interface from a real device is not; the delete arm then named an interface the device does not have, so it could not remove anything even had it worked. **Interfaces and the `modified` timestamp (1779115286) were byte-identical before and after both arms**, so the refusal precedes any state change. Now in KNOWN_DEAD_ENDPOINTS.md. |
+| **untested** | Whether it is the firmware or the credentials | Administrator credentials are refused, which makes a permissions ladder an unlikely explanation, but there is only one credential set on this gateway so the two are not formally separated. Only 5.210.12 tried. The tool says this rather than picking one. |
+
+Two things worth keeping.
+
+Four of these five failures were recorded before anyone tried to isolate the
+cause, because the tool volunteered nothing and each caller started from zero.
+A tool that carries its own known failure mode turns the next report from
+rediscovery into either confirmation or news.
+
+And the blocker was never technical. The test took two calls and about a
+minute; what it needed was somebody who knew which device was safe to touch.
+The finding said so plainly on 15 August — "I have not tried that because the
+only candidates are live Z-Wave devices" — and then sat for seventeen days,
+through two more failures and a third finding, because that sentence was
+filed rather than asked. **When a candidate is blocked on a judgement only the
+operator can make, the ledger row should be a question put to them, not a
+status.**
 
 <!-- END manual ledger -->
 

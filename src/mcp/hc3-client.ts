@@ -55,6 +55,16 @@ export class HC3HttpError extends Error {
  * message fallback is for errors this server raised itself — tool guards that
  * say "not found" in prose and never went near the gateway.
  */
+/**
+ * The HTTP status HC3 answered with, or null if this error did not come from
+ * a response. Read the field; never scrape the message for a status, because
+ * ids and paths carry digits of their own (see HC3HttpError).
+ */
+export function httpStatus(error: unknown): number | null {
+  const status = (error as any)?.status;
+  return typeof status === 'number' ? status : null;
+}
+
 export function isNotFound(error: unknown): boolean {
   const status = (error as any)?.status;
   if (typeof status === 'number') return status === 404;

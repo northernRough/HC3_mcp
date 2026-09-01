@@ -94,6 +94,54 @@ throwing a precise error if the id isn't present.
 
 ---
 
+### `POST /api/plugins/interfaces` — HTTP 403
+
+Tested through the MCP tool rather than curl, deliberately: this is a WRITE
+endpoint, HC3 has no dry-run, and a shape-check probe against a write path is
+treated as a real write. The tool is a direct passthrough to the endpoint, so
+the observation is the same.
+
+```
+manage_plugin_interfaces action=add    deviceId=4952 interfaces=["energy"]            -> 403, no body
+manage_plugin_interfaces action=delete deviceId=4952 interfaces=["autoTurnOff","light"] -> 403, no body
+manage_plugin_interfaces action=delete deviceId=4952 interfaces=["light"]             -> 403, no body
+manage_plugin_interfaces action=delete deviceId=5001 interfaces=["light"]             -> 403, no body
+manage_plugin_interfaces action=add    deviceId=3385 interfaces=["energy"]            -> 403, no body
+manage_plugin_interfaces action=delete deviceId=3385 interfaces=["energy"]            -> 403, no body
+```
+
+Adds and removes interfaces on a device. Refused for every combination tried
+on firmware 5.210.12 with administrator credentials: both directions, a single
+interface and a list of three, and across device classes -- QuickApps 4952
+(`com.fibaro.binarySwitch`) and 5001 (`com.fibaro.multilevelSwitch`), and
+non-QuickApp 3385, a Fibaro FGBS-222 Z-Wave device whose interfaces are
+`["notification","parameters","zwave","zwaveProtection"]`.
+
+**Nothing is written.** Device 3385's interfaces AND its `modified` timestamp
+(1779115286) were byte-identical before and after both of its arms, so the
+refusal happens before any state change. There is no partial-write risk in
+having tried.
+
+The device-class arm is the one that took longest to get, because the only
+non-QuickApp candidates on the reporting gateway were live Z-Wave devices in a
+house. 3385 was usable because it is dead (`deadReason: "power"`), and the
+`add` arm was chosen over `delete` because adding is reversible where removing
+a real interface from a real device is not.
+
+Since administrator credentials are refused, a permissions explanation is
+unlikely and "not permitted on this firmware" is the leading reading -- but
+only one credential set exists to test with, so credentials and firmware are
+not formally separated. Only 5.210.12 has been tested, so this entry is not
+yet in the every-revision sense permanent.
+
+**Working alternative:** none for interfaces themselves. For the usual
+underlying goal -- suppressing the UI furniture an interface brings -- two
+routes have worked on this gateway, neither isolated as a controlled test:
+`useEmbededView: false`, and setting `deviceRole: "Other"` via `modify_device`
+(dropped `light` and `isLight` on a multilevelSwitch QuickApp).
+
+---
+
 ## Hard-error dead endpoints — STARTING_SERVICES-conditional
 
 These return 501 (or 502) when HC3's panel-services cluster isn't fully

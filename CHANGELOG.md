@@ -2,6 +2,73 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.30.0] - 2026-09-01
+
+Friction triage, item 4: `manage_plugin_interfaces`, five bare 403s and three
+findings, and the open variable that had been blocking it for seventeen days.
+
+### Fixed
+
+- **`manage_plugin_interfaces` says what is known about its own 403.** The
+  tool was an unguarded passthrough with a one-line description ("Add or
+  remove interfaces from a device."), inherited from upstream. Every recorded
+  attempt returned `HTTP 403: Forbidden` with no body, and establishing that
+  the refusal is not about which interface or which direction cost one
+  reporter a create-and-inspect cycle and three findings: add and delete, one
+  interface and three, on freshly-created QuickApps of two types
+  (`com.fibaro.binarySwitch`, `com.fibaro.multilevelSwitch`), device unchanged
+  every time.
+
+  A 403 now carries all of that, plus the device's current interfaces so the
+  caller need not go and look, plus the two routes that HAVE worked on this
+  gateway for the usual underlying goal: `useEmbededView: false` suppresses
+  the interface-driven cards and buttons, and `deviceRole: "Other"` through
+  `modify_device` dropped `light` and `isLight` on a multilevelSwitch
+  QuickApp. Neither was recorded anywhere in the tool code before.
+
+  **The open variable is now closed.** Whether a non-QuickApp device is also
+  refused was the one thing separating "this endpoint is unavailable here"
+  from "QuickApps are rejected", and it had been untested since 15 August
+  because the only candidates were live Z-Wave devices in a house. Tested on
+  device 3385, a Fibaro FGBS-222 that is dead (`deadReason: "power"`) and
+  carries no `quickApp` interface: `add ["energy"]` -> 403, and `delete
+  ["energy"]` -> 403. `add` was chosen over `delete` because adding is
+  reversible where removing a real interface from a real device is not, and
+  the delete arm named an interface the device does not have, so it could not
+  remove anything even if it had worked.
+
+  **Nothing was written.** 3385's interfaces AND its `modified` timestamp
+  (1779115286) were byte-identical before and after both arms, so the refusal
+  happens before any state change.
+
+  So the refusal is not about the interface, the direction, or the device
+  class. Administrator credentials are refused, which makes a permissions
+  explanation unlikely, but only one credential set exists to test with -- so
+  credentials and firmware are not formally separated, and only 5.210.12 has
+  been tried. The tool says exactly that rather than collapsing it into one
+  cause.
+
+- **`POST /api/plugins/interfaces` added to KNOWN_DEAD_ENDPOINTS.md**, with
+  all six arms, the unchanged-timestamp evidence, and the scope limits. It is
+  reachable at runtime through
+  `get_hc3_api_notes({topic:"dead_endpoints"})`, which reads that file. The
+  entry records that it was tested through the MCP tool rather than curl,
+  deliberately: this is a WRITE endpoint, HC3 has no dry-run, and a
+  shape-check probe against a write path is treated as a real write.
+
+- **It verifies, like the rest of this fork.** Interfaces are read before and
+  after and the result reports `interfacesBefore`, `interfacesAfter`,
+  `changed` and `verified`. An accepted call that changed nothing is reported
+  as a warning rather than as success -- the write-said-yes / read-back-said-no
+  shape this server exists to close. And because a non-403 answer would
+  contradict every recorded attempt, a call that does change something returns
+  a note asking for a `report_finding`: if this endpoint ever starts working,
+  the fact arrives as evidence rather than as another unverified claim.
+
+- **Argument guards.** `action` must be add or delete, `deviceId` numeric,
+  `interfaces` non-empty -- all refused before any request. It previously
+  forwarded anything.
+
 ## [4.29.0] - 2026-09-01
 
 Friction triage, item 3: a well-isolated finding whose fix had been named for

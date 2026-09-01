@@ -4,6 +4,7 @@
 // allow_bulk=true when more than one device of the type exists.
 
 import { ToolModule } from './registry';
+import { httpStatus } from '../hc3-client';
 
 export const plugins: ToolModule = {
   schemas: [
@@ -162,7 +163,7 @@ export const plugins: ToolModule = {
       },
       {
         name: "manage_plugin_interfaces",
-        description: "Add or remove interfaces from a device.",
+        description: "Add or remove interfaces on a device via POST /api/plugins/interfaces. Reads `interfaces` back afterwards and reports whether they actually changed.\n\n**THIS ENDPOINT IS REFUSED ON FIRMWARE 5.210.12. Expect HTTP 403, with no body.** Not QuickApp-specific and not interface-specific — six attempts, both directions, single interface and a list of three, across device classes: QuickApps 4952 (`com.fibaro.binarySwitch`) and 5001 (`com.fibaro.multilevelSwitch`), and non-QuickApp 3385, a Fibaro FGBS-222 Z-Wave device. Catalogued in KNOWN_DEAD_ENDPOINTS.md; read it via get_hc3_api_notes({topic:\"dead_endpoints\"}).\n\n**Nothing is written.** Device 3385's interfaces and its `modified` timestamp were byte-identical before and after, so the refusal happens before any state change. A failed call here costs nothing but the call.\n\nAdministrator credentials are refused, so a permissions explanation is unlikely and \"not permitted on this firmware\" is the leading reading — but only one credential set has been tested, so credentials and firmware are not formally separated, and only 5.210.12 has been tried. The tool is kept rather than removed: the endpoint is documented, a later firmware may restore it, and a bare 403 with the tool claiming nothing was worse than a 403 carrying this.\n\n**What works instead, if your goal is the UI furniture an interface brings.** Both observed on this gateway, neither isolated as a controlled test:\n- `useEmbededView: false` suppresses the interface-driven cards and buttons without touching the interfaces themselves.\n- Setting `deviceRole: \"Other\"` through `modify_device` dropped the `light` interface and `isLight` (seen on a multilevelSwitch QuickApp).\n\nIf you get anything OTHER than a 403, that contradicts every recorded attempt and is news: file it with report_finding, naming the device type and firmware.",
         inputSchema: {
           type: "object",
           properties: {
@@ -421,12 +422,86 @@ export const plugins: ToolModule = {
       interfaces: string[]
     }): Promise<any> {
       const { action, deviceId, interfaces } = args;
-      const requestData = {
-        action,
+      if (action !== 'add' && action !== 'delete') {
+        throw new Error(`manage_plugin_interfaces: action must be "add" or "delete" (got ${JSON.stringify(action)}).`);
+      }
+      if (typeof deviceId !== 'number') {
+        throw new Error('manage_plugin_interfaces requires a numeric deviceId.');
+      }
+      if (!Array.isArray(interfaces) || interfaces.length === 0) {
+        throw new Error('manage_plugin_interfaces requires a non-empty interfaces array.');
+      }
+
+      // Read first, so the response can say what actually changed rather than
+      // echoing HC3. Best-effort: a device this tool cannot read is still
+      // worth attempting, and the attempt's own error is the better one to
+      // surface.
+      let before: string[] | null = null;
+      try {
+        const dev: any = await hc3.request(`/api/devices/${deviceId}`);
+        before = Array.isArray(dev?.interfaces) ? dev.interfaces : null;
+      } catch { /* fall through to the write */ }
+
+      let response: any;
+      try {
+        response = await hc3.request('/api/plugins/interfaces', 'POST', { action, deviceId, interfaces });
+      } catch (e: any) {
+        // The only outcome anyone has recorded. A bare "HTTP 403: Forbidden"
+        // with no body cost one reporter a create-and-inspect cycle and three
+        // findings; say what is known here instead of making them repeat it.
+        if (httpStatus(e) === 403) {
+          throw new Error(
+            `manage_plugin_interfaces: HTTP 403 Forbidden from HC3, no body. Device ${deviceId} is unchanged` +
+            `${before ? ` (interfaces still ${JSON.stringify(before)})` : ''}.\n\n` +
+            'This endpoint is refused on firmware 5.210.12 and is catalogued as dead — see ' +
+            'get_hc3_api_notes({topic:"dead_endpoints"}). Six attempts, both directions, one interface and ' +
+            'several, on QuickApps of two types AND on a non-QuickApp Z-Wave device. So it is not about which ' +
+            'interface, which direction, or whether the target is a QuickApp: retrying differently will not help. ' +
+            'Nothing is written — the refusal happens before any state change, verified by an unchanged `modified` ' +
+            'timestamp.\n\n' +
+            'If the goal is the UI furniture an interface brings, two routes have worked on this gateway: ' +
+            'set `useEmbededView: false` to suppress the interface-driven cards and buttons, or set ' +
+            '`deviceRole: "Other"` through modify_device, which dropped `light` and `isLight` on a multilevelSwitch QuickApp.'
+          );
+        }
+        throw e;
+      }
+
+      // A call that does not throw has not necessarily worked. If this
+      // endpoint ever starts answering, the answer becomes evidence rather
+      // than another unverified claim.
+      let after: string[] | null = null;
+      try {
+        const dev: any = await hc3.request(`/api/devices/${deviceId}`);
+        after = Array.isArray(dev?.interfaces) ? dev.interfaces : null;
+      } catch { /* verification is best-effort; report what we have */ }
+
+      const changed = before !== null && after !== null
+        ? JSON.stringify(before) !== JSON.stringify(after)
+        : null;
+      const expected = action === 'add'
+        ? interfaces.filter(i => after !== null && !after.includes(i))
+        : interfaces.filter(i => after !== null && after.includes(i));
+
+      return {
         deviceId,
-        interfaces
+        action,
+        requested: interfaces,
+        interfacesBefore: before,
+        interfacesAfter: after,
+        changed,
+        verified: after !== null ? expected.length === 0 : null,
+        ...(after !== null && expected.length > 0 ? {
+          warning: `HC3 accepted the call but the interfaces did not change as asked: ` +
+            `${action === 'add' ? 'still missing' : 'still present'} ${JSON.stringify(expected)}. ` +
+            'The write was reported as successful and was not applied.',
+        } : {}),
+        ...(changed === true ? {
+          note: 'This endpoint answered instead of returning 403, which every previously recorded attempt did. ' +
+            'That is new information about it — worth a report_finding naming the device type and firmware.',
+        } : {}),
+        response,
       };
-      return await hc3.request('/api/plugins/interfaces', 'POST', requestData);
     },
 
     async restart_plugin(hc3, args: { deviceId: number }): Promise<any> {
