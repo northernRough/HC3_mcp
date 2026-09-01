@@ -569,7 +569,7 @@
   },
   {
     "name": "create_scene",
-    "description": "Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be \"lua\" or \"scenario\". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `\"{ conditions = { { id = 2699, isTrigger = true, operator = \\\"==\\\", property = \\\"value\\\", type = \\\"device\\\", value = false } }, operator = \\\"any\\\" }\"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field 'conditions')`, naming a line in Fibaro's engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify'd before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:\"execution_model\"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.",
+    "description": "Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be \"lua\" or \"scenario\". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `\"{ conditions = { { id = 2699, isTrigger = true, operator = \\\"==\\\", property = \\\"value\\\", type = \\\"device\\\", value = false } }, operator = \\\"any\\\" }\"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field 'conditions')`, naming a line in Fibaro's engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify'd before sending (matches update_scene_content semantics). **Omitting `content` on a lua scene creates an EMPTY scene, not a scene with no body.** HC3 rejects a create with no content at all, dying inside its own Lua engine with `attempt to concatenate a nil value (field 'conditions')` — the same engine line as the structured-conditions trap, one word apart, and it names nothing you wrote. This tool therefore supplies a body that subscribes to nothing and returns `contentDefaulted: true` so the substitution is visible. Write the real body afterwards with update_scene_content. Nothing is defaulted for type \"scenario\": that body is a different shape and the requirement has not been tested there.\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:\"execution_model\"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -590,11 +590,15 @@
           "description": "Room id (required). Use get_rooms to find a valid id — HC3 rejects roomId=0 on creation."
         },
         "content": {
-          "description": "Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify'd. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error."
+          "description": "Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify'd. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error. OPTIONAL for a lua scene only in the sense that omitting it creates an EMPTY scene: HC3 itself rejects a create with no content, so this tool supplies a body that subscribes to nothing (conditions \"{ conditions = {}, operator = \\\"all\\\" }\", actions \"\") and reports contentDefaulted:true. Populate it afterwards with update_scene_content. For type \"scenario\" nothing is defaulted."
+        },
+        "restart": {
+          "type": "boolean",
+          "description": "Concurrency control. A scene runs ONE instance at a time; restart=true (the default) means an incoming trigger kills the running instance, false means the running instance is protected and the trigger is dropped. Read back after creation and reported as `restartWarning` if HC3 did not apply it."
         },
         "maxRunningInstances": {
           "type": "number",
-          "description": "Default 1."
+          "description": "Default 1. Vestigial — an HC2 leftover that does nothing on HC3. Do not design around it."
         },
         "enabled": {
           "type": "boolean",
@@ -1212,7 +1216,7 @@
   },
   {
     "name": "get_device_property",
-    "description": "Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). Propagates 404 on unknown deviceId or propertyName. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.",
+    "description": "Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). On a 404 it re-reads the device to say WHICH thing is missing: an unknown deviceId is reported as such, an unknown propertyName is reported with the list of properties the device does expose. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2472,19 +2476,19 @@
         },
         "expected": {
           "type": "string",
-          "description": "What you expected to happen."
+          "description": "What you expected to happen. Stored up to 2000 characters; anything beyond is cut and the cut is reported back to you."
         },
         "actual": {
           "type": "string",
-          "description": "What actually happened. Quote the error verbatim if there was one."
+          "description": "What actually happened. Quote the error verbatim if there was one. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you."
         },
         "reproduction": {
           "type": "string",
-          "description": "How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it."
+          "description": "How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you."
         },
         "impact": {
           "type": "string",
-          "description": "Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged."
+          "description": "Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged. This is the field triage reads first, so put the cost and any suggested fix at the FRONT. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you."
         },
         "reporter": {
           "type": "string",

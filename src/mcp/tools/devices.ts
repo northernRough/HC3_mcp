@@ -15,6 +15,7 @@
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { verifyWrite } from '../util';
+import { isNotFound } from '../hc3-client';
 import { validateViewLayout, describeViewLayoutProblems } from '../viewlayout';
 
 export const deleteDeviceSchema: MCPTool =
@@ -132,7 +133,7 @@ export const devices: ToolModule = {
       },
       {
         name: 'get_device_property',
-        description: 'Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). Propagates 404 on unknown deviceId or propertyName. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.',
+        description: 'Read a single device property via GET /api/devices/{id}/properties/{propertyName}. Returns {value, modified} — much smaller than get_device_info which hydrates the entire device record (~50 KB for instrumented devices). Use when you need one scalar field repeatedly (e.g. value, batteryLevel, lastBreached). On a 404 it re-reads the device to say WHICH thing is missing: an unknown deviceId is reported as such, an unknown propertyName is reported with the list of properties the device does expose. Note: some properties (viewLayout, uiCallbacks) can be large structured values — per-property fetch still helps but not always tiny.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -268,7 +269,35 @@ export const devices: ToolModule = {
       if (typeof args?.propertyName !== 'string' || args.propertyName.length === 0) {
         throw new Error('get_device_property requires a non-empty propertyName.');
       }
-      return await hc3.request(`/api/devices/${args.deviceId}/properties/${encodeURIComponent(args.propertyName)}`);
+      try {
+        return await hc3.request(`/api/devices/${args.deviceId}/properties/${encodeURIComponent(args.propertyName)}`);
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+        // A 404 here is two different problems wearing the same status, and
+        // HC3 sends no body to separate them. This was the single largest
+        // cluster in the friction log — 29 entries reading only "HTTP 404:
+        // Not Found", against which nobody could say whether the device or
+        // the property was the missing one. One extra read, on the failure
+        // path only, settles it and names what does exist.
+        let device: any;
+        try {
+          device = await hc3.request(`/api/devices/${args.deviceId}`);
+        } catch (inner: any) {
+          if (isNotFound(inner)) {
+            throw new Error(
+              `get_device_property: no device ${args.deviceId} on this HC3. Find the right id with find_devices_by_name or get_devices.`
+            );
+          }
+          throw e;
+        }
+        const names = Object.keys(device?.properties ?? {}).sort();
+        const shown = names.slice(0, 40).join(', ');
+        const more = names.length > 40 ? `, +${names.length - 40} more` : '';
+        throw new Error(
+          `get_device_property: device ${args.deviceId} (${device?.name}) has no property '${args.propertyName}'. ` +
+          `It exposes ${names.length}: ${shown}${more}.`
+        );
+      }
     },
 
     async find_device_by_endpoint(hc3, args: {
@@ -493,13 +522,17 @@ export const devices: ToolModule = {
 
       await hc3.request(`/api/devices/${args.deviceId}`, 'DELETE');
 
+      let stillExists = false;
       try {
         await hc3.request(`/api/devices/${args.deviceId}`);
+        stillExists = true;
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
         throw new Error(
           `delete_device: post-delete verify failed — device ${args.deviceId} still exists after DELETE.`
         );
-      } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
       }
 
       return {

@@ -11,7 +11,7 @@ import { ToolModule } from './registry';
 import { MCPTool } from '../types';
 import { deepMerge, verifyWrite } from '../util';
 import { SERVER_NAME, SERVER_VERSION } from '../version';
-import { recordFinding, readEntries, frictionPath } from '../friction';
+import { recordFinding, readEntries, frictionPath, FINDING_LIMITS } from '../friction';
 
 export const systemSchemas: Record<string, MCPTool> = {
   report_finding:
@@ -22,10 +22,10 @@ export const systemSchemas: Record<string, MCPTool> = {
           type: 'object',
           properties: {
             tool: { type: 'string', description: 'The tool the finding concerns, or "general" if it cuts across tools.' },
-            expected: { type: 'string', description: 'What you expected to happen.' },
-            actual: { type: 'string', description: 'What actually happened. Quote the error verbatim if there was one.' },
-            reproduction: { type: 'string', description: 'How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it.' },
-            impact: { type: 'string', description: 'Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged.' },
+            expected: { type: 'string', description: 'What you expected to happen. Stored up to 2000 characters; anything beyond is cut and the cut is reported back to you.' },
+            actual: { type: 'string', description: 'What actually happened. Quote the error verbatim if there was one. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you.' },
+            reproduction: { type: 'string', description: 'How to reproduce, varying ONE thing between the working and failing case. State plainly if you have not isolated it. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you.' },
+            impact: { type: 'string', description: 'Optional: what it cost — time lost, a wrong conclusion drawn, a live object damaged. This is the field triage reads first, so put the cost and any suggested fix at the FRONT. Stored up to 4000 characters; anything beyond is cut and the cut is reported back to you.' },
             reporter: { type: 'string', description: 'Optional: who or what is reporting, for follow-up.' },
           },
           required: ['tool', 'expected', 'actual', 'reproduction'],
@@ -239,18 +239,30 @@ export const system: ToolModule = {
           'If you have not isolated it, say so explicitly — an unisolated finding that admits it is far more useful than a confident wrong one.'
         );
       }
-      recordFinding(args.tool, {
+      const truncated = recordFinding(args.tool, {
         expected: args.expected, actual: args.actual,
         reproduction: args.reproduction, impact: args.impact, reporter: args.reporter,
       });
       const path = frictionPath();
+      // Truncation used to be silent, and it landed hardest on the most
+      // thorough reports: 11 of the 20 findings in this project's log that
+      // carried an `impact` sat exactly on the old 500-character cap, cut
+      // mid-sentence in the field where the cost and the suggested fix live.
+      // Say it here, in the same turn, while the reporter still has the text.
+      const cutNote = truncated.length
+        ? ` TRUNCATED: ${truncated.map(t => `${t.field} (kept ${t.kept} of ${t.submitted} chars)`).join(', ')}. ` +
+          'The stored text is marked where it was cut. If the lost part carried the cost or the fix, file a follow-up finding with just that.'
+        : '';
       return {
         recorded: !!path,
         storedAt: path ?? null,
         totalEntries: readEntries().length,
-        note: path
+        truncated,
+        limits: FINDING_LIMITS,
+        note: (path
           ? 'Recorded locally. Nothing was transmitted. Review via the hc3://friction resource.'
-          : 'NOT PERSISTED — no writable location for the friction log. Set MCP_FRICTION_LOG, or on a hardened systemd unit add StateDirectory=hc3-mcp. The finding was accepted but is lost when this process exits.',
+          : 'NOT PERSISTED — no writable location for the friction log. Set MCP_FRICTION_LOG, or on a hardened systemd unit add StateDirectory=hc3-mcp. The finding was accepted but is lost when this process exits.'
+        ) + cutNote,
       };
     },
 

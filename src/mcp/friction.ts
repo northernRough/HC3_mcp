@@ -28,6 +28,56 @@ import { dirname, join } from 'node:path';
 const MAX_BYTES = 512 * 1024;   // ~2-3k entries; small enough to read whole
 const MAX_MESSAGE = 400;
 
+/**
+ * Per-field caps on a submitted finding.
+ *
+ * Set from what the caps were actually costing, not from a guess. In this
+ * project's own log, 11 of the 20 findings carrying an `impact` sat exactly on
+ * the old 500-character cap and 3 `actual` fields sat on the old 1000 — cut
+ * off mid-sentence, silently, in the field where the cost and the suggested
+ * fix live. `reproduction` at 4000 had never once been hit, so it is unchanged
+ * and the others are raised towards it.
+ *
+ * The truncation is now marked in the stored text and reported back to the
+ * caller (see `truncateField`). A cap has to exist — an unbounded field on a
+ * size-capped log just evicts other people's findings faster — but a cap the
+ * reporter cannot see is the same silent-success shape this server exists to
+ * close.
+ */
+export const FINDING_LIMITS = {
+  expected: 2000,
+  actual: 4000,
+  reproduction: 4000,
+  impact: 4000,
+  reporter: 120,
+} as const;
+
+export type FindingField = keyof typeof FINDING_LIMITS;
+
+export interface Truncation {
+  field: string;
+  /** Characters submitted, after redaction. */
+  submitted: number;
+  /** Characters kept, excluding the marker. */
+  kept: number;
+}
+
+/**
+ * Cut to the cap, and say so in the text itself.
+ *
+ * The marker matters more than the limit. A reader of the log cannot
+ * distinguish a report that stopped from one that was stopped, and four of the
+ * eleven truncated impacts read as complete sentences that simply end early.
+ */
+export function truncateField(
+  field: string, text: string, limit: number, out: Truncation[],
+): string {
+  if (text.length <= limit) return text;
+  out.push({ field, submitted: text.length, kept: limit });
+  return text.slice(0, limit) +
+    `\n\n[…truncated: ${text.length - limit} of ${text.length} characters cut, the report_finding cap for \`${field}\` is ${limit}]`;
+}
+
 export interface FrictionEntry {
   at: number;
   kind: 'failure' | 'finding';
@@ -116,10 +166,28 @@ function append(entry: FrictionEntry): void {
   try {
     // Truncate oldest-first when the cap is hit. Losing old telemetry is
     // acceptable; unbounded growth on someone's gateway is not.
+    //
+    // Findings are exempt from the first pass. A failure is one automatic line
+    // that will recur the next time anyone hits it; a finding is a written
+    // report with a reproduction, and once evicted it is gone for good. They
+    // are also the minority — 21 of 104 entries here — so keeping them costs
+    // little. Only if dropping every eligible failure still leaves the file
+    // over cap does the halving fall back to dropping findings too.
     try {
       if (existsSync(path) && statSync(path).size > MAX_BYTES) {
-        const kept = readFileSync(path, 'utf8').split('\n').filter(Boolean);
-        writeFileSync(path, kept.slice(Math.floor(kept.length / 2)).join('\n') + '\n');
+        const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+        const drop = Math.floor(lines.length / 2);
+        const isFinding = (l: string) => { try { return JSON.parse(l)?.kind === 'finding'; } catch { return false; } };
+        let dropped = 0;
+        let kept = lines.filter(l => {
+          if (dropped >= drop) return true;
+          if (isFinding(l)) return true;
+          dropped++;
+          return false;
+        });
+        // Still over: the file is mostly findings, so fall back to oldest-first.
+        if (dropped < drop) kept = kept.slice(drop - dropped);
+        writeFileSync(path, kept.join('\n') + '\n');
       }
     } catch { /* rotation is best-effort */ }
     appendFileSync(path, JSON.stringify(entry) + '\n');
@@ -157,7 +225,12 @@ export function isConfigurationError(message: string): boolean {
 export function recordFailure(tool: string, message: string): void {
   try {
     if (isConfigurationError(message)) return;
-    const clean = redact(String(message)).slice(0, MAX_MESSAGE);
+    // Marked, not silent: 10 of the 83 failures in this project's log sit on
+    // this cap, and a message that stops mid-word reads as one the tool
+    // produced that way. The cap itself stays low — failures are the
+    // high-volume class and a long HC3 stack traceback adds nothing after the
+    // first lines.
+    const clean = truncateField('message', redact(String(message)), MAX_MESSAGE, []);
     append({
       at: Math.floor(Date.now() / 1000),
       kind: 'failure',
@@ -168,24 +241,37 @@ export function recordFailure(tool: string, message: string): void {
   } catch { /* never throw */ }
 }
 
-/** Record a human/agent-submitted finding via report_finding. */
-export function recordFinding(tool: string, f: NonNullable<FrictionEntry['finding']>): void {
+/**
+ * Record a human/agent-submitted finding via report_finding.
+ *
+ * Returns what it had to cut, so `report_finding` can tell the reporter in the
+ * same turn — while they still have the text and can re-file the missing half.
+ * Still never throws: an empty list is returned on any internal failure, and
+ * `recorded` in the tool result is what says whether it persisted.
+ */
+export function recordFinding(tool: string, f: NonNullable<FrictionEntry['finding']>): Truncation[] {
+  const cut: Truncation[] = [];
   try {
+    const field = (name: FindingField, text: string) =>
+      truncateField(name, redact(text), FINDING_LIMITS[name], cut);
     append({
       at: Math.floor(Date.now() / 1000),
       kind: 'finding',
       tool: String(tool || 'unknown'),
+      // Not truncation-marked: this is a deliberate short summary for the
+      // triage table, and the full text is in `finding` on the same entry.
       message: redact(f.expected + ' / ' + f.actual).slice(0, MAX_MESSAGE),
       signature: signature(f.actual),
       finding: {
-        expected: redact(f.expected).slice(0, 1000),
-        actual: redact(f.actual).slice(0, 1000),
-        reproduction: redact(f.reproduction).slice(0, 4000),
-        ...(f.impact ? { impact: redact(f.impact).slice(0, 500) } : {}),
-        ...(f.reporter ? { reporter: redact(f.reporter).slice(0, 120) } : {}),
+        expected: field('expected', f.expected),
+        actual: field('actual', f.actual),
+        reproduction: field('reproduction', f.reproduction),
+        ...(f.impact ? { impact: field('impact', f.impact) } : {}),
+        ...(f.reporter ? { reporter: field('reporter', f.reporter) } : {}),
       },
     });
   } catch { /* never throw */ }
+  return cut;
 }
 
 export function readEntries(): FrictionEntry[] {

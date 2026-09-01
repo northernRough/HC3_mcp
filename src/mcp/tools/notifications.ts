@@ -2,6 +2,7 @@
 
 import { ToolModule } from './registry';
 import { deepMerge, verifyWrite } from '../util';
+import { isNotFound } from '../hc3-client';
 
 export const notifications: ToolModule = {
   schemas: [
@@ -138,11 +139,17 @@ export const notifications: ToolModule = {
         );
       }
       await hc3.request(`/api/notificationCenter/${args.notificationId}`, 'DELETE');
+      let stillExists = false;
       try {
         await hc3.request(`/api/notificationCenter/${args.notificationId}`);
-        throw new Error(`delete_notification: post-delete verify failed — notification ${args.notificationId} still exists.`);
+        stillExists = true;
       } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
+        throw new Error(
+          `delete_notification: post-delete verify failed — notification ${args.notificationId} still exists.`
+        );
       }
       return {
         deleted: args.notificationId,

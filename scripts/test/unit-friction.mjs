@@ -9,7 +9,7 @@
 //   node scripts/test/unit-friction.mjs
 
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, existsSync, readFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, statSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -78,6 +78,87 @@ check('a finding round-trips with its reproduction', () => {
   assert.equal(f.tool, 'modify_device');
   assert.match(f.finding.reproduction, /only change/);
   assert.equal(f.finding.impact, 'a day');
+});
+
+// ---------------------------------------------------------------------------
+// Truncation. It used to be silent, and it landed hardest on the most
+// thorough reports: 11 of the 20 findings in this project's own log that
+// carried an `impact` sat exactly on the old 500-character cap, cut mid
+// sentence in the field where the cost and the suggested fix live.
+// ---------------------------------------------------------------------------
+
+check('an over-long field is marked where it was cut, and reported back', () => {
+  const long = 'x'.repeat(F.FINDING_LIMITS.impact + 250);
+  const cut = F.recordFinding('get_icon', {
+    expected: 'short', actual: 'short',
+    reproduction: 'vary exactly one thing between the working and failing case',
+    impact: long,
+  });
+  assert.equal(cut.length, 1, 'the caller must be told');
+  assert.deepEqual(cut[0], { field: 'impact', submitted: long.length, kept: F.FINDING_LIMITS.impact });
+  const f = F.readEntries().filter(e => e.kind === 'finding').pop();
+  // The marker is the point: a reader cannot otherwise tell a report that
+  // stopped from one that was stopped.
+  assert.match(f.finding.impact, /\[…truncated: 250 of \d+ characters cut, the report_finding cap for `impact` is 4000\]$/);
+});
+
+check('a field within its cap is stored verbatim, with no marker', () => {
+  const cut = F.recordFinding('get_icon', {
+    expected: 'short', actual: 'short',
+    reproduction: 'vary exactly one thing between the working and failing case',
+    impact: 'y'.repeat(F.FINDING_LIMITS.impact),
+  });
+  assert.deepEqual(cut, []);
+  const f = F.readEntries().filter(e => e.kind === 'finding').pop();
+  assert.equal(f.finding.impact.length, F.FINDING_LIMITS.impact);
+  assert.doesNotMatch(f.finding.impact, /truncated/);
+});
+
+check('the caps are the ones the data asked for', () => {
+  // Raised from what they were actually costing, not guessed. `reproduction`
+  // at 4000 had never been hit, so it anchors the rest.
+  assert.equal(F.FINDING_LIMITS.impact, 4000, 'impact was 500 and 11 of 20 sat on it');
+  assert.equal(F.FINDING_LIMITS.actual, 4000, 'actual was 1000 and 3 sat on it');
+  assert.equal(F.FINDING_LIMITS.reproduction, 4000);
+});
+
+check('a truncated failure message says so too', () => {
+  F.recordFailure('create_scene', 'HTTP 400: Bad Request - ' + 'z'.repeat(600));
+  const e = F.readEntries().filter(x => x.kind === 'failure').pop();
+  assert.match(e.message, /\[…truncated: \d+ of \d+ characters cut/);
+  // The cap stays low for failures — they are the high-volume class.
+  assert.ok(e.message.length < 600, `message was ${e.message.length}`);
+});
+
+check('rotation drops old failures but keeps findings', () => {
+  // Raising the field caps makes findings bigger, which under a plain
+  // oldest-first halving would evict them sooner. A failure is one automatic
+  // line that recurs the next time anyone hits it; a finding is a written
+  // report with a reproduction, and once evicted it is gone.
+  const rotDir = mkdtempSync(join(tmpdir(), 'friction-rot-'));
+  process.env.MCP_FRICTION_LOG = join(rotDir, 'friction.jsonl');
+  F._resetFrictionPath();
+
+  const finding = JSON.stringify({
+    at: 1, kind: 'finding', tool: 'get_icon', message: 'm', signature: 's',
+    finding: { expected: 'e', actual: 'a', reproduction: 'r', impact: 'the oldest entry in the file' },
+  });
+  const failure = JSON.stringify({
+    at: 2, kind: 'failure', tool: 'get_devices', message: 'q'.repeat(400), signature: 'sig',
+  });
+  // Findings first, so oldest-first halving would take them.
+  const lines = [finding, finding, ...Array.from({ length: 1400 }, () => failure)];
+  writeFileSync(process.env.MCP_FRICTION_LOG, lines.join('\n') + '\n');
+  assert.ok(statSync(process.env.MCP_FRICTION_LOG).size > 512 * 1024, 'fixture must exceed the cap');
+
+  F.recordFailure('get_devices', 'the write that triggers rotation');
+  const after = F.readEntries();
+  assert.ok(after.length < lines.length, 'rotation should have fired');
+  assert.equal(after.filter(e => e.kind === 'finding').length, 2, 'both findings must survive');
+  assert.match(after[0].finding.impact, /oldest entry/);
+
+  process.env.MCP_FRICTION_LOG = join(dir, 'friction.jsonl');
+  F._resetFrictionPath();
 });
 
 check('NEVER throws when the path is unwritable', () => {

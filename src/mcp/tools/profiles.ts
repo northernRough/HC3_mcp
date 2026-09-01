@@ -3,6 +3,7 @@
 
 import { ToolModule } from './registry';
 import { deepEqual, deepMerge, verifyWrite } from '../util';
+import { isNotFound } from '../hc3-client';
 
 export const profiles: ToolModule = {
   schemas: [
@@ -208,11 +209,17 @@ export const profiles: ToolModule = {
         throw new Error(`delete_profile: profile ${args.profileId} not found.`);
       }
       await hc3.request(`/api/profiles/${args.profileId}`, 'DELETE');
+      let stillExists = false;
       try {
         await hc3.request(`/api/profiles/${args.profileId}`);
-        throw new Error(`delete_profile: post-delete verify failed — profile ${args.profileId} still exists.`);
+        stillExists = true;
       } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
+        throw new Error(
+          `delete_profile: post-delete verify failed — profile ${args.profileId} still exists.`
+        );
       }
       return { deleted: args.profileId, name: existing.name };
     },

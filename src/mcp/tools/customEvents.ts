@@ -1,6 +1,7 @@
 // Custom-event tools (HC3's named event bus, fired by scenes/QAs).
 
 import { ToolModule } from './registry';
+import { isNotFound } from '../hc3-client';
 
 export const customEvents: ToolModule = {
   schemas: [
@@ -135,11 +136,17 @@ export const customEvents: ToolModule = {
       const encoded = encodeURIComponent(args.name);
       const existing: any = await hc3.request(`/api/customEvents/${encoded}`);
       await hc3.request(`/api/customEvents/${encoded}`, 'DELETE');
+      let stillExists = false;
       try {
         await hc3.request(`/api/customEvents/${encoded}`);
-        throw new Error(`delete_custom_event: post-delete verify failed — '${args.name}' still exists.`);
+        stillExists = true;
       } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
+        throw new Error(
+          `delete_custom_event: post-delete verify failed — '${args.name}' still exists.`
+        );
       }
       return {
         deleted: args.name,

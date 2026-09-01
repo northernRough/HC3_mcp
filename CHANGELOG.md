@@ -2,6 +2,153 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.29.0] - 2026-09-01
+
+Friction triage, item 3: a well-isolated finding whose fix had been named for
+two weeks and never applied.
+
+### Added
+
+- **`create_scene` accepts `restart`.** It was hardcoded `true` with no
+  argument to set it, so a caller who passed one had it silently dropped.
+  `scripts/probe.mjs`'s `withScene` has been passing `restart` to this tool
+  all along, and its own comment says a probe about re-entry must not let the
+  flag vary silently -- it could not vary at all. Nothing already settled
+  turns on it: no probe ever passed `false`, so every probe scene got the
+  `true` it was asking for, and the timer results stand.
+
+  Default is unchanged (`true`). The flag is read back from the post-create
+  refetch and reported as `restartWarning` if HC3 did not apply it -- reported
+  rather than thrown, because the scene exists by then and throwing would
+  leave an orphan over a concurrency flag. Only checked when the caller asked
+  for one explicitly: asserting HC3's own default is a claim nobody here has
+  tested.
+
+  `maxRunningInstances`' schema description now says it is vestigial, which
+  `modify_scene`'s already did.
+
+### Fixed
+
+- **`create_scene` with no `content` now creates an empty scene instead of a
+  400 from HC3's Lua engine.** `content` is not in `required`, and its
+  description gave no reason to send one, so omitting it read as legitimate.
+  It is not -- HC3 rejects the create from inside its own engine:
+
+      400 SceneValidationError
+      engine.lua:623: attempt to concatenate a nil value (field 'conditions')
+
+  One word from the structured-conditions trap already guarded in this file
+  (nil rather than table), on the same engine line, and naming nothing the
+  caller wrote. Four of the recurring failures in the friction log are this,
+  across 13 and 15 August, filed with a clean single-variable reproduction.
+  The reporter wanted an empty scene to populate with `update_scene_content`,
+  which is a reasonable thing to want.
+
+  So the body is supplied rather than the call refused, and the body is not
+  invented: `{ conditions = {}, operator = "all" }` with empty actions is
+  `scripts/probe.mjs`'s `withScene` default -- which creates its throwaway
+  scenes through `create_scene` itself -- and arm 1 of
+  `scripts/probe-scene-conditions.mjs`. Both have run against a live 5.2x
+  gateway repeatedly and been accepted. It subscribes to nothing, which
+  matters: a default that fired on something would be worse than the 400,
+  because a live controller would start running an empty scene on real events.
+
+  The substitution is reported as `contentDefaulted: true` with a note naming
+  `update_scene_content`, and stated in the schema so a caller can see it
+  before the call rather than after. Supplied content, including an explicitly
+  empty string, is never touched.
+
+  **Nothing is defaulted for `type: "scenario"`.** That body is a different
+  shape and nobody has tested whether it has the same requirement; inventing a
+  default for it would be exactly the wrong-negative mistake FRICTION.md keeps
+  a ledger about.
+
+## [4.28.0] - 2026-09-01
+
+Friction triage, item 2: the finding channel was truncating its own most
+valuable field, silently, and getting worse.
+
+### Fixed
+
+- **`report_finding` field caps raised, from what they were actually
+  costing.** `impact` was 500 characters and **11 of the 20 findings in this
+  project's log that carried one sat exactly on it**; `actual` was 1000 and 3
+  sat on that. The previous triage pass recorded this as 4 of 11, so it had
+  roughly doubled. It lands hardest on the most thorough reports, and `impact`
+  is where the cost and the suggested fix live. `reproduction` at 4000 had
+  never once been hit, so it is unchanged and anchors the rest: `impact` and
+  `actual` go to 4000, `expected` to 2000. The caps are exported as
+  `FINDING_LIMITS`.
+
+- **Truncation is no longer silent.** A cut field now carries a marker naming
+  how much was lost and which cap did it, so a reader can tell a report that
+  stopped from one that was stopped -- several of the eleven read as complete
+  sentences that simply end early. `recordFinding` returns what it cut and
+  `report_finding` reports it in the same turn, while the reporter still has
+  the text and can file the missing half. The limits are also stated in the
+  input schema, where a caller can act on them before the call rather than
+  after.
+
+  The same marker is applied to truncated failure messages, 10 of 83 of which
+  sit on the 400-character cap. That cap is unchanged: failures are the
+  high-volume class and an HC3 stack traceback adds nothing after the first
+  lines.
+
+- **Rotation no longer evicts findings first.** Consequence of the above:
+  bigger findings under a plain oldest-first halving would be lost sooner, and
+  they are the entries that cannot be recovered. A failure is one automatic
+  line that recurs the next time anyone hits it; a finding is a written report
+  with a reproduction. The halving now drops eligible failures first and only
+  falls back to dropping findings if the file is mostly findings and is still
+  over cap.
+
+## [4.27.0] - 2026-09-01
+
+Friction triage, item 1: the largest cluster in the telemetry named nothing.
+
+### Fixed
+
+- **HC3 errors now name the request that failed.** 51 of the 83 failures in
+  this project's own friction log were the literal string `HTTP 404: Not
+  Found` -- no method, no path, no id -- from `get_device_property` (29) and
+  `get_device_parameters` (22), spread over seventeen days. 19 of the 22 land
+  within five seconds of one of the 29, so it is one caller doing
+  property-then-parameters against the same id, over and over.
+
+  HC3 sends an empty body on a 404, so there was nothing else on the line, and
+  `recordFailure` stores only the tool and the message. The largest cluster in
+  the telemetry was undiagnosable by construction. `HC3HttpError` now carries
+  `status`, `statusText`, `method`, `endpoint` and `body`, and renders as
+  `HTTP 404: Not Found (GET /api/devices/9999/properties/value)`. As a side
+  effect the friction signature stops collapsing every 404 into one row:
+  `signature()` blanks digits but keeps the property name, so the rows split
+  by what was actually being read.
+
+- **`get_device_property` says WHICH thing is missing.** A 404 there is two
+  different problems wearing the same status, and HC3 sends no body to
+  separate them. On failure only, the tool re-reads the device: an unknown id
+  is reported as an unknown id, and an unknown property is reported with the
+  list of properties the device does expose.
+
+- **`get_device_parameters` and `set_device_parameter` report a missing
+  device.** In `get_device_parameters` the opening `GET /api/devices/{id}` is
+  the only unguarded request -- both `/api/zwave` fetches are caught -- so all
+  22 of its bare 404s were that one line, meaning the device does not exist.
+
+- **Post-delete verification could swallow its own failure.** Not found by
+  telemetry; found because putting the path into the message would have made
+  it worse. Seven tools recognised "gone" by testing the error message with
+  `/404|not.?found/i`, and each raised its `still exists` sentinel INSIDE the
+  try whose catch ran that test. An id containing `404` -- 4046, 1404, or
+  plain 404 -- matches through the id, so `delete_scene: post-delete verify
+  failed -- scene 4046 still exists` was swallowed and the tool returned
+  success on a scene that was still there. Affected `delete_scene`,
+  `delete_device`, `delete_room`, `delete_profile`, `delete_notification`,
+  `delete_custom_event`, `delete_global_variable`, and the
+  `create_global_variable` overwrite guard. The sentinel now lives outside the
+  try, and every site tests `isNotFound(e)`, which reads the status field and
+  only falls back to the message for errors this server raised itself.
+
 ## [4.26.1] - 2026-09-01
 
 ### Fixed

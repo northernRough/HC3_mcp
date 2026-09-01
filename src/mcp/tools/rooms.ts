@@ -2,6 +2,7 @@
 
 import { ToolModule } from './registry';
 import { deepMerge, verifyWrite } from '../util';
+import { isNotFound } from '../hc3-client';
 
 export const rooms: ToolModule = {
   schemas: [
@@ -151,11 +152,17 @@ export const rooms: ToolModule = {
         });
       }
       await hc3.request(`/api/rooms/${args.roomId}`, 'DELETE');
+      let stillExists = false;
       try {
         await hc3.request(`/api/rooms/${args.roomId}`);
-        throw new Error(`delete_room: post-delete verify failed — room ${args.roomId} still exists.`);
+        stillExists = true;
       } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
+        throw new Error(
+          `delete_room: post-delete verify failed — room ${args.roomId} still exists.`
+        );
       }
       return {
         deleted: args.roomId,

@@ -808,7 +808,7 @@ compared them.
 | Claim | Next test |
 |---|---|
 | `manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged | Reporter isolated three variants on the since-replaced Shading QA. Not isolated: whether a **non**-QuickApp device also 403s, which separates "endpoint unavailable here" from "QuickApps rejected". |
-| `create_scene` documents `content` as optional; omitting it throws a Lua-engine 400 about concatenating a nil `conditions` | Well isolated. Fix is to require `content`, or default `conditions` to a valid empty table. 4 of the recurring failures above are this. |
+| ~~`create_scene` documents `content` as optional; omitting it throws a Lua-engine 400 about concatenating a nil `conditions`~~ | **Confirmed and fixed in 4.29.0, 1 Sep 2026** — see the row below. Struck rather than deleted: a stale awaiting-verdict row is the same failure as a stale open-gap row. |
 | Scene variables have **no REST API**: `/scenes/{id}/variables` and three sibling paths all 501-empty, while `fibaro.setSceneVariable` works inside the run | Controls were run: known-bad paths also 501-empty, known-good return 200. If it holds, the scene-variable tool in "Gaps" below is **unbuildable**, and that gap should be struck rather than carried. |
 | `upload_icon`'s attach hint (`modify_device({properties:{deviceIcon: id}})`) leaves a QuickApp tile **blank**; what renders is `properties.icon = {path, source="HC"}` written from inside the owning QA | A/B on Shading versus Irrigation. Corroborated independently by the `modify_device` post-write verification failure on **Outdoor Mean** in the table above, where `properties.icon` was submitted and did not read back — this server's own guard catching the silent discard. |
 | `GET /iosDevices/{id}` returns the **entire** 15-entry collection, not one record | Anything taking the first element is wrong and looks right. Also reports `DELETE /iosDevices/{id}?udid={udid}` as the only shape that passes validation, which would make a cleanup tool buildable. |
@@ -884,6 +884,56 @@ cut off mid-sentence**, and `impact` is where the cost and the suggested fix
 live. One `actual` hit the 1000 cap too. Worth raising before the next batch
 arrives, since the truncation is silent and lands hardest on the most thorough
 reports.
+
+**Confirmed and fixed in 4.28.0 — 1 Sep 2026.** The next batch did arrive, and
+the count had roughly doubled: **11 of the 20 findings carrying an `impact` sat
+exactly on the 500 cap**, and 3 `actual` fields on the 1000. `reproduction` at
+4000 had never once been hit, which is what set the new numbers rather than a
+guess: `impact` and `actual` to 4000, `expected` to 2000, `reproduction`
+unchanged.
+
+Raising the caps was the smaller half. Truncation is now marked in the stored
+text and returned to the reporter by `report_finding` in the same turn, and the
+limits are stated in the input schema where a caller can act on them before the
+call. Several of the eleven read as complete sentences that simply end early,
+which is the same silent-success shape this server exists to close: a cap the
+reporter cannot see is indistinguishable from a report that finished.
+
+One consequence worth recording, because it was not in the original row.
+Bigger findings on a size-capped log get evicted sooner, and a finding is the
+entry that cannot be recovered — a failure recurs the next time anyone hits it,
+a written reproduction does not. Rotation now drops eligible failures first.
+
+Nothing recovers the text already lost from the 11 rows above. They are
+re-testable from their reproductions, which survived.
+
+#### The two 404 rows at the top of the table — settled 1 Sep 2026
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | The `get_device_property` and `get_device_parameters` rows are a server defect, not user error. They are **51 of the 83 recorded failures**, and the message is the bare string `HTTP 404: Not Found` | HC3 sends an empty body on 404, so `HC3Client.request` had nothing to append, and `recordFailure` stores only the tool and the message. The largest cluster in this file named neither the device nor the property. 19 of the 22 `get_device_parameters` entries land within 5s of one of the 29 `get_device_property` entries: one caller, property-then-parameters, same id, 15--31 Aug. **Fixed in 4.27.0**: `HC3HttpError` carries the status as a field and renders the method and path in the message. `get_device_property` re-reads the device on 404 to say which of the two is missing, and lists the properties that do exist; `get_device_parameters` reports an unknown id as an unknown id, its opening device read being its only unguarded request. |
+| **confirmed** | Every caller that recognised "gone" by testing the message with `/404|not.?found/i` was already wrong, and putting the path in the message would have made it worse | An id containing `404` matches through the id. Worse, each of the seven post-delete verifies raised its own `still exists` sentinel INSIDE the try whose catch ran that test, so `delete_scene: post-delete verify failed -- scene 4046 still exists` was swallowed and the tool returned success on a scene that was still there. Found by reading, not by telemetry: a silent-success bug cannot report itself. Fixed in 4.27.0 -- sentinel outside the try, `isNotFound(e)` reading the status field. Regression test: `scripts/test/unit-not-found.mjs`, which uses id 4046 deliberately. |
+
+Two things worth keeping. The friction log could not diagnose its own biggest
+row, which is a limit of recording the message but not the arguments -- the
+message was fixed here, the argument gap was not. And the swallowed-sentinel
+bug was adjacent to the fix rather than reported by anyone: it produced a
+success result, so no failure was ever recorded for it.
+
+#### `create_scene` without `content` — settled 1 Sep 2026
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | Omitting `content` throws `engine.lua:623: attempt to concatenate a nil value (field 'conditions')`, and `content` reads as optional because it is not in `required` | 4 of the recurring failures, 13 and 15 Aug, plus a finding with a single-variable reproduction. One word from the structured-conditions trap already guarded (nil rather than table), same engine line, naming nothing the caller wrote. |
+| **confirmed** | The second-named fix (default the conditions to a valid empty table) is the right one, and the body was already established here | `{ conditions = {}, operator = "all" }` with empty actions is `scripts/probe.mjs`'s `withScene` default -- which creates its throwaway scenes through `create_scene` itself -- and arm 1 of `scripts/probe-scene-conditions.mjs`. Both have run against a live 5.2x gateway repeatedly and been accepted, so no new gateway claim was needed to ship this. **Fixed in 4.29.0**: the body is supplied, `contentDefaulted: true` is returned so the substitution is visible, and the schema states it. |
+| **untested** | Whether `type: "scenario"` has the same requirement | Deliberately not defaulted. A scenario body is a different shape and nobody has tested it; a default invented for it would be a guess shipped as a fact. If someone hits the same 400 on a scenario create, that is the reproduction this row is waiting for. |
+
+Worth noting what made this cheap. The fix needed a fact about HC3 -- what the
+smallest acceptable scene body is -- and that fact was already sitting in the
+probe harness, load-bearing, in daily use. It had never been written down as a
+finding because it was never a surprise to anyone. A probe harness accumulates
+verified gateway behaviour as a side effect of testing other things, and it is
+worth reading before assuming a claim is untested.
 
 <!-- END manual ledger -->
 

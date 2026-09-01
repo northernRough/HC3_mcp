@@ -10,6 +10,29 @@
 
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
+import { isNotFound } from '../hc3-client';
+
+/**
+ * Read a device, turning "no such id" into a message that says so.
+ *
+ * Both tools here open by fetching the device, and in `get_device_parameters`
+ * that read is the ONLY unguarded request — the two /api/zwave fetches are
+ * caught. So every bare `HTTP 404: Not Found` recorded against it (22 in this
+ * project's own friction log, over seventeen days, with no way to tell which
+ * device was being asked for) was this one line.
+ */
+async function readDevice(hc3: any, tool: string, deviceId: number): Promise<any> {
+  try {
+    return await hc3.request(`/api/devices/${deviceId}`);
+  } catch (e: any) {
+    if (isNotFound(e)) {
+      throw new Error(
+        `${tool}: no device ${deviceId} on this HC3. Find the right id with find_devices_by_name or get_devices.`
+      );
+    }
+    throw e;
+  }
+}
 
 export const zwaveSchemas: Record<string, MCPTool> = {
   get_zwave_mesh_health:
@@ -228,7 +251,7 @@ export const zwave: ToolModule = {
       if (typeof deviceId !== 'number') {
         throw new Error('get_device_parameters requires a numeric deviceId.');
       }
-      const device: any = await hc3.request(`/api/devices/${deviceId}`);
+      const device: any = await readDevice(hc3, 'get_device_parameters', deviceId);
       const nodeId = device?.properties?.nodeId;
       if (nodeId === undefined || nodeId === null) {
         throw new Error(
@@ -326,7 +349,7 @@ export const zwave: ToolModule = {
         );
       }
 
-      const device: any = await hc3.request(`/api/devices/${deviceId}`);
+      const device: any = await readDevice(hc3, 'set_device_parameter', deviceId);
       const nodeId = device?.properties?.nodeId;
       if (nodeId === undefined || nodeId === null) {
         throw new Error(

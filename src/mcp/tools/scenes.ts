@@ -2,6 +2,7 @@
 
 import { ToolModule } from './registry';
 import { verifyWrite, contentHash } from '../util';
+import { isNotFound } from '../hc3-client';
 import { applyEdits, unifiedDiff, excerpt, wantsExcerpt, PatchEdit } from '../patch';
 import { luaLint, luaWarningSummary, toLuaSource } from '../lua';
 
@@ -34,6 +35,38 @@ function assertLuaSourceBlock(tool: string, field: 'conditions' | 'actions', val
     `(as a string — the Lua table is the VALUE of ${field}, not a JSON object in its place).`
   );
 }
+
+/**
+ * The smallest scene body HC3 will accept: a conditions table that subscribes
+ * to nothing, and an empty actions block.
+ *
+ * `content` reads as optional — it is not in `required`, and its own
+ * description offered no reason to send one — but omitting it fails, and
+ * fails opaquely:
+ *
+ *   400 SceneValidationError
+ *   engine.lua:623: attempt to concatenate a NIL value (field 'conditions')
+ *
+ * Same engine line as the structured-conditions trap above, one word apart
+ * (nil rather than table), and it named nothing the caller had written. Four
+ * of the recurring failures in this project's friction log are this, filed
+ * with a clean single-variable reproduction: the reporter expected an empty
+ * scene ready for update_scene_content, which is a reasonable thing to want.
+ *
+ * So supply it rather than refusing. This exact body is not a guess: it is
+ * `scripts/probe.mjs`'s `withScene` default, which creates its throwaway
+ * scenes through this very tool, and it is arm 1 of
+ * `scripts/probe-scene-conditions.mjs`. Both have run against a live 5.2x
+ * gateway, repeatedly, and been accepted.
+ *
+ * Lua scenes only. A `scenario` body is a different shape, nobody has tested
+ * whether it has the same requirement, and inventing a default for it would
+ * be the wrong-negative mistake this file keeps a ledger about.
+ */
+export const EMPTY_LUA_SCENE_CONTENT = {
+  conditions: '{ conditions = {}, operator = "all" }',
+  actions: '',
+};
 
 /** Validate the two Lua blocks inside a `content` argument, in either accepted form. */
 function assertSceneContentBlocks(tool: string, content: unknown): void {
@@ -200,15 +233,16 @@ export const scenes: ToolModule = {
       },
       {
         name: 'create_scene',
-        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `"{ conditions = { { id = 2699, isTrigger = true, operator = \\"==\\", property = \\"value\\", type = \\"device\\", value = false } }, operator = \\"any\\" }"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field \'conditions\')`, naming a line in Fibaro\'s engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics).\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:"execution_model"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.',
+        description: 'Create a new scene via POST /api/scenes. Post-create verify: refetches /api/scenes/{newId} and confirms name + type match. Guards: name must be 1–50 chars (HC3 silently truncates / rejects otherwise); type must be "lua" or "scenario". **`content` is {conditions, actions}, and BOTH are Lua source STRINGS.** The conditions block is a Lua table written as text, e.g. `"{ conditions = { { id = 2699, isTrigger = true, operator = \\"==\\", property = \\"value\\", type = \\"device\\", value = false } }, operator = \\"any\\" }"` — not a JSON object in its place. Passing the structure directly is refused here, because HC3 accepts it, stores it, and then dies at subscribe time with `attempt to concatenate a table value (field \'conditions\')`, naming a line in Fibaro\'s engine rather than your argument. The refusal prints the Lua to send instead. If content is an object it is JSON.stringify\'d before sending (matches update_scene_content semantics). **Omitting `content` on a lua scene creates an EMPTY scene, not a scene with no body.** HC3 rejects a create with no content at all, dying inside its own Lua engine with `attempt to concatenate a nil value (field \'conditions\')` — the same engine line as the structured-conditions trap, one word apart, and it names nothing you wrote. This tool therefore supplies a body that subscribes to nothing and returns `contentDefaulted: true` so the substitution is visible. Write the real body afterwards with update_scene_content. Nothing is defaulted for type "scenario": that body is a different shape and the requirement has not been tested there.\n\n**Before writing the Lua, call get_hc3_lua_scenes_guide({topic:"execution_model"}).** Most scene advice in circulation is HC2 advice or one of two myths, and both change what you write here: a scene runs ONE instance, governed by the `restart` field (`maxRunningInstances` is vestigial — never write it), and a firing `fibaro.setTimeout` does NOT restart the scene, so closures survive and the defensive re-read-everything pattern is a durability choice rather than a requirement (verified here on scratch scenes: a control arm with no timer scored one top-of-scene execution, the timer arm scored one with its callback firing, and a captured local survived intact). The guide also covers the conditions table, `matchInterval` for periodic scenes, and why state you may need to inspect belongs in a QuickApp.',
         inputSchema: {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Scene name (1–50 chars).' },
             type: { type: 'string', enum: ['lua', 'scenario'], description: 'Scene type.' },
             roomId: { type: 'number', description: 'Room id (required). Use get_rooms to find a valid id — HC3 rejects roomId=0 on creation.' },
-            content: { description: 'Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify\'d. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error.' },
-            maxRunningInstances: { type: 'number', description: 'Default 1.' },
+            content: { description: 'Scene body. Either a JSON string or an object of the shape {conditions, actions} — an object is JSON.stringify\'d. Both blocks must be Lua SOURCE STRINGS; a structured value in either is refused, with the correct Lua printed in the error. OPTIONAL for a lua scene only in the sense that omitting it creates an EMPTY scene: HC3 itself rejects a create with no content, so this tool supplies a body that subscribes to nothing (conditions "{ conditions = {}, operator = \\"all\\" }", actions "") and reports contentDefaulted:true. Populate it afterwards with update_scene_content. For type "scenario" nothing is defaulted.' },
+            restart: { type: 'boolean', description: 'Concurrency control. A scene runs ONE instance at a time; restart=true (the default) means an incoming trigger kills the running instance, false means the running instance is protected and the trigger is dropped. Read back after creation and reported as `restartWarning` if HC3 did not apply it.' },
+            maxRunningInstances: { type: 'number', description: 'Default 1. Vestigial — an HC2 leftover that does nothing on HC3. Do not design around it.' },
             enabled: { type: 'boolean', description: 'Default true.' },
             hidden: { type: 'boolean', description: 'Default false.' },
             icon: { type: 'string', description: 'Icon id. Default "scene_icon_icon_scene1".' },
@@ -427,6 +461,7 @@ export const scenes: ToolModule = {
       type: string;
       roomId?: number;
       content?: any;
+      restart?: boolean;
       maxRunningInstances?: number;
       enabled?: boolean;
       hidden?: boolean;
@@ -452,14 +487,27 @@ export const scenes: ToolModule = {
         enabled: args.enabled !== false,
         hidden: !!args.hidden,
         icon: args.icon ?? 'scene_icon_icon_scene1',
-        restart: true,
+        // Was hardcoded true and the argument did not exist, so a caller who
+        // passed one had it silently dropped — `scripts/probe.mjs`'s
+        // `withScene` has been passing `restart` to this tool all along, and
+        // its comment says a probe about re-entry must not let it vary
+        // silently. It could not vary at all. Nothing already settled turns
+        // on it (no probe ever passed false, so every probe scene got the
+        // true it was asking for), but the knob was inert.
+        restart: args.restart !== false,
         protectedByPin: false,
         stopOnAlarm: false,
         categories: args.categories && args.categories.length > 0 ? args.categories : [1]
       };
+      let contentDefaulted = false;
       if (args.content !== undefined) {
         assertSceneContentBlocks('create_scene', args.content);
         body.content = typeof args.content === 'string' ? args.content : JSON.stringify(args.content);
+      } else if (args.type === 'lua') {
+        // Not silent: reported as `contentDefaulted` below. A substitution the
+        // caller cannot see is the shape this server exists to close.
+        body.content = JSON.stringify(EMPTY_LUA_SCENE_CONTENT);
+        contentDefaulted = true;
       }
       const created: any = await hc3.request('/api/scenes', 'POST', body);
       const newId = created?.id;
@@ -473,7 +521,27 @@ export const scenes: ToolModule = {
       if (after?.type !== args.type) {
         throw new Error(`create_scene: post-create type mismatch. Submitted ${JSON.stringify(args.type)}, stored ${JSON.stringify(after?.type)}.`);
       }
-      return { sceneId: newId, scene: after };
+      // Checked, not thrown on. The scene exists by now, so throwing would
+      // leave an orphan over a concurrency flag; and only when the caller
+      // asked for one explicitly, because asserting HC3's own default is a
+      // claim nobody here has tested.
+      const restartMismatch = args.restart !== undefined && after?.restart !== body.restart
+        ? `create_scene: submitted restart=${body.restart}, HC3 stored restart=${JSON.stringify(after?.restart)}. ` +
+          'The scene was created; the flag was not applied. Set it with modify_scene and read it back.'
+        : null;
+      return {
+        sceneId: newId,
+        scene: after,
+        ...(restartMismatch ? { restartWarning: restartMismatch } : {}),
+        ...(contentDefaulted ? {
+          contentDefaulted: true,
+          note: 'No `content` was supplied, so this scene was created with an empty body — ' +
+            `conditions ${JSON.stringify(EMPTY_LUA_SCENE_CONTENT.conditions)}, actions "". ` +
+            'It subscribes to nothing and does nothing until you write it, which you can do with ' +
+            'update_scene_content. HC3 rejects a create with no content at all, from inside its Lua ' +
+            'engine, naming a line in engine.lua rather than the missing argument.',
+        } : {}),
+      };
     },
 
     async delete_scene(hc3, args: { sceneId: number }): Promise<any> {
@@ -488,13 +556,17 @@ export const scenes: ToolModule = {
         );
       }
       await hc3.request(`/api/scenes/${args.sceneId}`, 'DELETE');
+      let stillExists = false;
       try {
         await hc3.request(`/api/scenes/${args.sceneId}`);
+        stillExists = true;
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
         throw new Error(
           `delete_scene: post-delete verify failed — scene ${args.sceneId} still exists after DELETE.`
         );
-      } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
       }
       return {
         sceneId: args.sceneId,

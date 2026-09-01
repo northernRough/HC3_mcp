@@ -10,6 +10,7 @@
 
 import { ToolModule } from './registry';
 import { MCPTool } from '../types';
+import { isNotFound } from '../hc3-client';
 
 export const deleteGlobalVariableSchema: MCPTool =
       {
@@ -140,17 +141,21 @@ export const globals: ToolModule = {
       }
 
       const encoded = encodeURIComponent(args.varName);
+      // The refusal is raised AFTER the probe, not inside its try. Routing it
+      // through the same catch meant the catch had to recognise its own
+      // sentinel by message prefix to avoid swallowing it, which is one
+      // rename away from silently overwriting a variable.
+      let alreadyExists = false;
       try {
         await hc3.request(`/api/globalVariables/${encoded}`);
+        alreadyExists = true;
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+      }
+      if (alreadyExists) {
         throw new Error(
           `create_global_variable refuses to overwrite: variable '${args.varName}' already exists. Use set_global_variable to update, or delete_global_variable first.`
         );
-      } catch (e: any) {
-        const msg = String(e?.message ?? '');
-        if (!/404|not.?found/i.test(msg) && !msg.startsWith('create_global_variable refuses')) {
-          throw e;
-        }
-        if (msg.startsWith('create_global_variable refuses')) throw e;
       }
 
       const body: Record<string, any> = { name: args.varName, value: valueStr };
@@ -261,13 +266,17 @@ export const globals: ToolModule = {
 
       await hc3.request(`/api/globalVariables/${encoded}`, 'DELETE');
 
+      let stillExists = false;
       try {
         await hc3.request(`/api/globalVariables/${encoded}`);
+        stillExists = true;
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+      }
+      if (stillExists) {
         throw new Error(
           `delete_global_variable: post-delete verify failed — '${args.varName}' still exists after DELETE.`
         );
-      } catch (e: any) {
-        if (!/404|not.?found/i.test(String(e?.message ?? ''))) throw e;
       }
 
       return {

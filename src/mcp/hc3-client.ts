@@ -13,6 +13,54 @@ export interface HC3Config {
   password: string;
 }
 
+/**
+ * A non-2xx answer from HC3, carrying the status as DATA.
+ *
+ * The message names the request, because it did not before. 51 of the 83
+ * failures in this project's own friction log were the bare string
+ * "HTTP 404: Not Found" — no method, no path, no id — from two tools over
+ * seventeen days. HC3 sends an empty body on 404, so there was nothing else on
+ * the line, and `recordFailure` stores only the tool and the message. The
+ * largest cluster in the telemetry was undiagnosable by construction.
+ *
+ * The status is a field rather than only a substring because putting the path
+ * in the message breaks message-scraping. Callers recognised "gone" with
+ * `/404|not.?found/i` against the message, and an id like 4046 or 1404
+ * CONTAINS "404" — so a 500 on /api/devices/4046 would have read as a
+ * successful deletion. Use `isNotFound`, which reads the status.
+ */
+export class HC3HttpError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly method: string;
+  readonly endpoint: string;
+  /** HC3's response body, trimmed. Empty on most 4xx — notably every 404. */
+  readonly body: string;
+
+  constructor(status: number, statusText: string, method: string, endpoint: string, body: string) {
+    super(`HTTP ${status}: ${statusText} (${method} ${endpoint})${body ? ` - ${body}` : ''}`);
+    this.name = 'HC3HttpError';
+    this.status = status;
+    this.statusText = statusText;
+    this.method = method;
+    this.endpoint = endpoint;
+    this.body = body;
+  }
+}
+
+/**
+ * Is this error HC3 saying the thing is not there?
+ *
+ * Status first, so an id containing "404" cannot be mistaken for one. The
+ * message fallback is for errors this server raised itself — tool guards that
+ * say "not found" in prose and never went near the gateway.
+ */
+export function isNotFound(error: unknown): boolean {
+  const status = (error as any)?.status;
+  if (typeof status === 'number') return status === 404;
+  return /404|not.?found/i.test(String((error as any)?.message ?? error ?? ''));
+}
+
 export class HC3Client {
   readonly config: HC3Config;
 
@@ -56,9 +104,7 @@ export class HC3Client {
     const text = await response.text();
 
     if (!response.ok) {
-      const detail = text.trim();
-      const suffix = detail ? ` - ${detail}` : '';
-      throw new Error(`HTTP ${response.status}: ${response.statusText}${suffix}`);
+      throw new HC3HttpError(response.status, response.statusText, method, endpoint, text.trim());
     }
 
     if (!text) {
