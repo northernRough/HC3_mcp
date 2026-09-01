@@ -4,6 +4,7 @@
 // QA + scene + global, so expect 30-90s on typical HC3 installs.
 
 import { ToolModule } from './registry';
+import { isNotFound } from '../hc3-client';
 
 // Match a numeric id as a whole word (so 2494 doesn't match 24941).
 // Use new RegExp on each call to allow per-id construction.
@@ -146,9 +147,9 @@ export const audit: ToolModule = {
         'Z-Wave re-inclusion (or device deletion), is this QA still pointing at real, alive ' +
         'devices?" Walks every file in the QA, extracts every \\b\\d{2,5}\\b numeric token ' +
         '(skipping master device 1 and the SceneManager-style noise patterns; see below), ' +
-        'and classifies each unique id as ALIVE, DEAD, or DELETED via /api/devices/{id} ' +
+        'and classifies each unique id as ALIVE, DEAD, DELETED, or UNKNOWN via /api/devices/{id} ' +
         '(checking properties.dead and properties.deleted, not just the top-level fields ' +
-        'which are usually null even on confirmed-dead devices). Issues are grouped by id ' +
+        'which are usually null even on confirmed-dead devices). UNKNOWN means the lookup itself failed for a reason other than 404 — a timeout, a 5xx, an unreachable gateway — so the id is UNAUDITED rather than gone; it is reported as an issue with the underlying error, and `summary.warning` names the count. Do not act on an UNKNOWN as though it were DELETED. Issues are grouped by id ' +
         'with all source occurrences (file, line, snippet) attached. ' +
         'Stateless audit; does not modify HC3 or local files. ' +
         'Cost: fetches every QA file plus one /api/devices/{id} per unique candidate id; ' +
@@ -593,12 +594,23 @@ export const audit: ToolModule = {
       //   404 → DELETED (device gone from HC3 entirely)
       //   properties.deleted == true OR top-level deleted == true → DELETED
       //   properties.dead == true OR top-level dead == true → DEAD
+      //   any other lookup failure → UNKNOWN (this audit could not check it)
       //   else → ALIVE
+      //
+      // UNKNOWN exists because the alternative is a dangerous false positive.
+      // This branch previously read `if (msg.includes('HTTP 404')) DELETED
+      // else DELETED` — two arms doing the same thing, under a comment saying
+      // the second meant "unknown". So a timeout, a 500, or an unreachable
+      // gateway reported someone's live device as DELETED, which is a report
+      // that invites them to rip out a working binding. Not checking is a
+      // different answer from checking and finding nothing, and only one of
+      // them is safe to act on.
       //
       // Per-id cache so a busy QA file referencing the same id 50 times
       // only triggers one HTTP lookup.
-      const classification = new Map<number, 'ALIVE' | 'DEAD' | 'DELETED'>();
+      const classification = new Map<number, 'ALIVE' | 'DEAD' | 'DELETED' | 'UNKNOWN'>();
       const deviceMeta = new Map<number, { name?: string; type?: string }>();
+      const lookupError = new Map<number, string>();
       for (const id of candidateIds) {
         try {
           const dev = await hc3.request(`/api/devices/${id}`) as any;
@@ -616,12 +628,14 @@ export const audit: ToolModule = {
             deviceMeta.set(id, { name: dev?.name, type: dev?.type });
           }
         } catch (e: any) {
-          const msg = (e?.message ?? '').toString();
-          if (msg.includes('HTTP 404')) {
+          // isNotFound reads the status field rather than scraping the
+          // message: an id like 4046 contains "404", so a message test would
+          // classify a 500 on that device as gone.
+          if (isNotFound(e)) {
             classification.set(id, 'DELETED');
           } else {
-            // Treat any other failure as unknown — record but don't block.
-            classification.set(id, 'DELETED');
+            classification.set(id, 'UNKNOWN');
+            lookupError.set(id, String(e?.message ?? e).slice(0, 200));
           }
         }
       }
@@ -629,35 +643,41 @@ export const audit: ToolModule = {
       // 5. Group hits by id; report only DEAD / DELETED issues (alive ids
       // are summarised in stats but not enumerated — the caller doesn't
       // need a list of every healthy reference).
-      type Issue = { kind: 'DEAD' | 'DELETED'; id: number; name?: string; type?: string; files: Array<{ fileName: string; line: number; snippet: string }> };
+      type Issue = { kind: 'DEAD' | 'DELETED' | 'UNKNOWN'; id: number; name?: string; type?: string; error?: string; files: Array<{ fileName: string; line: number; snippet: string }> };
       const issuesById = new Map<number, Issue>();
       for (const fileGroup of occurrencesByFile) {
         for (const occ of fileGroup.perLine) {
           for (const id of occ.ids) {
             const cls = classification.get(id);
-            if (cls !== 'DEAD' && cls !== 'DELETED') continue;
+            if (cls !== 'DEAD' && cls !== 'DELETED' && cls !== 'UNKNOWN') continue;
             const meta = deviceMeta.get(id);
             let issue = issuesById.get(id);
             if (!issue) {
-              issue = { kind: cls, id, name: meta?.name, type: meta?.type, files: [] };
+              issue = {
+                kind: cls, id, name: meta?.name, type: meta?.type,
+                ...(cls === 'UNKNOWN' ? { error: lookupError.get(id) } : {}),
+                files: [],
+              };
               issuesById.set(id, issue);
             }
             issue.files.push({ fileName: fileGroup.name, line: occ.line, snippet: occ.snippet });
           }
         }
       }
-      const issues = Array.from(issuesById.values()).sort((a, b) => {
-        // DEAD first (recoverable), then DELETED (gone), then by id ascending.
-        if (a.kind !== b.kind) return a.kind === 'DEAD' ? -1 : 1;
-        return a.id - b.id;
-      });
+      // DEAD first (recoverable), then DELETED (gone), then UNKNOWN (not
+      // checked). UNKNOWN sorts last because it is the only kind that is not a
+      // statement about the device — it is a statement about this audit.
+      const order = { DEAD: 0, DELETED: 1, UNKNOWN: 2 } as const;
+      const issues = Array.from(issuesById.values()).sort((a, b) =>
+        order[a.kind] - order[b.kind] || a.id - b.id);
 
       // 6. Tally summary counts from the classification map.
-      let alive = 0, dead = 0, deleted = 0;
+      let alive = 0, dead = 0, deleted = 0, unknown = 0;
       for (const cls of classification.values()) {
         if (cls === 'ALIVE') alive++;
         else if (cls === 'DEAD') dead++;
         else if (cls === 'DELETED') deleted++;
+        else if (cls === 'UNKNOWN') unknown++;
       }
 
       // Optional: bind-aware mode parses bind("RoleStem", { ... }) descriptors
@@ -676,6 +696,12 @@ export const audit: ToolModule = {
           alive,
           dead,
           deleted,
+          unknown,
+          ...(unknown > 0 ? {
+            warning: `${unknown} id(s) could not be checked — the lookup failed for a reason other than "not found". ` +
+              'They are listed in `issues` with kind UNKNOWN and the underlying error. Treat them as unaudited, ' +
+              'NOT as deleted: this audit has no opinion on whether those devices exist.',
+          } : {}),
         },
         issues,
         bindAware: bindAwareBlock,

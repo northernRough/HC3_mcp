@@ -2,6 +2,30 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.33.0] - 2026-09-01
+
+### Fixed
+
+- **`audit_qa_devices` reported unreachable devices as DELETED.** The lookup
+  catch read `if (msg.includes('HTTP 404')) DELETED else DELETED` -- two arms
+  doing the same thing, under a comment saying the second meant "unknown".
+  Behaviour-neutral dead branching, and a dangerous default: a timeout, a 5xx
+  or an unreachable gateway told the caller their live device was gone from
+  HC3, which is a report that invites someone to rip a working binding out of
+  a QuickApp. Not checking is a different answer from checking and finding
+  nothing, and only one of the two is safe to act on.
+
+  There is now an `UNKNOWN` classification. A 404 still means DELETED; any
+  other lookup failure means the id is UNAUDITED. Unknowns are counted in
+  `summary.unknown`, listed in `issues` with the underlying error so the
+  failure can be diagnosed, sorted last (they are a statement about the audit,
+  not about the device), and carry a `summary.warning` saying in terms that
+  they must not be treated as deleted.
+
+  The 404 test also moved off message-scraping to `isNotFound`, which reads
+  the status field: an id like 4046 CONTAINS "404", so the old test classified
+  a 500 on that device as gone. Pinned by a test using exactly that id.
+
 ## [4.32.0] - 2026-09-01
 
 Friction triage, item 6: the 31 August batch, and the one thing in it that was
