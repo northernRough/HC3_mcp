@@ -2,6 +2,66 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.32.0] - 2026-09-01
+
+Friction triage, item 6: the 31 August batch, and the one thing in it that was
+a missing capability rather than a defect.
+
+### Added
+
+- **`upload_icon` takes an `overlay`: composite a badge server-side.** Both
+  images resolve through the same path `fromIcon` already uses, so a badge
+  built from two icons already on the gateway needs no payload at all and
+  neither picture passes through the conversation.
+
+  4.26.0 closed the adjacent case -- `fromIcon` reuses an icon UNCHANGED --
+  and the reporter said at the time that it does not help when the image must
+  be MODIFIED, which is what a badge is. That case still meant get_icon ->
+  edit locally -> re-type 8-15 KB of base64. Cost: about two hours in one
+  session, almost all of it transcription, verification and repair rather than
+  design, and it had already happened twice.
+
+  The mechanism from that finding is worth keeping: transcription accuracy
+  depends on DISTANCE from the tool result. Copying straight from a fresh
+  result succeeded twice; copying the same payload from further back in the
+  same conversation failed three times, twice with damage that
+  single-character repair could not recover.
+
+  `overlay` takes `base64` or `fromIcon`, plus `scale` (fraction of the base's
+  smaller side, default 0.4), `corner` (default bottom-right) and `margin`.
+  The badge keeps its own aspect ratio -- forcing it square would distort
+  artwork silently. It is applied to EVERY frame of a state set, because a
+  badge on only some frames would flicker on and off as the device value
+  changes, which the caller cannot see from here.
+
+  PNG only. Compositing SVG means either rasterising it (losing the point of
+  SVG) or splicing XML with a real parser and a viewBox transform; refused
+  with the reason rather than half-done.
+
+- **A PNG codec in `png.ts`** -- decode to RGBA, box-downscale, source-over
+  composite, re-encode. No new dependencies: node's zlib does the deflate and
+  the rest is in the file, which is a deliberate constraint of this fork.
+
+  Colour types 0/2/3/4/6, bit depths 1/2/4/8/16, all five row filters, PLTE
+  and tRNS. Interlaced files are REFUSED rather than mis-decoded: a wrong
+  Adam7 de-interlace produces a scrambled image that still uploads and still
+  renders, which is the worst available outcome.
+
+  Downscaling averages in PREMULTIPLIED space. Averaging straight RGBA blends
+  the colour of fully transparent pixels into their neighbours and fringes the
+  badge edge with whatever the transparent background happened to be, usually
+  black.
+
+  Encoding uses the standard minimum-sum-of-absolute-differences filter
+  heuristic across all five types; re-encoding this repo's own `icon.png`
+  comes out smaller than the original.
+
+  The decoder is the risky half, because a subtly wrong decode does not throw
+  -- it produces a plausible image that uploads cleanly and renders wrong on a
+  phone. So `unit-png-compose.mjs` builds its fixtures with zlib directly
+  rather than with `encodePng`: a round-trip through this repo's own encoder
+  would pass even if both halves shared a bug.
+
 ## [4.31.0] - 2026-09-01
 
 Friction triage, item 5: the triage surfaces said `untested` about everything,

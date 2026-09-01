@@ -1002,6 +1002,39 @@ misinformation, because the record was in the ledger and the falsehood was in
 the table, and nobody reads both. **A known limitation in a generated document
 decays into a false claim as soon as the underlying facts move.**
 
+#### Source: report_finding, 31 August 2026 — the third batch
+
+Three findings, from the icon session. Triaged here because the previous
+source section stops at 15 August and this batch had been sitting untriaged
+while its rows were counted in the table above.
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | `manage_plugin_interfaces` refuses a `multilevelSwitch` QuickApp too | The second device type and the fifth recorded failure. Settled in full two sections up; catalogued in KNOWN_DEAD_ENDPOINTS.md. |
+| **confirmed** | `get_icon`/`upload_icon` returned no hash, so a re-typed payload could not be checked before it became a wrong tile | Filed for the record by its own author, noting it was already resolved: `sizeBytes` catches truncation and is blind to substitution, and a flipped base64 character is exactly the same length. **Resolved in 4.26.0** — both return md5. Kept because re-testing it against 4.26.0 will correctly refute it, and without the row the reasoning gets re-derived. |
+| **confirmed** | No tool composites images, so a badged icon had to leave as base64 and be re-typed back | ~2 hours in one session, almost all transcription, verification and repair. Second occurrence (an Irrigation QA icon, then a towel-rail QA icon), so recurring rather than a one-off. **Fixed in 4.32.0** — `upload_icon` takes an `overlay`, both images resolve gateway-side, nothing passes through the conversation. |
+
+The composite finding is worth reading twice, because it names the mechanism
+rather than just the cost: **transcription accuracy depends on DISTANCE from
+the tool result.** Copying a payload straight from a fresh result succeeded
+twice; copying the same payload from further back in the same conversation
+failed three times, twice with damage that single-character repair could not
+recover. That generalises well beyond icons — any tool that hands back a blob
+the caller must hand forward is on a clock.
+
+It also shows the shape of a good near-miss. 4.26.0 fixed the adjacent case
+(`fromIcon`, an icon reused unchanged) and the reporter said plainly that it
+did not help when the image must be MODIFIED. The gap was named accurately at
+the moment the neighbouring fix shipped, and still took a second occurrence to
+close. The single-variable reproduction — same icons, same target, same call,
+"whether the image needs modifying" — is what made it actionable a fortnight
+later without re-testing anything.
+
+And the honest limit was stated in the finding itself: whether HC3 offers a
+server-side image operation that would avoid this was never tested. Still
+untested. The fix does the compositing here rather than claiming the gateway
+cannot.
+
 <!-- END manual ledger -->
 
 

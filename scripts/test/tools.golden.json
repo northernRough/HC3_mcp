@@ -3168,6 +3168,64 @@
             "icon"
           ]
         },
+        "overlay": {
+          "type": "object",
+          "description": "Composite a badge onto the image BEFORE upload, on the server, so neither picture passes through the conversation. The badge is itself `base64` or a `fromIcon` reference, so a badge built from two icons already on the gateway needs no payload at all. PNG only. Applied to every frame of a state set, so the badge cannot flicker on and off as the device value changes. This closes the case `fromIcon` does not: it reuses an icon UNCHANGED, and a badge is a modification, which previously meant get_icon -> edit locally -> re-type 8-15 KB of base64.",
+          "properties": {
+            "base64": {
+              "type": "string",
+              "description": "The badge image, base64 PNG."
+            },
+            "fromIcon": {
+              "type": "object",
+              "description": "The badge taken from an icon already on this gateway. Same shape as the top-level fromIcon.",
+              "properties": {
+                "icon": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "room",
+                    "scene",
+                    "device"
+                  ]
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "userIcon": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "icon"
+              ]
+            },
+            "scale": {
+              "type": "number",
+              "description": "Badge size as a fraction of the base image's smaller side. Default 0.4. The badge keeps its own aspect ratio."
+            },
+            "corner": {
+              "type": "string",
+              "enum": [
+                "top-left",
+                "top-right",
+                "bottom-left",
+                "bottom-right",
+                "centre"
+              ],
+              "description": "Where the badge sits. Default \"bottom-right\"."
+            },
+            "margin": {
+              "type": "number",
+              "description": "Whole pixels between badge and edge. Default 0."
+            }
+          }
+        },
         "statesOff": {
           "description": "Shorthand, with statesOn, for a device state set: the image for state 0. Either a base64 string or an { icon } reference. Expanded server-side to the full set the device type requires, so a dimmer needs two images here rather than eleven."
         },

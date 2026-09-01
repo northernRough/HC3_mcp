@@ -31,7 +31,7 @@
 
 import { ToolModule } from './registry';
 import { bytesHash } from '../util';
-import { inspectPng } from '../png';
+import { inspectPng, decodePng, encodePng, scaleRaster, compositeOver, placeBadge, Corner } from '../png';
 import { HC3Client } from '../hc3-client';
 
 
@@ -209,6 +209,83 @@ async function resolveSource(
   return { bytes: fetched.buf, ext: fetched.ext };
 }
 
+export interface IconOverlay {
+  base64?: string;
+  fromIcon?: IconRef;
+  /** Badge width as a fraction of the base's smaller side. Default 0.4. */
+  scale?: number;
+  corner?: Corner;
+  /** Pixels between the badge and the base's edge. Default 0. */
+  margin?: number;
+}
+
+/**
+ * Composite a badge onto an icon, server-side.
+ *
+ * `fromIcon` already moves an UNCHANGED icon gateway-to-gateway with no base64
+ * in the conversation. The gap this closes is the modified case: a badge —
+ * one existing icon scaled into the corner of another — still had to leave via
+ * get_icon, be edited locally, and be re-typed back as base64. That cost about
+ * two hours in one session and had already happened twice, almost all of it
+ * transcription and repair rather than design.
+ *
+ * Both images are resolved through the same `resolveSource` as everything else
+ * here, so the badge can itself be a reference and the whole operation can run
+ * with no payload at all.
+ *
+ * PNG only, and deliberately so. Compositing SVG means either rasterising it
+ * (throwing away the reason to use SVG) or splicing XML (which needs a real
+ * parser and a viewBox transform to be correct). Refused with the reason
+ * rather than half-done.
+ */
+async function applyOverlay(
+  hc3: HC3Client,
+  baseBytes: Buffer,
+  overlay: IconOverlay,
+  where: string,
+  ext: string,
+): Promise<Buffer> {
+  if (ext !== 'png') {
+    throw new Error(
+      `upload_icon: overlay is only supported for PNG, and ${where} is .${ext}. ` +
+      'Compositing SVG would mean rasterising it (losing the point of SVG) or splicing XML, ' +
+      'neither of which this server does. Supply a PNG base, or composite the SVG yourself.'
+    );
+  }
+  if (!overlay.base64 && !overlay.fromIcon) {
+    throw new Error('upload_icon: overlay needs base64 or fromIcon — the image to place on top.');
+  }
+  if (overlay.base64 && overlay.fromIcon) {
+    throw new Error('upload_icon: overlay takes either base64 or fromIcon, not both.');
+  }
+  const scale = overlay.scale ?? 0.4;
+  if (!(scale > 0 && scale <= 1)) {
+    throw new Error(`upload_icon: overlay.scale must be greater than 0 and at most 1 (got ${scale}).`);
+  }
+  const margin = overlay.margin ?? 0;
+  if (!Number.isInteger(margin) || margin < 0) {
+    throw new Error(`upload_icon: overlay.margin must be a non-negative whole number of pixels (got ${margin}).`);
+  }
+
+  const source = (overlay.base64 ?? overlay.fromIcon) as string | IconRef;
+  const badgeSrc = await resolveSource(hc3, source, 'the overlay', 'png');
+  assertExtMatches(badgeSrc.ext, 'png', 'the overlay', source);
+
+  const base = decodePng(baseBytes, `${where} (overlay base)`);
+  const badge = decodePng(badgeSrc.bytes, 'the overlay image');
+
+  const target = Math.max(1, Math.round(Math.min(base.width, base.height) * scale));
+  // Preserve the badge's own aspect ratio: forcing it square would distort
+  // artwork that is not, and the caller cannot see that it happened.
+  const ratio = badge.width / badge.height;
+  const bw = ratio >= 1 ? target : Math.max(1, Math.round(target * ratio));
+  const bh = ratio >= 1 ? Math.max(1, Math.round(target / ratio)) : target;
+
+  const scaled = badge.width === bw && badge.height === bh ? badge : scaleRaster(badge, bw, bh);
+  const at = placeBadge(base, scaled, overlay.corner ?? 'bottom-right', margin);
+  return encodePng(compositeOver(base, scaled, at.x, at.y));
+}
+
 /**
  * A referenced icon carries its own extension, and it will not always be the
  * one the caller declared. Uploading an SVG's bytes under `image/png` puts a
@@ -304,7 +381,18 @@ export const icons: ToolModule = {
           properties: {
             base64: { type: 'string', description: 'Base64-encoded image bytes (no data URL prefix). The right field for **room and scene** icons, and for **device** types that hold a single image (com.fibaro.genericDevice, i.e. a QuickApp tile). Device types that hold a state set take `states` instead. PNG must be exactly 128×128; colour type does not matter, RGBA is what most icons already on a live gateway use. SVG is uploaded as-is.' },
             fromIcon: { type: 'object', description: 'Single image taken from an icon ALREADY ON THIS GATEWAY instead of pasted as base64 — A reference to an icon already on this HC3: { icon, category?, extension?, userIcon?, state? }. `icon` is the name from list_icons (device[].iconSetName). `category` defaults to "device", `state` picks one file out of a set, and `userIcon` is inferred from the name — User<N> is a user icon, anything else is built-in — unless you state it.', properties: { icon: { type: 'string' }, category: { type: 'string', enum: ['room', 'scene', 'device'] }, extension: { type: 'string' }, userIcon: { type: 'boolean' }, state: { type: 'number' } }, required: ['icon'] },
-            statesOff: { description: 'Shorthand, with statesOn, for a device state set: the image for state 0. Either a base64 string or an { icon } reference. Expanded server-side to the full set the device type requires, so a dimmer needs two images here rather than eleven.' },
+
+            overlay: {
+              type: 'object',
+              description: 'Composite a badge onto the image BEFORE upload, on the server, so neither picture passes through the conversation. The badge is itself `base64` or a `fromIcon` reference, so a badge built from two icons already on the gateway needs no payload at all. PNG only. Applied to every frame of a state set, so the badge cannot flicker on and off as the device value changes. This closes the case `fromIcon` does not: it reuses an icon UNCHANGED, and a badge is a modification, which previously meant get_icon -> edit locally -> re-type 8-15 KB of base64.',
+              properties: {
+                base64: { type: 'string', description: 'The badge image, base64 PNG.' },
+                fromIcon: { type: 'object', description: 'The badge taken from an icon already on this gateway. Same shape as the top-level fromIcon.', properties: { icon: { type: 'string' }, category: { type: 'string', enum: ['room', 'scene', 'device'] }, extension: { type: 'string' }, userIcon: { type: 'boolean' }, state: { type: 'number' } }, required: ['icon'] },
+                scale: { type: 'number', description: 'Badge size as a fraction of the base image\'s smaller side. Default 0.4. The badge keeps its own aspect ratio.' },
+                corner: { type: 'string', enum: ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'centre'], description: 'Where the badge sits. Default "bottom-right".' },
+                margin: { type: 'number', description: 'Whole pixels between badge and edge. Default 0.' }
+              }
+            },            statesOff: { description: 'Shorthand, with statesOn, for a device state set: the image for state 0. Either a base64 string or an { icon } reference. Expanded server-side to the full set the device type requires, so a dimmer needs two images here rather than eleven.' },
             statesOn: { description: 'Shorthand, with statesOff, for a device state set: the image for every non-zero state. Either a base64 string or an { icon } reference. binarySwitch fills state 100; multilevelSwitch fills 10 through 100 with the same image, which is what a dimmer icon almost always wants.' },
             states: { type: 'object', description: 'For **device** icons whose type holds a state set: a map of device state → image, where each image is a base64 string OR an { icon } reference to something already on this gateway, e.g. { "0": "<off>", "100": { icon: "User1026" } }. HC3 stores these as User<N>0.png / User<N>100.png and picks one by the device\'s value. Keys must be integers, and the set must be complete for the type (binarySwitch 0/100, multilevelSwitch 0,10,…,100). A state-set type uploaded as one bare image registers and attaches, then renders blank.' },
             mime: { type: 'string', description: '"image/png" or "image/svg+xml". Applies to every state image.' },
@@ -406,6 +494,7 @@ export const icons: ToolModule = {
     async upload_icon(hc3, args: {
       base64?: string;
       fromIcon?: IconRef;
+      overlay?: IconOverlay;
       states?: Record<string, string | IconRef>;
       statesOff?: string | IconRef;
       statesOn?: string | IconRef;
@@ -579,21 +668,30 @@ export const icons: ToolModule = {
           const source = states![k];
           const resolved = await resolveSource(hc3, source, `state '${k}'`, ext);
           assertExtMatches(resolved.ext, ext, `state '${k}'`, source);
-          validatePng(resolved.bytes, `state '${k}'`);
+          // Every frame gets the same badge. A state set that carried it on
+          // only some frames would flicker the badge on and off as the device
+          // changes value, which is not something the caller could see here.
+          const bytes = args.overlay
+            ? await applyOverlay(hc3, resolved.bytes, args.overlay, `state '${k}'`, ext)
+            : resolved.bytes;
+          validatePng(bytes, `state '${k}'`);
           frames.push({
             part: `icon${k}`,
             state: k,
-            bytes: resolved.bytes,
+            bytes,
             ...(typeof source === 'object' ? { fromIcon: source.icon } : {}),
           });
         }
       } else {
         const resolved = await resolveSource(hc3, single as string | IconRef, 'the image', ext);
         assertExtMatches(resolved.ext, ext, 'the image', single as string | IconRef);
-        validatePng(resolved.bytes, 'the image');
+        const bytes = args.overlay
+          ? await applyOverlay(hc3, resolved.bytes, args.overlay, 'the image', ext)
+          : resolved.bytes;
+        validatePng(bytes, 'the image');
         frames.push({
           part: 'icon',
-          bytes: resolved.bytes,
+          bytes,
           ...(typeof single === 'object' ? { fromIcon: (single as IconRef).icon } : {}),
         });
       }
