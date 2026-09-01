@@ -36,7 +36,6 @@
     "so they can be pruned. Do not delete a `refuted` entry — that is the one",
     "this whole file exists to preserve."
   ],
-
   "failures": [
     {
       "tool": "get_device_property",
@@ -143,7 +142,6 @@
       "note": "Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own."
     }
   ],
-
   "findings": [
     {
       "at": 1788215794,
@@ -160,6 +158,82 @@
       "resolvedIn": "4.21.2",
       "resolvedAt": 1786838399,
       "note": "The wrong-negative in get_icon's own error text. See the failures entry for the same defect."
+    },
+    {
+      "at": 1786491508,
+      "tool": "general",
+      "verdict": "by-design",
+      "note": "Not a finding: the `statedir-check` self-test, filed to prove the finding channel survives a restart. Kept so nobody re-investigates it as a defect."
+    },
+    {
+      "at": 1786649205,
+      "tool": "create_scene",
+      "verdict": "confirmed",
+      "resolvedIn": "4.29.0",
+      "resolvedAt": 1788307199,
+      "note": "`content` documented as optional; omitting it drew a Lua-engine 400 about a nil `conditions`. create_scene now supplies an empty body that subscribes to nothing and reports contentDefaulted."
+    },
+    {
+      "at": 1786802191,
+      "tool": "get_hc3_quickapp_programming_guide",
+      "verdict": "confirmed",
+      "note": "Settled 15 Aug by scripts/probe-uicallbacks.mjs. A real tap ALWAYS dispatches to UIAction positionally, whatever uiCallbacks registers; only call_ui_event honours the registered name and passes an event table. This report was right and this file's own model was wrong. Consequences applied to call_ui_event and modify_device descriptions."
+    },
+    {
+      "at": 1786802225,
+      "tool": "patch_quickapp_file",
+      "verdict": "confirmed",
+      "note": "Client-side, no server fix available: a tool going unreachable mid-session is the documented stale-schema symptom — schemas cache at connect and a reconnect may not refresh them. Recorded rather than fixed."
+    },
+    {
+      "at": 1786809934,
+      "tool": "manage_plugin_interfaces",
+      "verdict": "confirmed",
+      "resolvedIn": "4.30.0",
+      "resolvedAt": 1788307199,
+      "note": "Settled 1 Sep on device 3385: the refusal is blanket, not per-interface, per-direction or per-device-class. Endpoint catalogued in KNOWN_DEAD_ENDPOINTS.md and the tool now carries it."
+    },
+    {
+      "at": 1786809955,
+      "tool": "manage_plugin_interfaces",
+      "verdict": "confirmed",
+      "resolvedIn": "4.30.0",
+      "resolvedAt": 1788307199,
+      "note": "The three-variant isolation in this report was correct. The missing device-class arm was run on 3385 on 1 Sep and agreed."
+    },
+    {
+      "at": 1786827802,
+      "tool": "call_ui_event",
+      "verdict": "confirmed",
+      "note": "Settled 15 Aug by scripts/probe-uicallbacks.mjs, twelve cells through the tool against eighteen real taps. The tool is more generous than reality on BOTH axes. Its own description now says so, and modify_device's end-to-end guarantee was withdrawn."
+    },
+    {
+      "at": 1788215133,
+      "tool": "manage_plugin_interfaces",
+      "verdict": "confirmed",
+      "resolvedIn": "4.30.0",
+      "resolvedAt": 1788307199,
+      "note": "The second device type and fifth recorded failure, which is what made the pattern worth settling."
+    },
+    {
+      "at": 1788215774,
+      "tool": "general",
+      "verdict": "confirmed",
+      "resolvedIn": "4.32.0",
+      "resolvedAt": 1788307199,
+      "note": "No tool composited images, so a badged icon had to leave as base64 and be re-typed back. upload_icon now takes an `overlay`; both images resolve gateway-side and nothing passes through the conversation."
+    },
+    {
+      "at": 1786649217,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Settled 1 Sep by scripts/probe-scene-variables.mjs on scene 670. All four REST spellings return 501 with an empty body — and so does a deliberately nonsensical sub-path on the same scene, which is the control that makes the result mean something: this is an unrouted path, not a feature that exists and refuses. The scene-variable tool is UNBUILDABLE, not unbuilt; the gap is struck rather than carried. Says nothing about fibaro.setSceneVariable, which never goes through REST."
+    },
+    {
+      "at": 1786649240,
+      "tool": "get_ios_devices",
+      "verdict": "confirmed",
+      "note": "Settled 1 Sep by scripts/probe-ios-device-by-id.mjs. GET /api/iosDevices/951 returned all 14 registered devices, byte-identical to the bare list (1284 bytes both ways) — the id segment is ignored. Worse than a 404 because it looks like it worked: anything taking the first element gets device 937 whatever it asked for. The DELETE shape the report also names was NOT probed; it would deregister a real phone."
     }
   ]
 }

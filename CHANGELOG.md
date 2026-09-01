@@ -2,6 +2,52 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.33.1] - 2026-09-01
+
+### Changed
+
+- **Eleven friction findings gained a verdict**, so the generated table and
+  `hc3://friction` stop calling settled work open. Nine were already settled
+  in FRICTION.md's hand-written ledger and had simply never reached
+  `friction-verdicts.json` -- the ledger said one thing, the generated section
+  said `untested`, and nobody reads both. That is precisely the drift 4.31.0
+  was built to stop, one level down: a register only helps if the verdicts
+  reach it.
+
+  The other two were settled by running the probes. **8 findings remain
+  genuinely untested**, down from a first count of 19 that was itself wrong
+  until the transcription happened.
+
+### Added
+
+- **`scripts/probe-scene-variables.mjs`** and
+  **`scripts/probe-ios-device-by-id.mjs`** -- two read-only probes, both
+  claims outstanding since 13 August.
+
+  Scene variables: **CONFIRMED, and a roadmap gap is struck.** Four REST
+  spellings on scene 670, all 501-empty. The result rests on the controls
+  rather than the arms -- a known-good path returned 200 and a deliberately
+  nonsensical sub-path on the same scene returned the identical 501-empty. An
+  arm matching the nonsense path means NO ROUTE, which is a different fact
+  from "route exists, not implemented" and leads to a different decision. The
+  scene-variable tool is **unbuildable, not unbuilt**; the gap is struck
+  through with its evidence rather than deleted, so it is not proposed again.
+  Says nothing about `fibaro.setSceneVariable`, which never goes through REST.
+
+  `GET /api/iosDevices/{id}`: **CONFIRMED.** Asked for device 951, got all 14
+  registered devices, byte-identical to the bare list. The id segment is
+  ignored, which is worse than a 404 because it looks like it worked -- any
+  caller taking the first element gets device 937 whatever it asked for. The
+  probe asks for the SECOND device deliberately: asking for the first returns
+  something indistinguishable from a correctly-honoured id. This matters
+  because `get_ios_devices` would feed a push tool, and the push finding says
+  the two push mechanisms take different id kinds and fail silently on the
+  wrong one.
+
+  Neither probe writes. The `DELETE /iosDevices/{id}?udid=` arm the report
+  also names is deliberately not run: it would deregister a real phone to
+  confirm a convenience.
+
 ## [4.33.0] - 2026-09-01
 
 ### Fixed

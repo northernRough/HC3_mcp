@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-09-01 00:33 UTC from 106 entries at `~/.hc3-mcp/friction.jsonl`._
+_Generated 2026-09-01 00:55 UTC from 106 entries at `~/.hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -116,7 +116,10 @@ _Reported by Claude Code session with nick, 2026-08-31; fix shipped in 4.26.0 th
 ### `general` — 0d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.32.0
+
+
+_No tool composited images, so a badged icon had to leave as base64 and be re-typed back. upload_icon now takes an `overlay`; both images resolve gateway-side and nothing passes through the conversation._
 
 
 **Expected:** A way to build a composite icon — one icon scaled and overlaid as a badge on another — without the image bytes passing through the conversation. Both source icons already exist on the gateway, so nothing about the task requires a human or a model to handle base64.
@@ -147,7 +150,10 @@ _Reported by Claude Code session with nick, 2026-08-31, following the 4.26.0 ico
 ### `manage_plugin_interfaces` — 0d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.30.0
+
+
+_The second device type and fifth recorded failure, which is what made the pattern worth settling._
 
 
 **Expected:** Interfaces removed from the QuickApp device, removing the Auto off card and Favourite position button from its sheet.
@@ -285,7 +291,10 @@ _Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
 ### `call_ui_event` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
+
+
+_Settled 15 Aug by scripts/probe-uicallbacks.mjs, twelve cells through the tool against eighteen real taps. The tool is more generous than reality on BOTH axes. Its own description now says so, and modify_device's end-to-end guarantee was withdrawn._
 
 
 **Expected:** That call_ui_event dispatches a UI event the way a user's tap does, since its own description recommends it as a verification step ("this is the tool people reach for *as* a verification step") and reports boundCallback to prove the element is wired.
@@ -346,7 +355,10 @@ _Reported by Claude, Shading QA migration, attaching the Awning icon to QA 4953_
 ### `manage_plugin_interfaces` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.30.0
+
+
+_The three-variant isolation in this report was correct. The missing device-class arm was run on 3385 on 1 Sep and agreed._
 
 
 **Expected:** Narrowing to a single interface, or switching action from delete to add, changes the outcome, telling us whether the refusal is per-interface or blanket.
@@ -369,7 +381,10 @@ _Reported by Claude, Shading QA migration, follow-up isolation on QA 4952_
 ### `manage_plugin_interfaces` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.30.0
+
+
+_Settled 1 Sep on device 3385: the refusal is blanket, not per-interface, per-direction or per-device-class. Endpoint catalogued in KNOWN_DEAD_ENDPOINTS.md and the tool now carries it._
 
 
 **Expected:** manage_plugin_interfaces action="delete" removes the named interfaces from a QuickApp, or refuses with a reason naming which interface cannot be removed.
@@ -422,7 +437,10 @@ _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 ### `patch_quickapp_file` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
+
+
+_Client-side, no server fix available: a tool going unreachable mid-session is the documented stale-schema symptom — schemas cache at connect and a reconnect may not refresh them. Recorded rather than fixed._
 
 
 **Expected:** Either that a tool used earlier in a session stays reachable, or that tool_search can reliably load it back when queried with its own description text. A tool that works and then cannot be found again by any phrasing is indistinguishable from the tool having been withdrawn.
@@ -489,7 +507,10 @@ _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 ### `get_hc3_quickapp_programming_guide` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
+
+
+_Settled 15 Aug by scripts/probe-uicallbacks.mjs. A real tap ALWAYS dispatches to UIAction positionally, whatever uiCallbacks registers; only call_ui_event honours the registered name and passes an event table. This report was right and this file's own model was wrong. Consequences applied to call_ui_event and modify_device descriptions._
 
 
 **Expected:** Either that the callback name in uiCallbacks is honoured and QuickApp:seedlingZonesChanged is invoked with an event table, per the documented QuickApp UI model where each element routes to its own named callback; or that the guide states plainly that named callbacks are not honoured per-element and every element arrives at UIAction positionally.
@@ -525,7 +546,10 @@ _Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
 ### `get_ios_devices` — 18d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
+
+
+_Settled 1 Sep by scripts/probe-ios-device-by-id.mjs. GET /api/iosDevices/951 returned all 14 registered devices, byte-identical to the bare list (1284 bytes both ways) — the id segment is ignored. Worse than a 404 because it looks like it worked: anything taking the first element gets device 937 whatever it asked for. The DELETE shape the report also names was NOT probed; it would deregister a real phone._
 
 
 **Expected:** A per-id GET on a collection route returns that one record, or 404. Anything built on it would otherwise appear to work.
@@ -571,7 +595,10 @@ _Reported by Claude, working with Nick (northernRough), 5.210.12_
 ### `general` — 18d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
+
+
+_Settled 1 Sep by scripts/probe-scene-variables.mjs on scene 670. All four REST spellings return 501 with an empty body — and so does a deliberately nonsensical sub-path on the same scene, which is the control that makes the result mean something: this is an unrouted path, not a feature that exists and refuses. The scene-variable tool is UNBUILDABLE, not unbuilt; the gap is struck rather than carried. Says nothing about fibaro.setSceneVariable, which never goes through REST._
 
 
 **Expected:** Some REST path reaches scene variables, so the MCP could offer a get/set tool for them the way it does for globalVariables and quickAppVariables.
@@ -594,7 +621,10 @@ _Reported by Claude, working with Nick (northernRough), 5.210.12_
 ### `create_scene` — 18d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.29.0
+
+
+_`content` documented as optional; omitting it drew a Lua-engine 400 about a nil `conditions`. create_scene now supplies an empty body that subscribes to nothing and reports contentDefaulted._
 
 
 **Expected:** create_scene documents `content` as optional ("Scene body. String or object"), so omitting it should create an empty scene ready to be populated by update_scene_content.
@@ -617,7 +647,10 @@ _Reported by Claude, working with Nick (northernRough), 5.210.12_
 ### `general` — 20d ago
 
 
-**Verdict:** untested
+**Verdict:** by-design
+
+
+_Not a finding: the `statedir-check` self-test, filed to prove the finding channel survives a restart. Kept so nobody re-investigates it as a defect._
 
 
 **Expected:** friction log survives a restart
@@ -782,9 +815,16 @@ re-running the top produces the same symptom.
 ### Gaps this exposed in the server
 
 - No push-sending tool, so the verified push routing rules have nowhere to live.
-- No scene-variable tool, despite "scene variables beat globals" being sound.
-  **May be unbuildable**: scene variables are reported to have no REST API at all
-  (jgab, forum topic 79129), untested here. Settle that before promising the tool.
+- ~~No scene-variable tool, despite "scene variables beat globals" being sound.~~
+  **UNBUILDABLE — settled 1 Sep 2026, gap struck.** `scripts/probe-scene-variables.mjs`
+  on scene 670: all four REST spellings return 501 with an empty body, and so
+  does a deliberately nonsensical sub-path on the same scene. That control is
+  what makes it evidence — the arms match an unrouted path, not a feature that
+  exists and refuses. The claim was attributed to jgab (forum topic 79129) and
+  had gone untested for nineteen days while the gap sat on a list as though
+  someone would get to it. Struck rather than deleted, so it is not proposed
+  again. `fibaro.setSceneVariable` still works inside a running scene; it never
+  goes through REST, and both facts are true at once.
 - ~~`update_quickapp_file` still echoes HC3's PUT response~~ — **closed in
   4.19.0**, which is recorded four rows up in this same file: both file-write
   tools return `bytes` + `contentHash`, taken from the verify fetch they were
@@ -827,9 +867,9 @@ compared them.
 |---|---|
 | ~~`manage_plugin_interfaces` returns a bare `HTTP 403` for add *and* delete, single and multi, device unchanged~~ | **Settled 1 Sep 2026 — see below.** Confirmed, the missing device-class arm was run on 3385, and the endpoint is catalogued in KNOWN_DEAD_ENDPOINTS.md. Carried by the tool in 4.30.0. |
 | ~~`create_scene` documents `content` as optional; omitting it throws a Lua-engine 400 about concatenating a nil `conditions`~~ | **Confirmed and fixed in 4.29.0, 1 Sep 2026** — see the row below. Struck rather than deleted: a stale awaiting-verdict row is the same failure as a stale open-gap row. |
-| Scene variables have **no REST API**: `/scenes/{id}/variables` and three sibling paths all 501-empty, while `fibaro.setSceneVariable` works inside the run | Controls were run: known-bad paths also 501-empty, known-good return 200. If it holds, the scene-variable tool in "Gaps" below is **unbuildable**, and that gap should be struck rather than carried. |
+| ~~Scene variables have **no REST API**~~ | **CONFIRMED 1 Sep 2026** by `scripts/probe-scene-variables.mjs` on scene 670. Four spellings, all 501-empty; known-good control 200, nonsense control 501-empty and identical to the arms. The gap in "Gaps" below is struck: the tool is unbuildable, not unbuilt. |
 | `upload_icon`'s attach hint (`modify_device({properties:{deviceIcon: id}})`) leaves a QuickApp tile **blank**; what renders is `properties.icon = {path, source="HC"}` written from inside the owning QA | A/B on Shading versus Irrigation. Corroborated independently by the `modify_device` post-write verification failure on **Outdoor Mean** in the table above, where `properties.icon` was submitted and did not read back — this server's own guard catching the silent discard. |
-| `GET /iosDevices/{id}` returns the **entire** 15-entry collection, not one record | Anything taking the first element is wrong and looks right. Also reports `DELETE /iosDevices/{id}?udid={udid}` as the only shape that passes validation, which would make a cleanup tool buildable. |
+| ~~`GET /iosDevices/{id}` returns the **entire** collection, not one record~~ | **CONFIRMED 1 Sep 2026** by `scripts/probe-ios-device-by-id.mjs`: asking for id 951 returned all 14 registered devices, byte-identical to the bare list at 1284 bytes. The id segment is ignored. Deliberately asked for the SECOND device, not the first, so "honoured" and "ignored" could not look alike. The `DELETE /iosDevices/{id}?udid={udid}` half is still untested and stays that way here — it would deregister a real phone. |
 | Named `uiCallbacks` dispatched to `UIAction` **positionally**, not to the registered callback, for a `select` with `selectionType "multi"` | **Conflicts with the "Resolved 13 Aug" row above**, whose scratch QA has since been deleted. Sharper than it looks: Irrigation's own source records `UIAction` receiving a single event **table** on 7 Aug and three **positional** args on 15 Aug, same device, same firmware. See the reconciling model below. Do not adopt either way yet. |
 
 #### The uiCallbacks conflict, and a model that fits every observation
@@ -1034,6 +1074,29 @@ And the honest limit was stated in the finding itself: whether HC3 offers a
 server-side image operation that would avoid this was never tested. Still
 untested. The fix does the compositing here rather than claiming the gateway
 cannot.
+
+#### Two read-only probes — 1 Sep 2026
+
+Both had sat in "Awaiting a verdict" since 13 August. Neither needed a write,
+neither took more than a minute, and one of them was quietly holding a roadmap
+item open.
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | Scene variables have no REST route at all | Four spellings on scene 670, every one 501 with an empty body. The result rests on the CONTROLS rather than the arms: a known-good path returned 200, and a deliberately nonsensical sub-path on the same scene returned the identical 501-empty. Matching the nonsense path is the signature of no route, which is a different fact from "route exists, not implemented" and leads to a different decision. **The scene-variable tool is unbuildable and its gap is struck.** |
+| **confirmed** | `GET /api/iosDevices/{id}` returns the whole collection | 14 devices back for a request naming one, byte-identical to the bare list. The probe asks for the SECOND device deliberately: asking for the first would return something indistinguishable from a correctly-honoured id. |
+
+Neither probe writes. The iOS report also named a `DELETE` shape as the only
+one that passes validation, and that arm is deliberately not run: it would
+deregister one of the household's real phones to confirm a convenience.
+
+What this pair is really about is cost asymmetry. Nineteen days of a roadmap
+gap, and a documented per-id read that silently returns the wrong device, both
+resolved by GETs anyone could have run at any point. **The reason they waited
+was not difficulty, it was that nobody had written the probe** — the same
+shape as `manage_plugin_interfaces`, which waited seventeen days for two calls.
+A claim with a reproduction in it is already most of a probe; the remaining
+step is small enough that it should not be a separate decision.
 
 <!-- END manual ledger -->
 
