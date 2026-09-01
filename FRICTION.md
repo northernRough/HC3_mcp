@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-08-31 23:15 UTC from 104 entries at `~/.hc3-mcp/friction.jsonl`._
+_Generated 2026-09-01 00:33 UTC from 106 entries at `~/.hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -11,6 +11,18 @@ gateway and record a verdict:
   refutation gets re-adopted by whoever reads the original report next
 - **untested** — plausible but unverified; must not reach a tool description or
   the server instructions
+- **by-design** — not a defect. The tool saw a call it knew was wrong and
+  refused it. Recorded because calling a working guard an untested candidate
+  wastes the same pass as calling a fixed bug one
+
+Verdicts come from `friction-verdicts.json`; a row with no entry there reads
+`untested`, which is the safe default rather than a claim. **⚠ SEEN SINCE ON
+x.y.z** means the failure was recorded BY a build that already contained its
+claimed fix, so the verdict is wrong and the telemetry is right. That check
+needs the version stamped on the entry (4.31.0 onward); for older entries a
+date-only discrepancy is reported on the console instead, because a release
+date cannot tell a failed fix apart from a gateway that had not been updated
+yet.
 
 `scripts/probe.mjs` provides throwaway objects with guaranteed teardown and a
 `single()` helper for one-variable tests, which is the bar a candidate has to
@@ -27,33 +39,33 @@ cheapest wins available.
 
 | Verdict | Count | Tool | Last | Message |
 |---|---|---|---|---|
-| untested | 29 | `get_device_property` | 0d ago | HTTP 404: Not Found |
-| untested | 22 | `get_device_parameters` | 0d ago | HTTP 404: Not Found |
-| untested | 5 | `manage_plugin_interfaces` | 0d ago | HTTP 403: Forbidden |
-| untested | 3 | `get_icon` | 16d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath |
-| untested | 3 | `upload_icon` | 16d ago | upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g.  |
-| untested | 2 | `filter_devices` | 0d ago | filter_devices requires filters array. |
-| untested | 2 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 2 of 2: The text was not found. It must match byte for byte, including indent |
-| untested | 2 | `get_icon` | 16d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath |
-| untested | 2 | `create_scene` | 16d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
-| untested | 2 | `create_scene` | 18d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua |
-| untested | 1 | `control_device` | 0d ago | Device 5002 (TEMP autooff probe) does not declare action 'setDefault'. Valid actions for this device: configur |
+| confirmed, fixed 4.27.0 | 29 | `get_device_property` | 0d ago | HTTP 404: Not Found <br>_A bare 404 naming neither the device nor the property. The tool now re-reads the device on 404 and says which of the two is missing, listing the properties that exist; HC3HttpError carries the method and path. New occurrences will not match this signature._ |
+| confirmed, fixed 4.27.0 | 22 | `get_device_parameters` | 0d ago | HTTP 404: Not Found <br>_Same bare 404. The opening device read is the tool's only unguarded request, so every one of these was a device that does not exist; it now says so._ |
+| confirmed, fixed 4.30.0 | 7 | `manage_plugin_interfaces` | 0d ago | HTTP 403: Forbidden <br>_The endpoint is refused on 5.210.12 for add and delete, single and multi, on QuickApps of two types AND on non-QuickApp device 3385 — whose interfaces and `modified` timestamp were byte-identical after both arms. Catalogued in KNOWN_DEAD_ENDPOINTS.md; the tool now carries it. Not fixed, because there is nothing here to fix: two of the seven are this project's own probe._ |
+| confirmed, fixed 4.21.2 | 3 | `get_icon` | 16d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
+| confirmed, fixed 4.19.2 | 3 | `upload_icon` | 16d ago | upload_icon: category "device" requires deviceTemplate — the Fibaro device type the icon is filed under, e.g.  <br>_The schema's `required` listed base64/mime/category while the handler refused a device upload without deviceTemplate, so obeying the schema guaranteed the refusal. `required` is now mime/category with the dependent requirement expressed in schema._ |
+| by-design | 2 | `filter_devices` | 0d ago | filter_devices requires filters array. <br>_Argument guard refusing a malformed call before it reaches HC3._ |
+| by-design | 2 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 2 of 2: The text was not found. It must match byte for byte, including indent <br>_A stale or mis-indented `old` refused with nothing written. Working as intended, though a run of these on one file usually means the caller is holding an out-of-date copy._ |
+| confirmed, fixed 4.21.2 | 2 | `get_icon` | 16d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
+| confirmed, fixed 4.18.0 | 2 | `create_scene` | 16d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`conditions` sent as a structure rather than a Lua source string. Refused locally now, with the Lua to send instead printed in the error._ |
+| confirmed, fixed 4.29.0 | 2 | `create_scene` | 18d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`content` omitted. HC3 rejected the create from inside its Lua engine, naming engine.lua rather than the missing argument. create_scene now supplies a body that subscribes to nothing and reports contentDefaulted._ |
+| by-design | 1 | `control_device` | 0d ago | Device 5002 (TEMP autooff probe) does not declare action 'setDefault'. Valid actions for this device: configur <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
 | untested | 1 | `filter_devices` | 0d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"Invalid JSON","message":"get_value< string > called on null  |
-| untested | 1 | `create_scene` | 0d ago | create_scene: roomId is required and must be a valid room id (HC3 rejects roomId=0 on creation). |
-| untested | 1 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 1 of 1: The text was not found. It must match byte for byte, including indent |
-| untested | 1 | `modify_device` | 0d ago | Post-write verification failed for device 4998.
+| by-design | 1 | `create_scene` | 0d ago | create_scene: roomId is required and must be a valid room id (HC3 rejects roomId=0 on creation). <br>_The guard working: HC3 rejects roomId=0 on creation, and this refuses before the call._ |
+| by-design | 1 | `patch_quickapp_file` | 0d ago | patch_quickapp_file refused edit 1 of 1: The text was not found. It must match byte for byte, including indent <br>_A stale or mis-indented `old` refused with nothing written. Working as intended, though a run of these on one file usually means the caller is holding an out-of-date copy._ |
+| confirmed | 1 | `modify_device` | 0d ago | Post-write verification failed for device 4998.
 Mismatched fields:
-  - topLevel.actions: submitted {"autoOn":2 |
-| untested | 1 | `control_device` | 0d ago | Device 4998 (towels) does not declare action 'autoOn'. Valid actions for this device: configureFavoritePositio |
-| untested | 1 | `modify_device` | 15d ago | HTTP 404: Not Found |
-| untested | 1 | `modify_device` | 16d ago | Post-write verification failed for device 4916.
+  - topLevel.actions: submitted {"autoOn":2 <br>_Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own._ |
+| by-design | 1 | `control_device` | 0d ago | Device 4998 (towels) does not declare action 'autoOn'. Valid actions for this device: configureFavoritePositio <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
+| untested | 1 | `modify_device` | 15d ago | HTTP 404: Not Found <br>_Reported as HC3 refusing a `type` change specifically, with the same device accepting topLevel={visible:true}. Not isolated here._ |
+| confirmed | 1 | `modify_device` | 16d ago | Post-write verification failed for device 4916.
 Mismatched fields:
-  - properties.uiView: submitted [{"compone |
-| untested | 1 | `modify_device` | 18d ago | Post-write verification failed for device 4916.
+  - properties.uiView: submitted [{"compone <br>_Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own._ |
+| confirmed | 1 | `modify_device` | 18d ago | Post-write verification failed for device 4916.
 Mismatched fields:
-  - properties.icon: submitted {"path":"/as |
-| untested | 1 | `create_quickapp_variable` | 18d ago | QuickApp variable 'dayLog' already exists on device 4933. Use set_quickapp_variable to update its value. |
-| untested | 1 | `modify_device` | 20d ago | modify_device requires at least one of topLevel or properties with at least one field. |
+  - properties.icon: submitted {"path":"/as <br>_Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own._ |
+| by-design | 1 | `create_quickapp_variable` | 18d ago | QuickApp variable 'dayLog' already exists on device 4933. Use set_quickapp_variable to update its value. <br>_Refusing to overwrite, and naming set_quickapp_variable as the way to update._ |
+| by-design | 1 | `modify_device` | 20d ago | modify_device requires at least one of topLevel or properties with at least one field. <br>_Argument guard._ |
 
 
 ## Submitted findings — 21
@@ -62,7 +74,10 @@ Mismatched fields:
 ### `get_icon` — 0d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.26.0
+
+
+_Filed for the record by its own author, who noted it was already resolved. get_icon and upload_icon return a content hash._
 
 
 **Expected:** get_icon and upload_icon should return a hash of the image bytes, so a caller who has to re-emit an 8-15KB base64 payload by hand can prove the copy is intact before it becomes a wrong tile. sizeBytes alone cannot do this.
@@ -305,7 +320,10 @@ _Reported by Claude, working with Nick, probe-uicallbacks.mjs, 15 Aug 2026_
 ### `get_icon` — 16d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.21.2
+
+
+_The wrong-negative in get_icon's own error text. See the failures entry for the same defect._
 
 
 **Expected:** Either get_icon fetches a user-uploaded device icon, or its negative claim is correct. The claim that no /assets path serves them appears to be false.
@@ -935,11 +953,12 @@ finding because it was never a surprise to anyone. A probe harness accumulates
 verified gateway behaviour as a side effect of testing other things, and it is
 worth reading before assuming a claim is untested.
 
-#### `manage_plugin_interfaces` — as far as it goes without a live write, 1 Sep 2026
+#### `manage_plugin_interfaces` — settled 1 Sep 2026
 
 A third finding arrived on 31 Aug (QA 5001, `com.fibaro.multilevelSwitch`),
-which is the second device type and the fifth recorded failure. That is enough
-to settle the pattern, and not enough to settle the cause.
+the second device type and the fifth recorded failure. That settled the
+pattern. The cause needed the device-class arm, which the operator unblocked
+by nominating device 3385 — and which then took two calls.
 
 | Verdict | Claim | Evidence |
 |---|---|---|
@@ -963,6 +982,25 @@ through two more failures and a third finding, because that sentence was
 filed rather than asked. **When a candidate is blocked on a judgement only the
 operator can make, the ledger row should be a question put to them, not a
 status.**
+
+#### The generated table said `untested` about everything — settled 1 Sep 2026
+
+| Verdict | Claim | Evidence |
+|---|---|---|
+| **confirmed** | The generated half of this file, and `hc3://friction`, reported no verdicts at all — the file hard-coded `untested` on every row, the resource showed no verdict column | Known and recorded as a limitation on 13 Aug ("the table hard-codes the verdict `untested`, so a row cannot be marked resolved there"). It then became a defect rather than a gap: rows fixed in 4.19.2 and 4.21.2 were still presented as open candidates two weeks later, and a finding whose own `actual` text opens "RESOLVED IN 4.26.0" sat under a hard-coded untested. After 4.27.0 the two largest rows in the table — 51 of 83 failures — were resolved work being shown as the top candidates for investigation. **Fixed in 4.31.0**: verdicts live in `friction-verdicts.json`, joined on by both surfaces through one shared implementation in `friction.ts`. |
+| **confirmed** | A fourth verdict was needed. `untested` is wrong for a guard that is working | `filter_devices requires filters array`, `control_device ... does not declare action`, `patch_quickapp_file ... text was not found` are the tool refusing a call it could see was wrong. Calling those untested candidates spends the same triage pass as calling a fixed bug one. Added `by-design`, documented in the preamble both surfaces render. |
+| **confirmed** | A verdict register rots the same way the table did, so it has to be checkable | A verdict asserting a fix, on a row that keeps occurring, is a claim the telemetry contradicts. But a **release date cannot show that**: with deploy lag every entry between release and deploy looks like a failed fix, and the first version of this check duly flagged `upload_icon` (4.19.2) and `create_scene` (4.18.0), both innocent — entries recorded days before the Pi was updated. So entries now carry the server version that wrote them (`v`), and a contradiction requires version evidence: **⚠ SEEN SINCE ON x.y.z** means the failure was recorded BY a build already containing its claimed fix. A date-only discrepancy is reported on the console with the deploy-lag caveat and never written into the committed file. |
+
+Only entries from 4.31.0 onward carry a version, so the two date-only notes
+above will keep appearing until those rows age out of the log. That is the
+correct behaviour — the alternative is a warning that is probably wrong, which
+is how people learn to skim warnings.
+
+The shape of this one is worth keeping. The limitation was recorded honestly,
+in the right place, on 13 August. Recording it did not stop it becoming
+misinformation, because the record was in the ledger and the falsehood was in
+the table, and nobody reads both. **A known limitation in a generated document
+decays into a false claim as soon as the underlying facts move.**
 
 <!-- END manual ledger -->
 

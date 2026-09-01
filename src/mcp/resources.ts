@@ -16,7 +16,10 @@
 
 import { HC3Client } from './hc3-client';
 import { parseBindBlocks } from './tools/audit';
-import { readEntries, groupFailures, frictionPath } from './friction';
+import {
+  readEntries, groupFailures, frictionPath,
+  loadVerdicts, matchFailureVerdict, matchFindingVerdict, verdictLabel,
+} from './friction';
 
 export interface ResourceDef {
   uri: string;
@@ -562,15 +565,20 @@ const friction: ResourceDef = {
     }
 
     const failures = groupFailures(entries);
+    const verdicts = loadVerdicts();
     out.push(`\n## Recurring failures — ${failures.length} distinct\n`);
     if (failures.length === 0) {
       out.push('\nNothing recorded. Either nothing has failed, or telemetry started recently.\n');
     } else {
       out.push('\nGrouped by tool and normalised message, most frequent first. A tool failing the same way repeatedly is usually a description gap rather than a user error.\n\n');
-      out.push(table(['Count', 'Tool', 'Last seen', 'Message'], failures.slice(0, 25).map(g => [
-        String(g.count), `\`${g.tool}\``, ago(now - g.lastSeen),
-        g.example.replace(/\|/g, '\\|').slice(0, 120),
-      ])));
+      out.push('**Read the Verdict column before acting on a row.** These are historical counts, not open bugs: a row can be a defect already fixed in a later version, or a guard working exactly as intended, and this view showed neither until 4.31.0. `untested` means nobody has recorded a verdict, which is the safe default rather than a claim.\n\n');
+      out.push(table(['Verdict', 'Count', 'Tool', 'Last seen', 'Message'], failures.slice(0, 25).map(g => {
+        const v = matchFailureVerdict(verdicts.failures, g);
+        return [
+          verdictLabel(v, g), String(g.count), `\`${g.tool}\``, ago(now - g.lastSeen),
+          (g.example.replace(/\|/g, '\\|').slice(0, 120) + (v?.note ? ` — _${v.note.replace(/\|/g, '\\|')}_` : '')),
+        ];
+      })));
     }
 
     const findings = entries.filter(e => e.kind === 'finding').reverse();
@@ -579,7 +587,10 @@ const friction: ResourceDef = {
       out.push('\nNone. Agents and operators can add one with the `report_finding` tool; it requires a single-variable reproduction.\n');
     } else {
       for (const f of findings.slice(0, 15)) {
+        const fv = matchFindingVerdict(verdicts.findings, f);
         out.push(`\n### \`${f.tool}\` — ${ago(now - f.at)}\n`);
+        out.push(`\n**Verdict:** ${verdictLabel(fv)}\n`);
+        if (fv?.note) out.push(`\n_${fv.note}_\n`);
         out.push(`\n**Expected:** ${f.finding?.expected}\n`);
         out.push(`\n**Actual:** ${f.finding?.actual}\n`);
         out.push(`\n**Reproduction:**\n\n${f.finding?.reproduction}\n`);
@@ -588,7 +599,7 @@ const friction: ResourceDef = {
     }
 
     out.push('\n## Triage\n');
-    out.push('\nNothing here is a verified fact. Every item needs re-testing against the gateway before it changes code or documentation — three claims adopted from plausible reports had to be reversed in a single week. Record a verdict of **confirmed**, **refuted** or **untested** for each, and keep the refutations written down so they are not re-adopted later.\n');
+    out.push('\nA row marked `untested` is not a verified fact. Re-test it against the gateway before it changes code or documentation — three claims adopted from plausible reports had to be reversed in a single week here. Verdicts are recorded in `friction-verdicts.json` (**confirmed**, **refuted**, **untested**, **by-design**) and joined on above; keep refutations written down so they are not re-adopted later. **⚠ SEEN SINCE ON x.y.z** means the failure was recorded BY a build that already claimed the fix, so the verdict is wrong and the telemetry is right.\n');
     return out.join('');
   },
 };

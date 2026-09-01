@@ -2,6 +2,65 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.31.0] - 2026-09-01
+
+Friction triage, item 5: the triage surfaces said `untested` about everything,
+including their own resolved work.
+
+### Fixed
+
+- **Verdicts are joined onto both friction surfaces.** FRICTION.md's generated
+  table hard-coded `untested` on every row and `hc3://friction` showed no
+  verdict at all. That was a documented limitation ("the table hard-codes the
+  verdict `untested`, so a row cannot be marked resolved there", 13 Aug) and it
+  then became a defect: rows fixed in 4.19.2 and 4.21.2 were still presented as
+  open candidates two weeks later, and a finding whose own text opens "RESOLVED
+  IN 4.26.0" sat under a hard-coded untested. After 4.27.0 the two largest rows
+  in the table -- 51 of 83 recorded failures -- were resolved work being shown
+  as the top candidates for investigation.
+
+  Verdicts now live in `friction-verdicts.json`, hand-maintained and shipped
+  with the package, joined on by both surfaces through one shared
+  implementation in `friction.ts`. Deliberately a separate file rather than
+  parsed out of the hand-written ledger, which is prose: a generator that
+  depends on prose keeping its shape breaks silently the first time someone
+  rewrites a paragraph.
+
+- **A fourth verdict, `by-design`.** `untested` is wrong for a guard that is
+  working. `filter_devices requires filters array`,
+  `control_device ... does not declare action` and
+  `patch_quickapp_file ... text was not found` are the tool refusing a call it
+  could see was wrong, and calling those untested candidates spends the same
+  triage pass as calling a fixed bug one.
+
+### Added
+
+- **Friction entries record the server version that wrote them** (`v`), and
+  `groupFailures` reports the newest entry's version as `lastVersion`.
+
+  This is what makes a verdict register checkable rather than another thing
+  that rots. A verdict asserting a fix, on a row that keeps occurring, is a
+  claim the telemetry contradicts -- but a RELEASE DATE cannot establish that.
+  With deploy lag, every entry between release and deploy looks like a failed
+  fix, and the first version of this check duly flagged `upload_icon` (4.19.2)
+  and `create_scene` (4.18.0), both innocent: entries recorded days before the
+  unit was updated.
+
+  So a contradiction requires version evidence. **⚠ SEEN SINCE ON x.y.z** on a
+  row means the failure was recorded BY a build that already contained its
+  claimed fix, so the verdict is wrong and the telemetry is right. A date-only
+  discrepancy is reported on the console with the deploy-lag caveat and never
+  written into the committed file -- a warning that is probably wrong teaches
+  people to skim warnings.
+
+- **The triage script reports unmatched verdicts**, so the register can be
+  pruned deliberately rather than rotting, and refuses outright on a
+  `friction-verdicts.json` that will not parse. The resource degrades quietly
+  to `untested` instead, because an unreadable side file must not take out
+  `hc3://friction`; the script is stricter because it writes a committed
+  document, and silently regenerating every row back to `untested` over a
+  stray comma is the exact misreporting being fixed.
+
 ## [4.30.0] - 2026-09-01
 
 Friction triage, item 4: `manage_plugin_interfaces`, five bare 403s and three

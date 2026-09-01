@@ -1,0 +1,165 @@
+{
+  "_README": [
+    "Verdicts for rows in FRICTION.md's GENERATED half, which the triage script",
+    "cannot know on its own — it reads telemetry, and telemetry does not record",
+    "whether anyone fixed anything.",
+    "",
+    "Without this file every generated row said 'untested' forever. That was a",
+    "known limitation and then became a defect: after 4.21.2 and 4.26.0 the",
+    "table was still presenting resolved work as open candidates, and one",
+    "finding's own text opened with 'RESOLVED IN 4.26.0' beside a hard-coded",
+    "untested. A triage file that misreports its own state costs more than one",
+    "with gaps in it.",
+    "",
+    "Verdict vocabulary — the three from FRICTION.md's preamble, plus one:",
+    "  confirmed  — reproduced here; safe to act on",
+    "  refuted    — tested here and did not hold. The row STAYS, marked refuted",
+    "  untested   — plausible, unverified; must not reach a tool description",
+    "  by-design  — not a defect: the tool saw a call it knew was wrong and",
+    "               refused it. Recorded because calling a working guard an",
+    "               untested candidate is as wrong as calling a fixed bug one,",
+    "               and these rows are otherwise re-investigated every pass.",
+    "",
+    "Matching. Failure rows are grouped by (tool, signature), so a verdict names",
+    "the tool and either `signature` (exact) or `signatureContains` (substring of",
+    "the normalised signature — note ids and numbers are already collapsed to",
+    "<n> and quoted values to '<v>'). Findings are keyed by their `at` epoch,",
+    "which is unique, with `tool` as a guard against a mistyped key.",
+    "",
+    "`resolvedIn` is the version that fixed it. `resolvedAt` is the epoch that",
+    "version shipped: the generator flags any row still occurring AFTER that",
+    "date, so a verdict claiming a fix that did not hold shows up as a warning",
+    "rather than quietly reassuring everybody. Omit resolvedAt only when there",
+    "is nothing to re-check (by-design rows).",
+    "",
+    "Entries whose rows are no longer in the log are reported by the generator",
+    "so they can be pruned. Do not delete a `refuted` entry — that is the one",
+    "this whole file exists to preserve."
+  ],
+
+  "failures": [
+    {
+      "tool": "get_device_property",
+      "signature": "HTTP <n>: Not Found",
+      "verdict": "confirmed",
+      "resolvedIn": "4.27.0",
+      "resolvedAt": 1788307199,
+      "note": "A bare 404 naming neither the device nor the property. The tool now re-reads the device on 404 and says which of the two is missing, listing the properties that exist; HC3HttpError carries the method and path. New occurrences will not match this signature."
+    },
+    {
+      "tool": "get_device_parameters",
+      "signature": "HTTP <n>: Not Found",
+      "verdict": "confirmed",
+      "resolvedIn": "4.27.0",
+      "resolvedAt": 1788307199,
+      "note": "Same bare 404. The opening device read is the tool's only unguarded request, so every one of these was a device that does not exist; it now says so."
+    },
+    {
+      "tool": "modify_device",
+      "signature": "HTTP <n>: Not Found",
+      "verdict": "untested",
+      "note": "Reported as HC3 refusing a `type` change specifically, with the same device accepting topLevel={visible:true}. Not isolated here."
+    },
+    {
+      "tool": "manage_plugin_interfaces",
+      "signature": "HTTP <n>: Forbidden",
+      "verdict": "confirmed",
+      "resolvedIn": "4.30.0",
+      "resolvedAt": 1788307199,
+      "note": "The endpoint is refused on 5.210.12 for add and delete, single and multi, on QuickApps of two types AND on non-QuickApp device 3385 — whose interfaces and `modified` timestamp were byte-identical after both arms. Catalogued in KNOWN_DEAD_ENDPOINTS.md; the tool now carries it. Not fixed, because there is nothing here to fix: two of the seven are this project's own probe."
+    },
+    {
+      "tool": "create_scene",
+      "signatureContains": "concatenate a nil value",
+      "verdict": "confirmed",
+      "resolvedIn": "4.29.0",
+      "resolvedAt": 1788307199,
+      "note": "`content` omitted. HC3 rejected the create from inside its Lua engine, naming engine.lua rather than the missing argument. create_scene now supplies a body that subscribes to nothing and reports contentDefaulted."
+    },
+    {
+      "tool": "create_scene",
+      "signatureContains": "concatenate a table value",
+      "verdict": "confirmed",
+      "resolvedIn": "4.18.0",
+      "resolvedAt": 1786665599,
+      "note": "`conditions` sent as a structure rather than a Lua source string. Refused locally now, with the Lua to send instead printed in the error."
+    },
+    {
+      "tool": "get_icon",
+      "signatureContains": "could not fetch",
+      "verdict": "confirmed",
+      "resolvedIn": "4.21.2",
+      "resolvedAt": 1786838399,
+      "note": "The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place."
+    },
+    {
+      "tool": "upload_icon",
+      "signatureContains": "requires deviceTemplate",
+      "verdict": "confirmed",
+      "resolvedIn": "4.19.2",
+      "resolvedAt": 1786665599,
+      "note": "The schema's `required` listed base64/mime/category while the handler refused a device upload without deviceTemplate, so obeying the schema guaranteed the refusal. `required` is now mime/category with the dependent requirement expressed in schema."
+    },
+    {
+      "tool": "create_scene",
+      "signatureContains": "roomId is required",
+      "verdict": "by-design",
+      "note": "The guard working: HC3 rejects roomId=0 on creation, and this refuses before the call."
+    },
+    {
+      "tool": "filter_devices",
+      "signature": "filter_devices requires filters array.",
+      "verdict": "by-design",
+      "note": "Argument guard refusing a malformed call before it reaches HC3."
+    },
+    {
+      "tool": "modify_device",
+      "signature": "modify_device requires at least one of topLevel or properties with at least one field.",
+      "verdict": "by-design",
+      "note": "Argument guard."
+    },
+    {
+      "tool": "create_quickapp_variable",
+      "signatureContains": "already exists on device",
+      "verdict": "by-design",
+      "note": "Refusing to overwrite, and naming set_quickapp_variable as the way to update."
+    },
+    {
+      "tool": "control_device",
+      "signatureContains": "does not declare action",
+      "verdict": "by-design",
+      "note": "The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets."
+    },
+    {
+      "tool": "patch_quickapp_file",
+      "signatureContains": "The text was not found",
+      "verdict": "by-design",
+      "note": "A stale or mis-indented `old` refused with nothing written. Working as intended, though a run of these on one file usually means the caller is holding an out-of-date copy."
+    },
+    {
+      "tool": "modify_device",
+      "signatureContains": "Post-write verification failed",
+      "verdict": "confirmed",
+      "note": "Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own."
+    }
+  ],
+
+  "findings": [
+    {
+      "at": 1788215794,
+      "tool": "get_icon",
+      "verdict": "confirmed",
+      "resolvedIn": "4.26.0",
+      "resolvedAt": 1788220799,
+      "note": "Filed for the record by its own author, who noted it was already resolved. get_icon and upload_icon return a content hash."
+    },
+    {
+      "at": 1786813363,
+      "tool": "get_icon",
+      "verdict": "confirmed",
+      "resolvedIn": "4.21.2",
+      "resolvedAt": 1786838399,
+      "note": "The wrong-negative in get_icon's own error text. See the failures entry for the same defect."
+    }
+  ]
+}

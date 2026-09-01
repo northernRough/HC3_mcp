@@ -24,6 +24,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { SERVER_VERSION } from './version';
 
 const MAX_BYTES = 512 * 1024;   // ~2-3k entries; small enough to read whole
 const MAX_MESSAGE = 400;
@@ -82,6 +83,15 @@ export interface FrictionEntry {
   at: number;
   kind: 'failure' | 'finding';
   tool: string;
+  /**
+   * Server version that recorded this entry.
+   *
+   * Without it, "was this seen after the fix shipped?" cannot be answered:
+   * a release date says when a fix EXISTED, not when this gateway ran it, and
+   * deploy lag makes every entry in that window look like a fix that failed.
+   * Optional because entries written before 4.31.0 do not carry it.
+   */
+  v?: string;
   message: string;
   signature: string;
   /** Present only on `finding` entries submitted via report_finding. */
@@ -234,6 +244,7 @@ export function recordFailure(tool: string, message: string): void {
     append({
       at: Math.floor(Date.now() / 1000),
       kind: 'failure',
+      v: SERVER_VERSION,
       tool: String(tool || 'unknown'),
       message: clean,
       signature: signature(message),
@@ -257,6 +268,7 @@ export function recordFinding(tool: string, f: NonNullable<FrictionEntry['findin
     append({
       at: Math.floor(Date.now() / 1000),
       kind: 'finding',
+      v: SERVER_VERSION,
       tool: String(tool || 'unknown'),
       // Not truncation-marked: this is a deliberate short summary for the
       // triage table, and the full text is in `finding` on the same entry.
@@ -295,6 +307,8 @@ export interface FrictionGroup {
   firstSeen: number;
   lastSeen: number;
   example: string;
+  /** Server version of the most recent entry, when it recorded one. */
+  lastVersion?: string;
 }
 
 /** Group failures by (tool, signature), most frequent first. */
@@ -307,11 +321,11 @@ export function groupFailures(entries: FrictionEntry[]): FrictionGroup[] {
     if (g) {
       g.count++;
       g.firstSeen = Math.min(g.firstSeen, e.at);
-      g.lastSeen = Math.max(g.lastSeen, e.at);
+      if (e.at >= g.lastSeen) { g.lastSeen = e.at; g.lastVersion = e.v; }
     } else {
       map.set(key, {
         tool: e.tool, signature: e.signature, count: 1,
-        firstSeen: e.at, lastSeen: e.at, example: e.message,
+        firstSeen: e.at, lastSeen: e.at, example: e.message, lastVersion: e.v,
       });
     }
   }
@@ -350,3 +364,107 @@ export function invitesAFinding(tool: string, message: string): boolean {
 export const FINDING_NUDGE =
   '\n\nIf this was unexpected, call report_finding now — while you still have the exact sequence. ' +
   'A finding filed next turn is usually a finding lost.';
+
+// ---------------------------------------------------------------------------
+// Verdicts
+//
+// The generated triage table and the hc3://friction resource both listed every
+// row with no verdict at all — the file hard-coded "untested", the resource
+// showed nothing. That was a documented limitation until it became a defect:
+// rows fixed in 4.19.2 and 4.21.2 were still reading as open candidates, and a
+// finding whose own text began "RESOLVED IN 4.26.0" sat under a hard-coded
+// untested. A triage surface that misreports its own state costs more than one
+// with gaps, because the gaps do not argue with you.
+//
+// Telemetry cannot know any of this: it records failures, not whether anyone
+// fixed them. So the verdicts live in friction-verdicts.json, hand-maintained
+// and shipped with the package, and are joined on here — in ONE place, used by
+// both the script and the resource, because two copies of this logic is how
+// the get_icon/upload_icon contradiction happened.
+// ---------------------------------------------------------------------------
+
+export interface Verdict {
+  tool: string;
+  /** Exact normalised signature, or use signatureContains. */
+  signature?: string;
+  signatureContains?: string;
+  /** Findings are keyed by their unique `at` epoch. */
+  at?: number;
+  verdict: 'confirmed' | 'refuted' | 'untested' | 'by-design';
+  resolvedIn?: string;
+  resolvedAt?: number;
+  note?: string;
+}
+
+/** Package root, from out/mcp/ (compiled) — two levels up. */
+function packageRoot(): string {
+  return join(__dirname, '..', '..');
+}
+
+export function loadVerdicts(root?: string): { failures: Verdict[]; findings: Verdict[]; present: boolean } {
+  try {
+    const raw = readFileSync(join(root ?? packageRoot(), 'friction-verdicts.json'), 'utf8');
+    const v = JSON.parse(raw);
+    return {
+      failures: Array.isArray(v.failures) ? v.failures : [],
+      findings: Array.isArray(v.findings) ? v.findings : [],
+      present: true,
+    };
+  } catch {
+    // Absent or unreadable is not an error here: every row simply reads
+    // untested, which is the safe default. The triage SCRIPT is stricter and
+    // refuses on a malformed file, because that is the surface that writes
+    // a committed document.
+    return { failures: [], findings: [], present: false };
+  }
+}
+
+export function matchFailureVerdict(verdicts: Verdict[], g: FrictionGroup): Verdict | undefined {
+  return verdicts.find(v => v.tool === g.tool && (
+    v.signature !== undefined
+      ? v.signature === g.signature
+      : (v.signatureContains !== undefined && g.signature.includes(v.signatureContains))
+  ));
+}
+
+export function matchFindingVerdict(verdicts: Verdict[], e: FrictionEntry): Verdict | undefined {
+  return verdicts.find(v => v.at === e.at && v.tool === e.tool);
+}
+
+/** Numeric compare of dotted versions. <0, 0, >0. */
+export function cmpVersion(a: string, b: string): number {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/**
+ * Has this row occurred on a build that already contained its claimed fix?
+ *
+ * Only the recorded VERSION can answer that. `resolvedAt` is a release date,
+ * and a release date says when a fix existed, not when this gateway ran it —
+ * with deploy lag every entry in that window looks like a fix that failed. The
+ * first pass of this check flagged two rows for precisely that reason and both
+ * were entries recorded days before the unit was updated. So a contradiction
+ * requires version evidence; a date-only discrepancy is reported elsewhere as
+ * something to look at, never asserted.
+ */
+export function verdictContradicted(v: Verdict | undefined, g: FrictionGroup | undefined): boolean {
+  return !!v?.resolvedIn && !!g?.lastVersion && cmpVersion(g.lastVersion, v.resolvedIn) >= 0;
+}
+
+/** Date-only discrepancy on an entry too old to carry a version. */
+export function verdictSuspect(v: Verdict | undefined, g: FrictionGroup | undefined): boolean {
+  return v?.resolvedAt !== undefined && g?.lastVersion === undefined && (g?.lastSeen ?? 0) > v.resolvedAt;
+}
+
+export function verdictLabel(v: Verdict | undefined, g?: FrictionGroup): string {
+  if (!v) return 'untested';
+  const fixed = v.resolvedIn ? `, fixed ${v.resolvedIn}` : '';
+  const flag = verdictContradicted(v, g) ? ` **⚠ SEEN SINCE ON ${g!.lastVersion}**` : '';
+  return `${v.verdict}${fixed}${flag}`;
+}
