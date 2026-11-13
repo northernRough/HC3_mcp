@@ -28,8 +28,19 @@ git-crypt-encrypted). This release lets the server use it.
   Secrets (git-crypt-encrypted `secrets/` in the snapshot repo, `«secret»`
   placeholders in the clear files) are resolved server side for comparison and
   restore and **never returned**; a test asserts no secret value appears in
-  any tool output. Files and variables only: viewLayout and uiCallbacks are
-  not restored.
+  any tool output.
+
+  **The tile.** `diff_quickapp_vs_snapshot` also compares `viewLayout`,
+  `uiView`, `useUiView` and `uiCallbacks` (canonical JSON, so key order is not
+  a change), and `restore_quickapp_from_snapshot` restores whichever differ
+  when given `includeView:true`, in one final write after files. The
+  snapshot's viewLayout is validated first, as `modify_device` does; if the
+  tile then renders zero items where it rendered some before, the previous
+  view is written back automatically. On 13 Nov the copier left the tile new
+  over old code, so every tap logged "Class does not have roomSlider function
+  defined". Verified live on a throwaway QuickApp carrying Shading's tile:
+  0 -> 21 items, all four properties identical to the snapshot afterwards,
+  named uiCallbacks included.
 
   **Runtime state vs settings.** A variable holding a JSON object or array is
   treated as runtime state (Shading's `env`, `decisions`, `state`, rewritten

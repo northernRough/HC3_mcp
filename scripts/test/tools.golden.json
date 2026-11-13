@@ -862,7 +862,7 @@
   },
   {
     "name": "diff_quickapp_vs_snapshot",
-    "description": "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
+    "description": "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Also reports whether the tile (viewLayout, uiView, useUiView, uiCallbacks) matches the snapshot.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2621,7 +2621,7 @@
   },
   {
     "name": "restore_quickapp_from_snapshot",
-    "description": "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. Covers files and variables only, not viewLayout or uiCallbacks.",
+    "description": "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. includeView:true also restores the tile (viewLayout, uiView, useUiView, uiCallbacks, whichever differ) in one final write: the snapshot's viewLayout is validated first, and if the tile then renders zero items the previous view is written back automatically.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2681,6 +2681,10 @@
         "preview": {
           "type": "boolean",
           "description": "Report the plan and write nothing. Default false."
+        },
+        "includeView": {
+          "type": "boolean",
+          "description": "Also restore the tile (viewLayout, uiView, useUiView, uiCallbacks) where it differs. Default false."
         }
       },
       "required": [

@@ -35,17 +35,28 @@ await check('bool accepts "true"', () => assert.equal(coerceVarValue('bool', 'tr
 await check('bool rejects nonsense', () => assert.throws(() => coerceVarValue('bool', 'maybe', 'x')));
 
 // ---------------------------------------------------------------- 3.6
-function fakeHc3(vars, files = {}) {
+function fakeHc3(vars, files = {}, view = {}) {
   const calls = [];
-  const state = { vars: vars.map(v => ({ ...v })), files: { ...files } };
+  const state = { vars: vars.map(v => ({ ...v })), files: { ...files }, view: { ...view } };
   return {
     calls, state,
     async request(endpoint, method = 'GET', body) {
       calls.push({ endpoint, method, body });
       let m;
       if ((m = endpoint.match(/^\/api\/devices\/(\d+)$/))) {
-        if (method === 'PUT') { state.vars = body.properties.quickAppVariables.map(v => ({ ...v })); return {}; }
-        return { id: Number(m[1]), name: 'Shading', enabled: true, interfaces: ['quickApp'], properties: { quickAppVariables: state.vars.map(v => ({ ...v })) } };
+        if (method === 'PUT') {
+          const { quickAppVariables, ...rest } = body.properties;
+          if (quickAppVariables) state.vars = quickAppVariables.map(v => ({ ...v }));
+          Object.assign(state.view, JSON.parse(JSON.stringify(rest)));
+          return {};
+        }
+        return { id: Number(m[1]), name: 'Shading', enabled: true, interfaces: ['quickApp'],
+                 properties: { quickAppVariables: state.vars.map(v => ({ ...v })), ...JSON.parse(JSON.stringify(state.view)) } };
+      }
+      if (endpoint.startsWith('/api/plugins/getView')) {
+        // Model HC3: a layout containing BAD renders as an empty tile.
+        const items = JSON.stringify(state.view).includes('BAD') ? [] : (state.view.viewLayout?.$jason?.body?.sections?.items ?? []);
+        return { $jason: { body: { sections: { items } } } };
       }
       if ((m = endpoint.match(/^\/api\/quickApp\/\d+\/files$/))) {
         if (method === 'PUT') { for (const f of body) state.files[f.name] = f.content; return body.map(f => ({ name: f.name })); }
@@ -106,12 +117,15 @@ const repo = mkdtempSync(join(tmpdir(), 'snap-'));
 const g = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
 g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
 const SECRET = 'hunter2-very-secret';
+const SNAP_VIEW = { viewLayout: { $jason: { body: { sections: { items: [{ type: 'label', name: 'l1' }, { type: 'button', name: 'roomSlider' }] } } } },
+                    uiCallbacks: [{ name: 'roomSlider', eventType: 'onChanged', callback: 'roomSlider' }], useUiView: false };
+let snapView = SNAP_VIEW;
 function writeSnap(mainSrc, engineSrc, vars, msg, date) {
   const f = join(repo, 'quickapps', '4984-shading');
   mkdirSync(join(f, 'files'), { recursive: true }); mkdirSync(join(repo, 'secrets'), { recursive: true });
   writeFileSync(join(f, 'files', 'main.lua'), mainSrc);
   writeFileSync(join(f, 'files', 'engine.lua'), engineSrc);
-  writeFileSync(join(f, 'metadata.json'), JSON.stringify({ id: 4984, name: 'Shading', properties: { quickAppVariables: vars } }));
+  writeFileSync(join(f, 'metadata.json'), JSON.stringify({ id: 4984, name: 'Shading', properties: { quickAppVariables: vars, ...snapView } }));
   writeFileSync(join(repo, 'secrets', 'quickapp-vars.json'), JSON.stringify({ 4984: { name: 'Shading', vars: { apiKey: SECRET } } }));
   writeFileSync(join(repo, 'secrets', 'inline.json'), JSON.stringify({ 'hc3/password': { value: SECRET, files: [] } }));
   g('add', '-A'); execFileSync('git', ['-C', repo, 'commit', '-q', '-m', msg], { env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } });
@@ -185,6 +199,35 @@ await check('restore: one variable write first (dryRun stays "true"), then one f
   assert.deepEqual(r.untouched.runtimeVariablesSkipped, ['state']);
   assert.equal(r.verified, true);
   assert.ok(!JSON.stringify(r).includes(SECRET), 'secret leaked');
+});
+const OLD_VIEW = { viewLayout: { $jason: { body: { sections: { items: [{ type: 'label', name: 'l1' }] } } } }, uiCallbacks: [], useUiView: false };
+await check('diff reports the tile differing, key order ignored', async () => {
+  const reordered = { useUiView: false, uiCallbacks: [{ callback: 'roomSlider', eventType: 'onChanged', name: 'roomSlider' }], viewLayout: SNAP_VIEW.viewLayout };
+  let r = await H.diff_quickapp_vs_snapshot(fakeHc3(liveVars(), liveFiles(), reordered), { deviceId: 4984, commit: 'latest' });
+  assert.equal(r.summary.view.differs, 0);
+  r = await H.diff_quickapp_vs_snapshot(fakeHc3(liveVars(), liveFiles(), OLD_VIEW), { deviceId: 4984, commit: 'latest' });
+  assert.deepEqual(r.view.filter(v => v.status === 'differs').map(v => v.property).sort(), ['uiCallbacks', 'viewLayout']);
+});
+await check('without includeView the tile is untouched but flagged', async () => {
+  const hc3 = fakeHc3(liveVars(), liveFiles(), OLD_VIEW);
+  const r = await H.restore_quickapp_from_snapshot(hc3, { deviceId: 4984, commit: 'latest', preview: true });
+  assert.deepEqual(r.viewDiffers.sort(), ['uiCallbacks', 'viewLayout']);
+});
+await check('includeView writes the differing tile properties LAST, verified', async () => {
+  const hc3 = fakeHc3(liveVars(), liveFiles(), OLD_VIEW);
+  const r = await H.restore_quickapp_from_snapshot(hc3, { deviceId: 4984, commit: 'latest', includeView: true });
+  const writes = hc3.calls.filter(c => c.method !== 'GET');
+  assert.match(writes.at(-1).endpoint, /\/api\/devices\/4984$/);
+  assert.deepEqual(Object.keys(writes.at(-1).body.properties).sort(), ['uiCallbacks', 'viewLayout']);
+  assert.equal(r.view.itemsBefore, 1); assert.equal(r.view.itemsAfter, 2); assert.equal(r.view.verified, true);
+});
+await check('a tile that renders empty is rolled back', async () => {
+  snapView = { ...SNAP_VIEW, viewLayout: { $jason: { body: { sections: { items: [{ type: 'label', name: 'BAD' }] } } } } };
+  writeSnap(NEW_MAIN, '-- new engine\n', vars, 'snapshot: 2026-11-13 02:00:00 UTC', '2026-11-13T02:00:00Z');
+  const hc3 = fakeHc3(liveVars(), liveFiles(), OLD_VIEW);
+  await assert.rejects(H.restore_quickapp_from_snapshot(hc3, { deviceId: 4984, commit: 'latest', files: 'none', includeView: true }), /ROLLED BACK/);
+  assert.equal(JSON.stringify(hc3.state.view.viewLayout), JSON.stringify(OLD_VIEW.viewLayout));
+  snapView = SNAP_VIEW;
 });
 await check('a runtime variable named explicitly IS restored', async () => {
   const hc3 = fakeHc3(liveVars(), liveFiles());

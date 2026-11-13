@@ -22,6 +22,25 @@ import { promisify } from 'node:util';
 import { ToolModule } from './registry';
 import { contentHash } from '../util';
 import { coerceVarValue } from './quickapps';
+import { validateViewLayout, describeViewLayoutProblems } from '../viewlayout';
+
+/** The tile: both layout formats, which one is used, and the button bindings.
+ *  On 13 Nov the copier replaced files and variables but left these new, so
+ *  old code ran behind a new panel and every tap logged "Class does not have
+ *  roomSlider function defined". */
+export const VIEW_PROPS = ['viewLayout', 'uiView', 'useUiView', 'uiCallbacks'] as const;
+
+/** JSON with object keys sorted, so key order never reads as a change. */
+export function canonical(v: any): string {
+  const sort = (x: any): any => Array.isArray(x) ? x.map(sort)
+    : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map(k => [k, sort(x[k])])) : x;
+  return JSON.stringify(sort(v));
+}
+
+export function viewItemCount(view: any): number {
+  const items = view?.$jason?.body?.sections?.items;
+  return Array.isArray(items) ? items.length : 0;
+}
 
 const run = promisify(execFile);
 const PLACEHOLDER = '«secret»';
@@ -111,7 +130,7 @@ function unredact(text: string, vault: Vault): { text: string; unresolved: strin
 
 interface SnapFile { fileName: string; content: string; masked: string; md5: string; bytes: number; hasSecrets: boolean; unresolved: string[] }
 interface SnapVar { name: string; type?: string; value: any; secret: boolean; resolved: boolean }
-interface SnapQA { commit: string; date: string; folder: string; name: string; files: SnapFile[]; variables: SnapVar[]; vaultAvailable: boolean }
+interface SnapQA { commit: string; date: string; folder: string; name: string; files: SnapFile[]; variables: SnapVar[]; view: Record<string, any>; vaultAvailable: boolean }
 
 /**
  * A variable holding a JSON object or array is runtime state, not
@@ -159,7 +178,9 @@ export async function loadSnapshotQA(deviceId: number, commitRef?: string): Prom
     const resolved = !secret || v.name in secretVals;
     return { name: v.name, type: v.type, value: secret ? secretVals[v.name] : v.value, secret, resolved };
   });
-  return { commit, date, folder, name: meta?.name ?? folder.split('-').slice(1).join('-'), files, variables, vaultAvailable: vault.available };
+  const view: Record<string, any> = {};
+  for (const k of VIEW_PROPS) if (meta?.properties && k in meta.properties) view[k] = meta.properties[k];
+  return { commit, date, folder, name: meta?.name ?? folder.split('-').slice(1).join('-'), files, variables, view, vaultAvailable: vault.available };
 }
 
 const mask = (v: SnapVar | { secret: boolean; value: any }) => (v.secret ? PLACEHOLDER : v.value);
@@ -176,7 +197,9 @@ async function liveQA(hc3: any, deviceId: number) {
     return { fileName: f.name, isMain: !!f.isMain, content, md5: contentHash(content)!, bytes: Buffer.byteLength(content, 'utf8') };
   }));
   const variables: any[] = dev?.properties?.quickAppVariables ?? [];
-  return { name: dev.name, enabled: dev.enabled, files, variables };
+  const view: Record<string, any> = {};
+  for (const k of VIEW_PROPS) if (dev?.properties && k in dev.properties) view[k] = dev.properties[k];
+  return { name: dev.name, enabled: dev.enabled, files, variables, view };
 }
 
 export function compare(snap: SnapQA, live: Awaited<ReturnType<typeof liveQA>>) {
@@ -203,7 +226,13 @@ export function compare(snap: SnapQA, live: Awaited<ReturnType<typeof liveQA>>) 
       ? { name: n, status, secret: true, ...runtime }
       : { name: n, status, ...runtime, snapshot: s ? { type: s.type, value: s.value } : undefined, live: l ? { type: l.type, value: l.value } : undefined };
   });
-  return { files, variables };
+  const view = VIEW_PROPS.map(k => {
+    const inS = k in snap.view, inL = k in live.view;
+    const status = !inS && !inL ? 'absent' : !inL ? 'only-in-snapshot' : !inS ? 'only-live'
+      : canonical(snap.view[k]) === canonical(live.view[k]) ? 'same' : 'differs';
+    return { property: k, status };
+  });
+  return { files, variables, view };
 }
 
 export const snapshots: ToolModule = {
@@ -235,7 +264,7 @@ export const snapshots: ToolModule = {
     },
     {
       name: 'diff_quickapp_vs_snapshot',
-      description: "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
+      description: "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Also reports whether the tile (viewLayout, uiView, useUiView, uiCallbacks) matches the snapshot.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -247,7 +276,7 @@ export const snapshots: ToolModule = {
     },
     {
       name: 'restore_quickapp_from_snapshot',
-      description: "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. Covers files and variables only, not viewLayout or uiCallbacks.",
+      description: "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. includeView:true also restores the tile (viewLayout, uiView, useUiView, uiCallbacks, whichever differ) in one final write: the snapshot's viewLayout is validated first, and if the tile then renders zero items the previous view is written back automatically.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -258,6 +287,7 @@ export const snapshots: ToolModule = {
           sourceDeviceId: { type: 'number', description: 'Restore from a different QuickApp in the snapshot (e.g. a QA re-created under a new id). Default: deviceId.' },
           dryRunFirst: { type: 'boolean', description: 'Set the dryRun variable to "true" before writing files, and leave it there. Default false.' },
           preview: { type: 'boolean', description: 'Report the plan and write nothing. Default false.' },
+          includeView: { type: 'boolean', description: 'Also restore the tile (viewLayout, uiView, useUiView, uiCallbacks) where it differs. Default false.' },
         },
         required: ['deviceId', 'commit'],
       },
@@ -306,7 +336,7 @@ export const snapshots: ToolModule = {
     async diff_quickapp_vs_snapshot(hc3, args: { deviceId: number; commit?: string }): Promise<any> {
       const id = Number(args.deviceId);
       const [snap, live] = await Promise.all([loadSnapshotQA(id, args.commit), liveQA(hc3, id)]);
-      const { files, variables } = compare(snap, live);
+      const { files, variables, view } = compare(snap, live);
       const count = (xs: any[], s: string) => xs.filter(x => x.status === s && !x.runtime).length;
       return {
         deviceId: id, liveName: live.name, snapshotName: snap.name,
@@ -315,15 +345,16 @@ export const snapshots: ToolModule = {
           files: { same: count(files, 'same'), differs: count(files, 'differs'), onlyInSnapshot: count(files, 'only-in-snapshot'), onlyLive: count(files, 'only-live') },
           variables: { same: count(variables, 'same'), differs: count(variables, 'differs'), onlyInSnapshot: count(variables, 'only-in-snapshot'), onlyLive: count(variables, 'only-live'),
                        runtime: variables.filter((v: any) => v.runtime).length },
+          view: { differs: view.filter(v => v.status === 'differs' || v.status === 'only-in-snapshot').length },
         },
-        files, variables,
+        files, variables, view,
         ...(snap.vaultAvailable ? {} : { warning: 'Encrypted secrets could not be read (git-crypt locked?); secret comparisons are unknown.' }),
       };
     },
 
     async restore_quickapp_from_snapshot(hc3, args: {
       deviceId: number; commit: string; files?: string | string[]; variables?: string | string[];
-      sourceDeviceId?: number; dryRunFirst?: boolean; preview?: boolean;
+      sourceDeviceId?: number; dryRunFirst?: boolean; preview?: boolean; includeView?: boolean;
     }): Promise<any> {
       const id = Number(args.deviceId);
       if (!args.commit) throw new Error("commit is required ('latest', 'before:<ISO date>', or a commit id) so the source is explicit.");
@@ -384,13 +415,29 @@ export const snapshots: ToolModule = {
         if (args.dryRunFirst) put('dryRun', snapVars.get('dryRun')?.type, true);
       }
 
+      // ---- view (tile): only properties that differ, only if asked
+      const viewProps = args.includeView
+        ? diff.view.filter(v => v.status === 'differs' || v.status === 'only-in-snapshot').map(v => v.property)
+        : [];
+      if (viewProps.includes('viewLayout')) {
+        const problems = validateViewLayout(snap.view.viewLayout);
+        if (problems.length) {
+          throw new Error(`The snapshot's viewLayout fails validation (HC3 would render an EMPTY tile):\n` +
+            describeViewLayoutProblems(problems) + `\nNothing written.`);
+        }
+      }
+
       const plan = {
         deviceId: id, liveName: live.name, source: { deviceId: sourceId, name: snap.name, commit: snap.commit.slice(0, 10), date: snap.date },
         steps: [
           ...(newVars ? [{ step: 'variables (one write, one restart)', names: [...varNames, ...(args.dryRunFirst ? ['dryRun="true"'] : [])] }] : []),
           ...(toCreate.length ? [{ step: 'create files missing live', files: toCreate }] : []),
           ...(toUpdate.length ? [{ step: 'update files (one write, one restart)', files: toUpdate.map(n => ({ fileName: n, from: diff.files.find(f => f.fileName === n)?.liveHash, to: snapFiles.get(n)!.md5 })) }] : []),
+          ...(viewProps.length ? [{ step: 'tile view (one write; rolled back automatically if the tile renders empty)', properties: viewProps }] : []),
         ],
+        ...(!args.includeView && diff.view.some(v => v.status === 'differs')
+          ? { viewDiffers: diff.view.filter(v => v.status === 'differs').map(v => v.property), viewNote: 'The tile differs from the snapshot; pass includeView:true to restore it too.' }
+          : {}),
         untouched: {
           ...(varSel === 'differing' ? { runtimeVariablesSkipped: diff.variables.filter((v: any) => v.runtime && v.status === 'differs').map(v => v.name) } : {}),
           filesOnlyLive: diff.files.filter(f => f.status === 'only-live').map(f => f.fileName),
@@ -419,6 +466,30 @@ export const snapshots: ToolModule = {
           name: n, content: snapFiles.get(n)!.content, type: 'lua', isOpen: false, isMain: isMain.get(n) ?? false,
         })));
       }
+      // ---- 4. tile view, last, so the new code's handlers exist when it appears
+      let viewResult: any;
+      if (viewProps.length) {
+        const before = await hc3.request(`/api/devices/${id}`);
+        const beforeProps: Record<string, any> = {};
+        for (const k of viewProps) if (before?.properties && k in before.properties) beforeProps[k] = before.properties[k];
+        const itemsBefore = viewItemCount(await hc3.request(`/api/plugins/getView?id=${id}&type=view`).catch(() => null));
+        const put: Record<string, any> = {};
+        for (const k of viewProps) put[k] = snap.view[k];
+        await hc3.request(`/api/devices/${id}`, 'PUT', { properties: put });
+        const after = await hc3.request(`/api/devices/${id}`);
+        const mismatched = viewProps.filter(k => canonical(after?.properties?.[k]) !== canonical(snap.view[k]));
+        const itemsAfter = viewItemCount(await hc3.request(`/api/plugins/getView?id=${id}&type=view`).catch(() => null));
+        if (itemsAfter === 0 && itemsBefore > 0) {
+          await hc3.request(`/api/devices/${id}`, 'PUT', { properties: beforeProps });
+          const itemsRolled = viewItemCount(await hc3.request(`/api/plugins/getView?id=${id}&type=view`).catch(() => null));
+          throw new Error(`Tile restore ROLLED BACK: after writing ${viewProps.join(', ')} the tile rendered 0 items ` +
+            `(was ${itemsBefore}); previous view written back, now ${itemsRolled} items. Files and variables steps (if any) stand.`);
+        }
+        viewResult = { properties: viewProps, itemsBefore, itemsAfter, verified: mismatched.length === 0,
+                       ...(itemsAfter === 0 ? { warning: 'The tile renders 0 items. It was empty before too, so nothing was rolled back; check get_plugin_view.' } : {}),
+                       ...(mismatched.length ? { storedDifferently: mismatched } : {}) };
+      }
+
       // ---- verify every restored file by md5
       const verify = await Promise.all(chosen.map(async n => {
         const d = await hc3.request(`/api/quickApp/${id}/files/${encodeURIComponent(n)}`).catch(() => null);
@@ -427,7 +498,8 @@ export const snapshots: ToolModule = {
       }));
       const failed = verify.filter(v => !v.ok);
       const result = {
-        written: true, verified: failed.length === 0, ...plan, files: verify,
+        written: true, verified: failed.length === 0 && (!viewResult || viewResult.verified), ...plan, files: verify,
+        ...(viewResult ? { view: viewResult } : {}),
         ...(args.dryRunFirst ? { next: `dryRun is "true" on ${id}. Check its debug output, then set_quickapp_variable dryRun "false".` } : {}),
       };
       if (failed.length) {
