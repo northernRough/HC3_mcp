@@ -138,10 +138,72 @@ api.post("/mobile/push", {
 })
 \`\`\`
 
-Passing the wrong kind fails silently. \`category = "STANDARD"\` returns HTTP 400
-and omitting it returns 500. Never bare-\`pcall\` a notification call: capture the
+The two fail DIFFERENTLY (measured 13 Aug 2026). \`/mobile/push\` validates and
+says so: a user id where a device id belongs is HTTP 400 "wrong device type for
+push notification", an unknown id 404, \`category = "STANDARD"\` 400, a missing
+category or an empty \`mobileDevices\` list 500; a correct call answers 200 and
+echoes the devices it reached, so a wrapper can assert on it. \`fibaro.alert\`
+returns nil for everything, right or wrong: the wrong id kind there fails
+silently. Never bare-\`pcall\` a notification call: capture the
 outcome and log it, or delivery failure is invisible. get_ios_devices supplies
 the device ids.
+
+## Writing your OWN variables: self:setVariable is safe, the device API is not
+
+\`self:setVariable(name, value)\` from inside a QuickApp does NOT restart it:
+Shading rewrites its state variables every tick and firmwareWatch relies on it.
+Writing the same QuickApp's \`quickAppVariables\` through the device API
+(\`api.put("/devices/"..self.id, {properties = {quickAppVariables = ...}})\`) is an
+EXTERNAL write and restarts it, and in \`onInit\` that is a restart loop: on
+16 Aug 2026 an installer QuickApp copied seven variables into itself, restarted,
+copied them again, several times a second, until it was disabled. A QuickApp
+cannot rebuild itself that way; do it from a second, throwaway QuickApp.
+
+## fibaro.getValue returns only the value here
+
+Widely quoted as returning \`value, lastModified\`. On this gateway (5.2x) the
+second result is nil, for \`value\` and \`power\` alike, measured on six devices.
+A staleness check built on it never fires. Read \`modified\` from
+\`api.get("/devices/"..id)\` (or \`/devices/{id}/properties/{name}\`) instead.
+
+## fibaro.getDevicesID() is a device-list query, not "my id"
+
+It returns a TABLE of matching device ids. Used in an \`or\` chain to find a
+QuickApp's own id (\`fibaro.getDevicesID and fibaro.getDevicesID() or self.id\`),
+the truthy table wins, \`string.format("%d", ...)\` raises, and inside a pcall
+nothing is logged: a self-healing mechanism did nothing for six months this way.
+A QuickApp's own id is \`self.id\`. And \`fn and fn()\` only proves the function
+exists, not that it returns what you think.
+
+## Variable size, and where large state belongs
+
+Measured 31 Oct 2026: QuickApp variables of 10 KB to 800 KB write and read back
+byte-identical. The cost is linear and lands on everyone: writing costs about
+0.65 ms CPU per KB, and EVERY read of the device record (other QuickApps,
+get_device_info, this server's snapshot) pays about 1.2 ms per KB of variables
+(800 KB: ~0.95 s). Keep large state on a hidden child device: a QuickAppChild
+holds its own variables (\`child:setVariable\`), and they do not inflate the
+parent's record.
+
+## A child's variables written from OUTSIDE are invisible to the running parent
+
+Writing a variable on a QuickAppChild through the API does not restart the
+parent, and the parent's in-memory child object keeps the old value. Worse, the
+next time the parent's code calls \`setVariable\` on that child it writes its
+stale copy back: on 1 Nov 2026 two Daikin children were repointed at new
+thermostats and silently reverted 20 minutes later. After an external write to
+a child, restart the parent (set_quickapp_variable / set_quickapp_variables take
+\`restartParent:true\`), or have the child read the variable at use time.
+
+## A QuickApp thermostat in a climate zone does not get every setpoint
+
+A QuickApp thermostat (e.g. \`com.fibaro.hvacSystemAuto\`) in a climate zone
+receives \`setThermostatMode\` and \`setHeating/CoolingThermostatSetpoint\` when it
+joins the zone, when the zone's mode changes, and after a schedule edit. It does
+NOT receive them at schedule slot changes (1 Nov 2026), although the zone's own
+setpoints change. So poll the zone: \`api.get("/panels/climate/"..zoneId)\` and
+read \`properties.currentTemperatureHeating\` / \`currentTemperatureCooling\`.
+
 `
       },
 
@@ -310,6 +372,17 @@ self.sock:readUntil("\\n", {
     end
 })
 \`\`\`
+## One persistent socket, not one per request
+
+Opening a \`net.TCPSocket\` per request, doing connect/write/read and calling
+\`sock:close()\` in the read callback crashes the QuickApp after a while with
+"QuickApp crashed" and "Unknown error occurred: cancel: Bad file descriptor"
+(26 Oct 2026: Modbus TCP, ~8 sockets a minute; the first crash after ~20
+minutes, then every few minutes; pcall around close does not help, and a probe
+with a few dozen sockets never showed it). The Ventilation QuickApp restarted
+about 100 times in five hours. Open ONE socket, keep it, queue requests through
+it, and reconnect only when it fails.
+
         `
       },
 
@@ -584,6 +657,21 @@ state sets are shaped per device type.
 - event path live → \`call_ui_event\`, then \`get_debug_messages(type:"trace")\`
   and look for the \`UIEvent:\` line
 - the thing actually works → **tap it on a phone**. Nothing else substitutes.
+## Changing the tile at runtime (verified)
+
+\`api.post("/plugins/updateView", {deviceId = self.id, componentName = <name>,
+propertyName = <prop>, newValue = <value>})\` from inside the QuickApp:
+
+- \`propertyName = "options"\` with an array of option tables replaces a select's
+  labels live. selectionType, the eventBinding, the other components and the
+  option values all survive, and the QuickApp does NOT restart (16 Aug 2026).
+  So a picker's labels CAN carry live state.
+- \`propertyName = "visible"\`, \`newValue = false\` hides a label or select;
+  get_plugin_view then reports \`"visible": false\` for it (27 Oct 2026).
+- A slider's \`min\`, \`max\` and \`step\` written in the layout are kept.
+- get_plugin_view renders from \`viewLayout\`, not \`uiView\`: after a uiView-only
+  write the plugin view still shows the viewLayout's components.
+
         `,
       },
 

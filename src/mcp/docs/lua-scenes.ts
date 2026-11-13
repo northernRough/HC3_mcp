@@ -206,6 +206,27 @@ A scene that has grown a state machine, a serialised state blob and several
 hundred lines of control logic has outgrown the container: its state is
 unreadable over REST, its restart semantics are hostile, and it has no UI.
 Port it to a QuickApp.
+## What the scene sandbox does not have
+
+- **\`net.TCPSocket\`** is nil in a scene (\`(load):9: attempt to call a nil value
+  (field 'TCPSocket')\`, 17 Oct 2026). QuickApps have it. For a raw TCP probe of a
+  LAN device, use a temporary QuickApp (create_quickapp,
+  update_multiple_quickapp_files, get_debug_messages, delete_device).
+- **\`load\`** is not exposed (8 Nov 2026), so a scene cannot compile another
+  scene's source as a pre-flight check. patch_scene_content's luaWarnings
+  heuristic is the only check before a scene fires.
+- **\`fibaro.getValue\`** returns only the value; the second result
+  (lastModified, as widely quoted) is nil here. Read \`modified\` from
+  \`api.get("/devices/"..id)\`.
+
+## An uncaught api error kills a scene without a trace
+
+A scene whose \`api.get\` throws (a wrong path, say) dies on the spot: no output
+at all, not even the log lines before it, and run_scene_sync still reports
+success in milliseconds (15 Aug 2026). It is indistinguishable from a scene that
+never ran. Wrap api calls in \`pcall\` and log the error. And note the QuickApp
+file endpoint is \`/quickApp/{id}/files/{name}\`, not \`/devices/{id}/files\`.
+
 `
       },
 
