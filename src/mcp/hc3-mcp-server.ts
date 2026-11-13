@@ -16,6 +16,7 @@ import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
 import { recordWrite } from './writelog';
+import { unknownArguments, missingArguments } from './args';
 import { listResources, readResource } from './resources';
 import { recordFailure, invitesAFinding, FINDING_NUDGE } from './friction';
 import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
@@ -192,8 +193,12 @@ class HC3MCPServer {
     };
   }
 
-  private handleListTools(request: MCPRequest): MCPResponse {
-    const tools: MCPTool[] = [
+  private toolsCache?: MCPTool[];
+  /** Every tool schema this server serves. tools/list returns it; the
+   *  dispatcher validates arguments against it. Built once. */
+  private allTools(): MCPTool[] {
+    if (this.toolsCache) return this.toolsCache;
+    const tools: MCPTool[] = [] = [
       ...devices.schemas,
 
       ...rooms.schemas,
@@ -272,6 +277,11 @@ class HC3MCPServer {
 
       ...audit.schemas,
     ];
+    return (this.toolsCache = tools);
+  }
+
+  private handleListTools(request: MCPRequest): MCPResponse {
+    const tools = this.allTools();
 
     return {
       jsonrpc: '2.0',
@@ -291,6 +301,17 @@ class HC3MCPServer {
       if (!(name in toolHandlers)) {
         throw new Error(`Unknown tool: ${name}`);
       }
+      // Refuse arguments the tool does not declare, BEFORE anything runs.
+      // They used to be dropped silently: `exact` on find_devices_by_name
+      // (the parameter is exactMatch) quietly did a substring search, and
+      // `dryRun` on update_multiple_quickapp_files was ignored and the
+      // write went ahead. An unrecognised argument is a caller's intent
+      // this server would otherwise discard without a word.
+      const schema = this.allTools().find(t => t.name === name);
+      const unknown = unknownArguments(schema, args);
+      if (unknown) throw new Error(unknown);
+      const missing = missingArguments(schema, args);
+      if (missing) throw new Error(missing);
       result = await toolHandlers[name](this.hc3, args);
       // Local, best-effort: lets the snapshot job tell our writes from others'.
       recordWrite(name, args, result, true);

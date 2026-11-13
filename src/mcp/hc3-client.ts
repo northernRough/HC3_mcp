@@ -87,7 +87,11 @@ export class HC3Client {
     });
   }
 
-  async request(endpoint: string, method = 'GET', data?: any): Promise<any> {
+  /** Default per-request timeout. Pass opts.timeoutMs for endpoints HC3 is
+   *  known to answer slowly (event history: 19-20 s on a busy gateway). */
+  static readonly DEFAULT_TIMEOUT_MS = 15000;
+
+  async request(endpoint: string, method = 'GET', data?: any, opts?: { timeoutMs?: number }): Promise<any> {
     if (!this.config.host || !this.config.username || !this.config.password) {
       throw new Error('Fibaro HC3 not configured. Please check environment variables.');
     }
@@ -103,14 +107,25 @@ export class HC3Client {
     const requestOptions: RequestInit = {
       method,
       headers,
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(opts?.timeoutMs ?? HC3Client.DEFAULT_TIMEOUT_MS),
     };
 
     if (data && method !== 'GET') {
       requestOptions.body = JSON.stringify(data);
     }
 
-    const response = await fetch(url, requestOptions);
+    const timeoutMs = opts?.timeoutMs ?? HC3Client.DEFAULT_TIMEOUT_MS;
+    let response: Response;
+    try {
+      response = await fetch(url, requestOptions);
+    } catch (e: any) {
+      // "The operation was aborted due to timeout" named neither the call
+      // nor the limit, and read like a network fault.
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        throw new Error(`HC3 did not answer ${method} ${endpoint.split('?')[0]} within ${Math.round(timeoutMs / 1000)} s.`);
+      }
+      throw e;
+    }
     const text = await response.text();
 
     if (!response.ok) {

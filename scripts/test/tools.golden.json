@@ -954,7 +954,7 @@
             "properties": {
               "filter": {
                 "type": "string",
-                "description": "Filter key, e.g. \"deviceID\", \"enabled\", \"roomID\", \"type\""
+                "description": "Filter key, e.g. \"deviceID\", \"enabled\", \"roomID\", \"type\", \"hasProperty\", \"hasNoProperty\". hasNoProperty is evaluated by this tool (HC3's own returns nothing): a device matches if it lacks EVERY listed property."
               },
               "value": {
                 "type": "array",
@@ -972,7 +972,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Attribute names to return per device. E.g. [\"id\", \"name\", \"roomID\", \"type\"]. Omit to get all."
+          "description": "Attribute names to return per device, e.g. [\"id\", \"name\", \"roomID\", \"type\", \"properties.value\"]. Top-level fields, \"properties\" (the whole object) or \"properties.<name>\". OMIT to get ids only (that is what HC3 returns), not full records."
         }
       },
       "required": [
@@ -1003,7 +1003,7 @@
   },
   {
     "name": "find_devices_by_name",
-    "description": "Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId in {0, 1}) — i.e. system/root devices (QAs, HC3 controllers, grouping wrappers) and direct Z-Wave nodes (the physical device as a whole). Child endpoints of multi-endpoint parents (FGRGBW channels, ZEN52 endpoints 1/2, AEON MultiSensor's motion/temp/lux children, etc.) are excluded. For children-of-multi-endpoint-devices use find_device_by_endpoint (by endPointId). HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.",
+    "description": "Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exactMatch:true for equality). Searches EVERY device, including Z-Wave endpoint children, which is where most controllable devices live (a dimmer channel, a sensor's motion child); each result carries parentId so you can tell a node from its endpoints. Until 4.35.0 only top-level devices (parentId 0 or 1) were searched, so an exactly-named endpoint child came back as [] and read as \"no such device\". Pass topLevelOnly:true for the old behaviour. HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1022,6 +1022,10 @@
         "visibleOnly": {
           "type": "boolean",
           "description": "If true, only return devices where visible === true. Defaults to false."
+        },
+        "topLevelOnly": {
+          "type": "boolean",
+          "description": "If true, only top-level devices (parentId 0 or 1: QuickApps, controllers, whole Z-Wave nodes). Defaults to false: endpoint children are searched too."
         }
       },
       "required": [
@@ -1315,7 +1319,7 @@
   },
   {
     "name": "get_event_history",
-    "description": "Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering \"what happened?\" on the HC3 — both \"what just happened?\" and retrospective \"did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?\" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event's objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call. When scoping to object_id(s) over a bounded window (from set), the window is paged through in full so a device's older in-window events are not truncated by HC3's newest-first response cap.",
+    "description": "Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering \"what happened?\" on the HC3 — both \"what just happened?\" and retrospective \"did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?\" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event's objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call. When scoping to object_id(s) over a bounded window (from set), the window is paged through so a device's older in-window events are not truncated by HC3's newest-first response cap. HC3 answers each page slowly (~20 s on a busy gateway), so paging stops after ~100 s: the result is then an object {truncated:true, note, coveredFrom, events} instead of a bare array, saying how far back it got. Narrow the window to cover the rest.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3118,7 +3122,7 @@
   },
   {
     "name": "update_multiple_quickapp_files",
-    "description": "Update multiple QuickApp source files at once.",
+    "description": "Update several QuickApp source files in one write, so the QuickApp restarts once rather than once per file. Files that do not exist yet are created first (one POST each; HC3 answers the multi-file PUT with HTTP 500 if any named file is missing, after writing the ones that exist). Every file is then read back and byte-compared; the result carries each file's contentHash. If the PUT fails, the error lists which files were WRITTEN, left unchanged or missing, so a partial write is never reported as nothing written.",
     "inputSchema": {
       "type": "object",
       "properties": {
