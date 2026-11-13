@@ -15,3 +15,7 @@ hc3-dashboard.html
 
 # Firmware characterisation records — per gateway, carry serial + host.
 scripts/test/firmware/
+
+.env
+.env.*
+!.env.example
