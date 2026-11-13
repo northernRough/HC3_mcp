@@ -67,10 +67,12 @@ export function coerceVarValue(declaredType: string | undefined, value: any, nam
 export const quickappsCoreSchemas: MCPTool[] = [
       {
         name: 'get_quickapps',
-        description: 'Get all QuickApps',
+        description: 'List every QuickApp: id, name, type, roomID, enabled, visible, parentId, interfaces and its number of variables. Compact by default (about 5 KB for 33 QuickApps). Pass full:true for complete device records, which include every viewLayout and uiView tree: ~840 KB here, enough to be truncated by the client and to use up a context window. For one QuickApp in full, use get_quickapp.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            full: { type: 'boolean', description: 'Return complete device records (very large). Default false.' },
+          },
         },
       },
       {
@@ -338,6 +340,10 @@ export const quickappsExtSchemas: MCPTool[] = [
             value: {
               type: ["string", "number", "boolean"],
               description: "Value to set. Will be coerced to match the variable's declared type. For string-typed variables, numeric inputs are stringified to preserve type."
+            },
+            restartParent: {
+              type: "boolean",
+              description: "Only for a QuickApp CHILD: restart its parent after the write so the running code reloads the value. Without it the parent keeps its old copy in memory and may write it back. Default false."
             }
           },
           required: ["deviceId", "name", "value"]
@@ -354,6 +360,10 @@ export const quickappsExtSchemas: MCPTool[] = [
               type: "object",
               description: "Map of variable name to new value, e.g. {\"dryRun\": \"false\", \"winterOutdoorC\": \"15\"}. Every name must already exist on the device.",
               additionalProperties: { type: ["string", "number", "boolean"] }
+            },
+            restartParent: {
+              type: "boolean",
+              description: "Only for a QuickApp CHILD: restart its parent after the write so the running code reloads the value. Without it the parent keeps its old copy in memory and may write it back. Default false."
             }
           },
           required: ["deviceId", "variables"]
@@ -520,12 +530,33 @@ export const quickappsExtSchemas: MCPTool[] = [
 ];
 
 /**
+ * Writing a variable on a QuickApp CHILD does not restart the parent, and the
+ * running parent does not see the new value: on 1 Nov 2026 two Daikin
+ * children were repointed at new thermostats, the parent kept the old ids in
+ * memory, and its next child:setVariable wrote them back (finding
+ * 1793544288). Say so in the result, and restart the parent if asked.
+ */
+async function childFollowUp(hc3: any, device: any, restartParent: boolean | undefined): Promise<Record<string, any>> {
+  const ifaces: string[] = Array.isArray(device?.interfaces) ? device.interfaces : [];
+  if (!ifaces.includes('quickAppChild') || !(device?.parentId > 1)) return {};
+  if (restartParent) {
+    await hc3.request('/api/plugins/restart', 'POST', { deviceId: device.parentId });
+    return { child: { parentId: device.parentId, parentRestarted: true,
+      note: `Parent QuickApp ${device.parentId} restarted so it reloads this child's variables.` } };
+  }
+  return { child: { parentId: device.parentId, parentRestarted: false,
+    warning: `Device ${device.id} is a QuickApp CHILD. Its parent (${device.parentId}) was NOT restarted and does not see ` +
+      `this value; if the parent's code later calls setVariable on this child, it writes its old copy back. ` +
+      `Repeat with restartParent:true, or restart_quickapp ${device.parentId}.` } };
+}
+
+/**
  * Merge several values into a QuickApp's variables with ONE PUT and verify.
  * Exported for restore_quickapp_from_snapshot, which must order its single
  * variable write before its file push.
  */
 export async function setQuickAppVariables(
-  hc3: any, deviceId: number, values: Record<string, any>,
+  hc3: any, deviceId: number, values: Record<string, any>, opts?: { restartParent?: boolean },
 ): Promise<any> {
   const names = Object.keys(values ?? {});
   if (names.length === 0) {
@@ -566,20 +597,30 @@ export async function setQuickAppVariables(
   if (problems.length) {
     throw new Error(`set_quickapp_variables on device ${deviceId}: post-write verification failed:\n  - ${problems.join('\n  - ')}`);
   }
-  return { deviceId, written: names.length, writes: 1, verified: true, variables: changes };
+  return { deviceId, written: names.length, writes: 1, verified: true, variables: changes,
+           ...(await childFollowUp(hc3, device, opts?.restartParent)) };
 }
 
 export const quickapps: ToolModule = {
   schemas: [...quickappsCoreSchemas, ...quickappsExtSchemas],
 
   handlers: {
-    async get_quickapps(hc3): Promise<any> {
+    async get_quickapps(hc3, args?: { full?: boolean }): Promise<any> {
       // /api/quickApp/ returns HTTP 501 on current firmware (5.20x) — same
       // dead-endpoint cluster as /api/info, /api/firmware, /api/energy.
       // Enumerate via /api/devices?interface=quickApp instead. Returned shape
       // is the canonical /api/devices record, with QAs identified by the
       // "quickApp" interface entry.
-      return await hc3.request('/api/devices?interface=quickApp');
+      const all: any[] = (await hc3.request('/api/devices?interface=quickApp')) ?? [];
+      if (args?.full === true) return all;
+      // Full records were ~840 KB for 33 QuickApps (friction, 7 Nov): every
+      // layout tree, to answer "what QuickApps are there".
+      return all.map(d => ({
+        id: d.id, name: d.name, type: d.type, roomID: d.roomID,
+        enabled: d.enabled, visible: d.visible, parentId: d.parentId,
+        interfaces: d.interfaces,
+        variables: (d?.properties?.quickAppVariables ?? []).length,
+      }));
     },
 
     async get_quickapp(hc3, args: { quickAppId: number }): Promise<any> {
@@ -937,6 +978,7 @@ export const quickapps: ToolModule = {
       deviceId: number;
       name: string;
       value: string | number | boolean;
+      restartParent?: boolean;
     }): Promise<any> {
       const { deviceId, name, value } = args;
       if (typeof name !== 'string' || name.length === 0) {
@@ -990,15 +1032,17 @@ export const quickapps: ToolModule = {
         deviceId,
         name,
         previous: { type: existing.type, value: existing.value },
-        current: { type: afterVar.type, value: afterVar.value }
+        current: { type: afterVar.type, value: afterVar.value },
+        ...(await childFollowUp(hc3, device, args.restartParent)),
       };
     },
 
     async set_quickapp_variables(hc3, args: {
       deviceId: number;
       variables: Record<string, string | number | boolean>;
+      restartParent?: boolean;
     }): Promise<any> {
-      return await setQuickAppVariables(hc3, args.deviceId, args.variables);
+      return await setQuickAppVariables(hc3, args.deviceId, args.variables, { restartParent: args.restartParent });
     },
 
     async create_quickapp_variable(hc3, args: {

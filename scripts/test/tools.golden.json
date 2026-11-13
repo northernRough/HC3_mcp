@@ -375,7 +375,7 @@
             "number",
             "boolean"
           ],
-          "description": "Initial value. For isEnum globals must be one of enumValues."
+          "description": "Initial value. Optional: omit it for an empty string (some clients drop an explicit \"\" before it reaches the server). For isEnum globals must be one of enumValues."
         },
         "readOnly": {
           "type": "boolean",
@@ -394,8 +394,7 @@
         }
       },
       "required": [
-        "varName",
-        "value"
+        "varName"
       ]
     }
   },
@@ -1796,10 +1795,15 @@
   },
   {
     "name": "get_quickapps",
-    "description": "Get all QuickApps",
+    "description": "List every QuickApp: id, name, type, roomID, enabled, visible, parentId, interfaces and its number of variables. Compact by default (about 5 KB for 33 QuickApps). Pass full:true for complete device records, which include every viewLayout and uiView tree: ~840 KB here, enough to be truncated by the client and to use up a context window. For one QuickApp in full, use get_quickapp.",
     "inputSchema": {
       "type": "object",
-      "properties": {}
+      "properties": {
+        "full": {
+          "type": "boolean",
+          "description": "Return complete device records (very large). Default false."
+        }
+      }
     }
   },
   {
@@ -2920,6 +2924,10 @@
             "boolean"
           ],
           "description": "Value to set. Will be coerced to match the variable's declared type. For string-typed variables, numeric inputs are stringified to preserve type."
+        },
+        "restartParent": {
+          "type": "boolean",
+          "description": "Only for a QuickApp CHILD: restart its parent after the write so the running code reloads the value. Without it the parent keeps its old copy in memory and may write it back. Default false."
         }
       },
       "required": [
@@ -2949,6 +2957,10 @@
               "boolean"
             ]
           }
+        },
+        "restartParent": {
+          "type": "boolean",
+          "description": "Only for a QuickApp CHILD: restart its parent after the write so the running code reloads the value. Without it the parent keeps its old copy in memory and may write it back. Default false."
         }
       },
       "required": [

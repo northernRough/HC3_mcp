@@ -72,7 +72,7 @@ export const globals: ToolModule = {
           },
           value: {
             type: ['string', 'number', 'boolean'],
-            description: 'Initial value. For isEnum globals must be one of enumValues.'
+            description: 'Initial value. Optional: omit it for an empty string (some clients drop an explicit "" before it reaches the server). For isEnum globals must be one of enumValues.'
           },
           readOnly: {
             type: 'boolean',
@@ -88,7 +88,7 @@ export const globals: ToolModule = {
             description: 'Allowed enum values. Required when isEnum=true.'
           }
         },
-        required: ['varName', 'value']
+        required: ['varName']
       }
     },
   ],
@@ -119,7 +119,9 @@ export const globals: ToolModule = {
       // mismatch", which previously bubbled up as a confusing HTTP 400. The
       // schema already advertises ["string", "number", "boolean"] as valid
       // input types, so the coercion is the wrapper's responsibility.
-      const v = args.value;
+      // value omitted means "" (friction, 14 Oct: four attempts with value ""
+      // never reached the server, the client dropped it).
+      const v = args.value === undefined || args.value === null ? '' : args.value;
       const valueStr =
         typeof v === 'string'  ? v
         : typeof v === 'number' || typeof v === 'boolean' ? String(v)

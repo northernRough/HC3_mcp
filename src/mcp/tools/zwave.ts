@@ -397,6 +397,20 @@ export const zwave: ToolModule = {
 
       const cacheUpdated = after !== null && after.value === value;
 
+      // cacheUpdated:false used to read as "the write failed". It does not
+      // mean that: on 17 Oct 2026 (5.220.15) two FGR223 parents showed
+      // cacheUpdated:false AND an event-log isSupportedByDevice:false, and the
+      // blinds' slats then rotated as the new value dictated: it transmitted.
+      const props = device?.properties ?? {};
+      const battery = props.batteryLevel !== undefined || (typeof props.wakeUpTime === 'number' && props.wakeUpTime > 0);
+      const outcome = cacheUpdated
+        ? 'HC3 stored the new value. Transmission to the device cannot be read back on 5.x; empirically setConfiguration does transmit.'
+        : 'NOT a failure signal by itself: HC3 did not update its cached copy, but on this firmware writes have transmitted with ' +
+          'cacheUpdated:false and an event-log isSupportedByDevice:false (FGR223, 17 Oct 2026). Judge by the device\'s behaviour ' +
+          'or a property that depends on the parameter, not by these fields.' +
+          (battery ? ' This is a BATTERY device: a parameter write can only reach it when it wakes up, and HC3 shows nothing ' +
+            'to say it is queued (pendingActions stays false). Wake it, or wait for its wake-up interval.' : '');
+
       return {
         deviceId,
         deviceName: device?.name ?? null,
@@ -409,6 +423,8 @@ export const zwave: ToolModule = {
         before,
         after,
         cacheUpdated,
+        outcome,
+        ...(battery ? { batteryDevice: true } : {}),
         actionResponse,
         transmissionNote:
           'cacheUpdated=true means HC3 accepted and stored the new value. Whether the value transmitted to the physical Z-Wave device is NOT programmatically verifiable on HC3 5.x firmware (no mesh read-back path). Empirically, setConfiguration does transmit on this firmware (proven on Fibaro FGD212, 2026-05-09). For safety-critical writes, observe device behaviour or read the relevant device property afterwards.'

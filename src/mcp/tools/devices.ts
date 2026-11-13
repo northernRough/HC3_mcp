@@ -42,6 +42,23 @@ export const deleteDeviceSchema: MCPTool =
         }
       };
 
+/** Where `function <Class>:<method>(` is defined in a QuickApp's files, as
+ *  "file:line", or undefined. */
+export async function findQuickAppMethod(hc3: any, qaId: number, method: string): Promise<string | undefined> {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(method)) return undefined;
+  const re = new RegExp(`function\\s+[A-Za-z_][\\w.]*\\s*:\\s*${method}\\s*\\(`);
+  let files: any[] = [];
+  try { files = (await hc3.request(`/api/quickApp/${qaId}/files`)) ?? []; } catch { return undefined; }
+  for (const f of files) {
+    let content = '';
+    try { content = (await hc3.request(`/api/quickApp/${qaId}/files/${encodeURIComponent(f.name)}`))?.content ?? ''; } catch { continue; }
+    const lines = content.split('\n');
+    const i = lines.findIndex(l => re.test(l));
+    if (i >= 0) return `${f.name}:${i + 1}`;
+  }
+  return undefined;
+}
+
 /** Pick top-level fields and "properties.X" paths from a device record. */
 export function projectDevice(d: any, attrs: string[]): Record<string, any> {
   const out: Record<string, any> = {};
@@ -270,7 +287,12 @@ export const devices: ToolModule = {
     },
 
     async get_device_info(hc3, args: { deviceId: number }): Promise<any> {
-      return await hc3.request(`/api/devices/${args.deviceId}`);
+      try {
+        return await hc3.request(`/api/devices/${args.deviceId}`);
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+        throw new Error(`get_device_info: no device ${args.deviceId} on this HC3. Find the right id with find_devices_by_name or get_devices.`);
+      }
     },
 
     async cancel_delayed_action(hc3, args: { deviceId: number; timestamp: number }): Promise<any> {
@@ -306,6 +328,13 @@ export const devices: ToolModule = {
             );
           }
           throw e;
+        }
+        if (device && args.propertyName in device && !(args.propertyName in (device.properties ?? {}))) {
+          // interfaces, parentId, roomID, name... live at the record's root.
+          throw new Error(
+            `get_device_property: '${args.propertyName}' is a top-level field of device ${args.deviceId}, not a property. ` +
+            `Its value is ${JSON.stringify(device[args.propertyName])}. Use get_device_info for top-level fields.`
+          );
         }
         const names = Object.keys(device?.properties ?? {}).sort();
         const shown = names.slice(0, 40).join(', ');
@@ -435,13 +464,27 @@ export const devices: ToolModule = {
       const device = await hc3.request(`/api/devices/${args.deviceId}`);
       const declared = (device?.actions && typeof device.actions === 'object') ? device.actions : {};
       const declaredNames = Object.keys(declared);
+      let foundInSource: string | undefined;
       if (declaredNames.length > 0 && !(args.action in declared)) {
-        throw new Error(
-          `Device ${args.deviceId} (${device?.name}) does not declare action '${args.action}'. ` +
-          `Valid actions for this device: ${declaredNames.sort().join(', ')}. ` +
-          `Note: HC3 silently accepts and drops invalid actions on QuickApps with empty actions map, ` +
-          `so this pre-check enforces declared actions when present.`
-        );
+        // HC3 dispatches ANY method of a QuickApp, declared or not, so refusing
+        // every undeclared action blocked real methods (dumpCapabilities on the
+        // Daikin QA, 17 Oct). But it silently drops a method that does not
+        // exist, so allowing everything would hide typos. Look for the method
+        // in the QuickApp's own Lua (the parent's, for a child) and decide.
+        const ifaces: string[] = Array.isArray(device?.interfaces) ? device.interfaces : [];
+        const isQA = ifaces.includes('quickApp');
+        const isChild = ifaces.includes('quickAppChild') && device?.parentId > 1;
+        if (isQA || isChild) {
+          foundInSource = await findQuickAppMethod(hc3, isQA ? args.deviceId : device.parentId, args.action);
+        }
+        if (!foundInSource) {
+          throw new Error(
+            `Device ${args.deviceId} (${device?.name}) does not declare action '${args.action}'` +
+            (isQA || isChild ? `, and no \`function <Class>:${args.action}(\` exists in its QuickApp's source` : '') + `. ` +
+            `Valid actions for this device: ${declaredNames.sort().join(', ')}. ` +
+            `HC3 silently accepts and drops an action that does not exist, so this check is the only signal you would get.`
+          );
+        }
       }
 
       const endpoint = `/api/devices/${args.deviceId}/action/${encodeURIComponent(args.action)}`;
@@ -456,6 +499,10 @@ export const devices: ToolModule = {
       }
 
       await hc3.request(endpoint, 'POST', requestData);
+      if (foundInSource) {
+        return `Device ${args.deviceId}: '${args.action}' is not a declared action, but it is defined in the QuickApp's source ` +
+          `(${foundInSource}), so it was dispatched. HC3 gives no delivery receipt for QuickApp methods; check get_debug_messages for its effect.`;
+      }
       return `Device ${args.deviceId} action '${args.action}' executed successfully.`;
     },
 
@@ -465,7 +512,24 @@ export const devices: ToolModule = {
       properties?: Record<string, any>;
       allowUnsafeViewLayout?: boolean;
     }): Promise<any> {
-      const { deviceId, topLevel, properties } = args;
+      const { deviceId } = args;
+      // Some clients send an object argument as a JSON string. That reached
+      // `'quickAppVariables' in properties` and crashed with "Cannot use 'in'
+      // operator to search for 'quickAppVariables' in {...}" (friction, 1 Nov).
+      const asObject = (v: any, field: string): Record<string, any> | undefined => {
+        if (v === undefined || v === null) return undefined;
+        if (typeof v === 'string') {
+          try { v = JSON.parse(v); } catch {
+            throw new Error(`modify_device: \`${field}\` must be an object; got a string that is not JSON.`);
+          }
+        }
+        if (typeof v !== 'object' || Array.isArray(v)) {
+          throw new Error(`modify_device: \`${field}\` must be an object of fields to set; got ${Array.isArray(v) ? 'an array' : typeof v}.`);
+        }
+        return v;
+      };
+      const topLevel = asObject(args.topLevel, 'topLevel');
+      const properties = asObject(args.properties, 'properties');
 
       if (properties && 'quickAppVariables' in properties) {
         throw new Error(
@@ -519,7 +583,29 @@ export const devices: ToolModule = {
         body.properties = { ...properties };
       }
 
-      await hc3.request(`/api/devices/${deviceId}`, 'PUT', body);
+      try {
+        await hc3.request(`/api/devices/${deviceId}`, 'PUT', body);
+      } catch (e: any) {
+        if (!isNotFound(e)) throw e;
+        // HC3 answers 404 for a device that EXISTS when it refuses one of the
+        // fields, which reads as "wrong id" and sends callers checking ids.
+        let dev: any = null;
+        try { dev = await hc3.request(`/api/devices/${deviceId}`); } catch (inner: any) { if (!isNotFound(inner)) throw e; }
+        if (!dev) {
+          throw new Error(`modify_device: no device ${deviceId} on this HC3. Find the right id with find_devices_by_name or get_devices.`);
+        }
+        const fields = [...topLevelKeys.map(k => `topLevel.${k}`), ...propertiesKeys.map(k => `properties.${k}`)];
+        const known: string[] = [];
+        if (topLevelKeys.includes('type')) known.push('`type` cannot be changed after creation (HC3 404s it; create a new device instead)');
+        if (propertiesKeys.includes('viewLayout') && dev.parentId && dev.parentId > 1) {
+          known.push('a QuickApp CHILD takes its custom UI as `uiView`, not `viewLayout` (HC3 404s viewLayout on children)');
+        }
+        throw new Error(
+          `modify_device: device ${deviceId} (${dev.name}) exists, but HC3 answered 404 to the write: it refused one of ` +
+          `${fields.join(', ')}. Nothing was written.` +
+          (known.length ? ` Known cause: ${known.join('; ')}.` : ' Write the fields one at a time to find which.')
+        );
+      }
       const after = await hc3.request(`/api/devices/${deviceId}`);
       verifyWrite(topLevel, properties, after, `device ${deviceId}`);
 
