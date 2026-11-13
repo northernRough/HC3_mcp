@@ -101,6 +101,26 @@ the QuickApp restarts — and an external variable write restarts it. If the val
 matters across restarts, persist it to \`quickAppVariables\` and seed it back in
 \`onInit\`.
 
+## A one-off helper QuickApp must delete or disarm itself when done
+
+A QuickApp written to do one job (copy one QA into another, install something,
+probe the gateway) must, once that job is done, **either delete itself or
+disarm itself** by clearing its own source/target variable so that a later
+\`onInit\` finds nothing to do. Marking it disabled is **not** enough.
+
+Observed on firmware 5.220.15, 13 Nov 2026: the HC3 rebooted at 03:46, and a
+spent copier QuickApp (4983), marked disabled, ran its \`onInit\` on boot anyway.
+It copied the retired Shading build (4953) over the live one (4984): every file
+and every QuickApp variable. Nobody noticed until the afternoon. The same
+copier had earlier replaced 4984's README silently for three months. Not
+isolated: it is unknown whether every disabled QuickApp runs \`onInit\` on boot,
+so do not rely on disabled meaning inert.
+
+So, in the helper itself: do the work, then \`api.delete("/devices/"..self.id)\`,
+or \`self:setVariable("source", "")\` and have \`onInit\` return early when it is
+empty. And make the work idempotent and guarded (check the target's current
+content hash before overwriting), so a second run cannot do damage.
+
 ## Exclude children when scanning the device fleet
 
 Any discovery, audit or dead-device watchdog logic must filter with

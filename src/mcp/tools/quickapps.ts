@@ -33,6 +33,37 @@ import { applyEdits, unifiedDiff, excerpt, wantsExcerpt, PatchEdit } from '../pa
 import { luaLint, luaWarningSummary } from '../lua';
 import { contentHash } from '../util';
 
+/**
+ * Coerce a value to a QuickApp variable's declared HC3 type.
+ *
+ * An UNTYPED variable (no `type` field, as created by the HC3 web UI and by
+ * QuickApps' own setVariable) is written as a STRING. Until 4.34.0 the value
+ * went through as whatever JSON type arrived, so on 2026-11-13 a restore wrote
+ * winterOutdoorC as the number 15 and winterMask/showDetail as the boolean
+ * true — and a QuickApp testing `getVariable("x") == "true"` reads false.
+ * Lua QuickApps see variables as strings; keep them that way.
+ */
+export function coerceVarValue(declaredType: string | undefined, value: any, name: string): any {
+  if (declaredType === 'number' || declaredType === 'integer') {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) {
+      throw new Error(`Cannot set numeric variable '${name}' to non-numeric value ${JSON.stringify(value)}.`);
+    }
+    return declaredType === 'integer' ? Math.trunc(n) : n;
+  }
+  if (declaredType === 'bool' || declaredType === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    if (value === 'true' || value === 1) return true;
+    if (value === 'false' || value === 0) return false;
+    throw new Error(`Cannot set boolean variable '${name}' to value ${JSON.stringify(value)}.`);
+  }
+  // 'string', and untyped (undefined / '') alike.
+  if (declaredType === undefined || declaredType === null || declaredType === '' || declaredType === 'string') {
+    return typeof value === 'string' ? value : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+  }
+  return value;   // an HC3 type this server does not know: pass through untouched
+}
+
 export const quickappsCoreSchemas: MCPTool[] = [
       {
         name: 'get_quickapps',
@@ -292,7 +323,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "set_quickapp_variable",
-        description: "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed). **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
+        description: "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). No tool can recover the literal once the harness has parsed it; pass it as an explicit JSON string where your client allows. An UNTYPED variable (no declared type, as the HC3 web UI and a QuickApp's own setVariable create them) is written as a string: true becomes \"true\", 15 becomes \"15\", because that is what the QuickApp's getVariable returns and compares against. To change SEVERAL variables on one QuickApp use set_quickapp_variables: one write, one restart. (modify_device rejects quickAppVariables by design.) **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
         inputSchema: {
           type: "object",
           properties: {
@@ -310,6 +341,22 @@ export const quickappsExtSchemas: MCPTool[] = [
             }
           },
           required: ["deviceId", "name", "value"]
+        }
+      },
+      {
+        name: "set_quickapp_variables",
+        description: "Set SEVERAL existing QuickApp variables in ONE write, so the QuickApp restarts once instead of once per variable. Reads the full quickAppVariables array, merges your values in (each coerced to that variable's declared type; untyped variables are written as strings, exactly as set_quickapp_variable does), PUTs the complete array once, then reads it back and verifies every name, value and type. Every name must already exist, or nothing is written; use create_quickapp_variable for new ones. Variables you do not name are written back unchanged. **This still restarts the QuickApp, once.** Order it before any other restarting write (file pushes, restarts) so the restart cannot swallow it. On 13 Nov 2026 a restore needed five variables, which meant five restarts through set_quickapp_variable.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deviceId: { type: "number", description: "QuickApp device ID" },
+            variables: {
+              type: "object",
+              description: "Map of variable name to new value, e.g. {\"dryRun\": \"false\", \"winterOutdoorC\": \"15\"}. Every name must already exist on the device.",
+              additionalProperties: { type: ["string", "number", "boolean"] }
+            }
+          },
+          required: ["deviceId", "variables"]
         }
       },
       {
@@ -471,6 +518,56 @@ export const quickappsExtSchemas: MCPTool[] = [
         }
       },
 ];
+
+/**
+ * Merge several values into a QuickApp's variables with ONE PUT and verify.
+ * Exported for restore_quickapp_from_snapshot, which must order its single
+ * variable write before its file push.
+ */
+export async function setQuickAppVariables(
+  hc3: any, deviceId: number, values: Record<string, any>,
+): Promise<any> {
+  const names = Object.keys(values ?? {});
+  if (names.length === 0) {
+    throw new Error('set_quickapp_variables needs at least one variable in `variables`.');
+  }
+  const device = await hc3.request(`/api/devices/${deviceId}`);
+  const vars: any[] = device?.properties?.quickAppVariables ?? [];
+  const byName = new Map(vars.map(v => [v.name, v]));
+  const missing = names.filter(n => !byName.has(n));
+  if (missing.length) {
+    const known = vars.map(v => v.name).join(', ') || '(none)';
+    throw new Error(
+      `Nothing written: ${missing.length} variable(s) do not exist on device ${deviceId}: ${missing.join(', ')}. ` +
+      `Known variables: ${known}. Use create_quickapp_variable to add new ones.`
+    );
+  }
+  const coerced: Record<string, any> = {};
+  for (const n of names) coerced[n] = coerceVarValue(byName.get(n).type, values[n], n);
+
+  const newVars = vars.map(v => (v.name in coerced ? { ...v, value: coerced[v.name] } : v));
+  await hc3.request(`/api/devices/${deviceId}`, 'PUT', { properties: { quickAppVariables: newVars } });
+
+  const after = await hc3.request(`/api/devices/${deviceId}`);
+  const afterBy = new Map(((after?.properties?.quickAppVariables ?? []) as any[]).map(v => [v.name, v]));
+  const problems: string[] = [];
+  const changes: any[] = [];
+  for (const n of names) {
+    const a = afterBy.get(n);
+    const before = byName.get(n);
+    if (!a) { problems.push(`'${n}' missing after write`); continue; }
+    if (String(a.value) !== String(coerced[n])) problems.push(`'${n}' requested ${JSON.stringify(coerced[n])}, stored ${JSON.stringify(a.value)}`);
+    if (a.type !== before.type) problems.push(`'${n}' type was '${before.type}', now '${a.type}'`);
+    changes.push({ name: n, previous: { type: before.type, value: before.value }, current: { type: a.type, value: a.value } });
+  }
+  // A full-array PUT can also lose variables nobody named. Check for that too.
+  const lost = vars.filter(v => !afterBy.has(v.name)).map(v => v.name);
+  if (lost.length) problems.push(`variables lost by the write: ${lost.join(', ')}`);
+  if (problems.length) {
+    throw new Error(`set_quickapp_variables on device ${deviceId}: post-write verification failed:\n  - ${problems.join('\n  - ')}`);
+  }
+  return { deviceId, written: names.length, writes: 1, verified: true, variables: changes };
+}
 
 export const quickapps: ToolModule = {
   schemas: [...quickappsCoreSchemas, ...quickappsExtSchemas],
@@ -820,29 +917,7 @@ export const quickapps: ToolModule = {
       }
 
       const declaredType = existing.type;
-      let coercedValue: any;
-      if (declaredType === 'string') {
-        coercedValue = String(value);
-      } else if (declaredType === 'number' || declaredType === 'integer') {
-        const n = typeof value === 'number' ? value : Number(value);
-        if (!Number.isFinite(n)) {
-          throw new Error(
-            `Cannot set numeric variable '${name}' to non-numeric value ${JSON.stringify(value)}.`
-          );
-        }
-        coercedValue = declaredType === 'integer' ? Math.trunc(n) : n;
-      } else if (declaredType === 'bool' || declaredType === 'boolean') {
-        if (typeof value === 'boolean') coercedValue = value;
-        else if (value === 'true' || value === 1) coercedValue = true;
-        else if (value === 'false' || value === 0) coercedValue = false;
-        else {
-          throw new Error(
-            `Cannot set boolean variable '${name}' to value ${JSON.stringify(value)}.`
-          );
-        }
-      } else {
-        coercedValue = value;
-      }
+      const coercedValue = coerceVarValue(declaredType, value, name);
 
       const newVars = vars.map(v =>
         v.name === name ? { ...v, value: coercedValue } : v
@@ -879,6 +954,13 @@ export const quickapps: ToolModule = {
         previous: { type: existing.type, value: existing.value },
         current: { type: afterVar.type, value: afterVar.value }
       };
+    },
+
+    async set_quickapp_variables(hc3, args: {
+      deviceId: number;
+      variables: Record<string, string | number | boolean>;
+    }): Promise<any> {
+      return await setQuickAppVariables(hc3, args.deviceId, args.variables);
     },
 
     async create_quickapp_variable(hc3, args: {

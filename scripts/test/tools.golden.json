@@ -861,6 +861,26 @@
     }
   },
   {
+    "name": "diff_quickapp_vs_snapshot",
+    "description": "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp id"
+        },
+        "commit": {
+          "type": "string",
+          "description": "'latest' (default), 'before:<ISO date>', or a commit id"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
     "name": "disarm_alarm_partition",
     "description": "Disarm alarm partition",
     "inputSchema": {
@@ -1897,6 +1917,37 @@
     }
   },
   {
+    "name": "get_snapshot_quickapp",
+    "description": "One QuickApp as it was in a snapshot: its files (name, md5 contentHash, size) and variables (name, type, value). md5 matches get_quickapp_file's contentHash for identical content. Secret variables and secrets hard-coded in source are shown as «secret»; their values never leave the server. Set includeContent (optionally with files) to get file bodies, which can be large; prefer diff_quickapp_vs_snapshot and restore_quickapp_from_snapshot, which compare and write server side. commit: 'latest', 'before:<ISO date>' (newest snapshot before that time, e.g. before:2026-11-13T03:40), or a commit id from list_snapshots.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp id"
+        },
+        "commit": {
+          "type": "string",
+          "description": "'latest' (default), 'before:<ISO date>', or a commit id"
+        },
+        "includeContent": {
+          "type": "boolean",
+          "description": "Return file bodies (default false). Secrets inside source stay masked."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "With includeContent: only these files."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
     "name": "get_sprinkler_system",
     "description": "Get specific sprinkler system by ID",
     "inputSchema": {
@@ -2110,6 +2161,23 @@
     }
   },
   {
+    "name": "list_snapshots",
+    "description": "List nightly HC3 snapshots (commits in the hc3-snapshot git repo on this server's host), newest first, with date and message. Pass deviceId to list only snapshots in which that QuickApp's files or metadata changed, with the files that changed: the quickest way to find when a QuickApp's code last moved, and which snapshot to restore from. Read-only. Snapshots are taken daily at about 02:30 local time; anything changed since the last one is not in any snapshot.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "Optional QuickApp id: only snapshots where it changed."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum entries (default 20, max 200)."
+        }
+      }
+    }
+  },
+  {
     "name": "manage_plugin_interfaces",
     "description": "Add or remove interfaces on a device via POST /api/plugins/interfaces. Reads `interfaces` back afterwards and reports whether they actually changed.\n\n**THIS ENDPOINT IS REFUSED ON FIRMWARE 5.210.12. Expect HTTP 403, with no body.** Not QuickApp-specific and not interface-specific — six attempts, both directions, single interface and a list of three, across device classes: QuickApps 4952 (`com.fibaro.binarySwitch`) and 5001 (`com.fibaro.multilevelSwitch`), and non-QuickApp 3385, a Fibaro FGBS-222 Z-Wave device. Catalogued in KNOWN_DEAD_ENDPOINTS.md; read it via get_hc3_api_notes({topic:\"dead_endpoints\"}).\n\n**Nothing is written.** Device 3385's interfaces and its `modified` timestamp were byte-identical before and after, so the refusal happens before any state change. A failed call here costs nothing but the call.\n\nAdministrator credentials are refused, so a permissions explanation is unlikely and \"not permitted on this firmware\" is the leading reading — but only one credential set has been tested, so credentials and firmware are not formally separated, and only 5.210.12 has been tried. The tool is kept rather than removed: the endpoint is documented, a later firmware may restore it, and a bare 403 with the tool claiming nothing was worse than a 403 carrying this.\n\n**What works instead, if your goal is the UI furniture an interface brings.** Both observed on this gateway, neither isolated as a controlled test:\n- `useEmbededView: false` suppresses the interface-driven cards and buttons without touching the interfaces themselves.\n- Setting `deviceRole: \"Other\"` through `modify_device` dropped the `light` interface and `isLight` (seen on a multilevelSwitch QuickApp).\n\nIf you get anything OTHER than a 403, that contradicts every recorded attempt and is news: file it with report_finding, naming the device type and firmware.",
     "inputSchema": {
@@ -2160,7 +2228,7 @@
   },
   {
     "name": "modify_device",
-    "description": "Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. HC3's PUT semantics for nested properties: top-level fields merge, but array-valued properties under `properties.*` (such as `quickAppVariables`, `categories`, `parameters`, `uiCallbacks`) are fully replaced. Submitting a partial array destroys entries not in the submission. `quickAppVariables` is explicitly rejected by this tool — use `set_quickapp_variable` instead. For other array-valued properties, fetch the full current array, modify, and submit the complete modified array.\n\n**Building or fixing a QuickApp tile? Call get_hc3_quickapp_programming_guide({topic:\"ui\"}) first** — the two sections below are the parts that concern this tool, and the guide carries the rest of the lifecycle in order.\n\n**QuickApp `viewLayout` (verified on 5.210.12).** An externally-PUT viewLayout DOES render — a QuickApp does not need to install its own view from Lua. But a malformed `select` takes the WHOLE tile with it, not just that element: HC3 stores the layout, this tool reports verified, and `/plugins/getView` then returns an empty item list with every other component gone. Two silent triggers: a `select` without `selectionType` ('single' or 'multi'), which is required on EVERY select in the layout; or `values` supplied as a JSON object rather than an array — in Lua `values = {}` encodes as `{}` not `[]`, so use `json.array()` (same for `selectedItems` when clearing a multi-select). After any viewLayout write, read back get_plugin_view and confirm the components are present: a verified write here does not mean a rendered tile.\n\n**Restoring named `uiCallbacks` (verified end to end on 5.210.12).** `create_quickapp` cannot keep them — HC3 rewrites `{name:\"modeSelector\", eventType:\"onToggled\", callback:\"modeSelection\"}` into `{eventType:\"onReleased\", callback:\"uimodeSelectorOnReleased\"}` at creation. Writing the named array back through THIS tool afterwards does stick: it survives a later `update_multiple_quickapp_files` push with the `uiCallbacks` modified timestamp unchanged, and **no restart is needed** for the new binding to take effect (measured; a restart was long assumed necessary and is not). **But a stuck name is not a dispatched name.** Firing the element with `call_ui_event` dispatches the named method with `{eventType, elementName, values, deviceId}` — while a real tap in the app dispatches **`UIAction`, positionally**, ignoring the name entirely. That difference was measured on 5.210.12 by `scripts/probe-uicallbacks.mjs`; this description previously stated only the `call_ui_event` half, which reads as an end-to-end guarantee and is not one. Write the names back if you want them, but handle the event in `UIAction` too, or the tile will be dead under a finger while testing green. `uiCallbacks` is array-valued, so submit the complete array — a partial one destroys the entries you leave out. Then read it back (get_device_info) and confirm: the read is cheap and the failure mode is silent.",
+    "description": "Modify device fields in a single atomic PUT. Use `topLevel` for fields at the device body root (e.g., `name`, `roomID`, `enabled`, `visible`) and `properties` for nested device properties (e.g., `saveLogs`, `icon`, `manufacturer`). At least one must be provided. Writes are verified by refetching and comparing each submitted field; throws on any mismatch rather than silently succeeding. HC3's PUT semantics for nested properties: top-level fields merge, but array-valued properties under `properties.*` (such as `quickAppVariables`, `categories`, `parameters`, `uiCallbacks`) are fully replaced. Submitting a partial array destroys entries not in the submission. `quickAppVariables` is explicitly rejected by this tool — use `set_quickapp_variable` for one, or `set_quickapp_variables` for several in a single write (one restart). For other array-valued properties, fetch the full current array, modify, and submit the complete modified array.\n\n**Building or fixing a QuickApp tile? Call get_hc3_quickapp_programming_guide({topic:\"ui\"}) first** — the two sections below are the parts that concern this tool, and the guide carries the rest of the lifecycle in order.\n\n**QuickApp `viewLayout` (verified on 5.210.12).** An externally-PUT viewLayout DOES render — a QuickApp does not need to install its own view from Lua. But a malformed `select` takes the WHOLE tile with it, not just that element: HC3 stores the layout, this tool reports verified, and `/plugins/getView` then returns an empty item list with every other component gone. Two silent triggers: a `select` without `selectionType` ('single' or 'multi'), which is required on EVERY select in the layout; or `values` supplied as a JSON object rather than an array — in Lua `values = {}` encodes as `{}` not `[]`, so use `json.array()` (same for `selectedItems` when clearing a multi-select). After any viewLayout write, read back get_plugin_view and confirm the components are present: a verified write here does not mean a rendered tile.\n\n**Restoring named `uiCallbacks` (verified end to end on 5.210.12).** `create_quickapp` cannot keep them — HC3 rewrites `{name:\"modeSelector\", eventType:\"onToggled\", callback:\"modeSelection\"}` into `{eventType:\"onReleased\", callback:\"uimodeSelectorOnReleased\"}` at creation. Writing the named array back through THIS tool afterwards does stick: it survives a later `update_multiple_quickapp_files` push with the `uiCallbacks` modified timestamp unchanged, and **no restart is needed** for the new binding to take effect (measured; a restart was long assumed necessary and is not). **But a stuck name is not a dispatched name.** Firing the element with `call_ui_event` dispatches the named method with `{eventType, elementName, values, deviceId}` — while a real tap in the app dispatches **`UIAction`, positionally**, ignoring the name entirely. That difference was measured on 5.210.12 by `scripts/probe-uicallbacks.mjs`; this description previously stated only the `call_ui_event` half, which reads as an end-to-end guarantee and is not one. Write the names back if you want them, but handle the event in `UIAction` too, or the tile will be dead under a finger while testing green. `uiCallbacks` is array-valued, so submit the complete array — a partial one destroys the entries you leave out. Then read it back (get_device_info) and confirm: the read is cheap and the failure mode is silent.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2174,7 +2242,7 @@
         },
         "properties": {
           "type": "object",
-          "description": "Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: \"...\"}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable); parameters (the PUT path caches without transmitting on firmware 5.x — use set_device_parameter, which wraps the working setConfiguration action); associations / multichannelAssociations (precautionary reject, no verified REST path yet — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries)."
+          "description": "Nested device properties to modify (e.g., {saveLogs: false, icon: {...}, manufacturer: \"...\"}). Sent under properties.* in the PUT body. This is the wrapper HC3 requires for nested updates. Rejected here: quickAppVariables (use set_quickapp_variable, or set_quickapp_variables for several at once); parameters (the PUT path caches without transmitting on firmware 5.x — use set_device_parameter, which wraps the working setConfiguration action); associations / multichannelAssociations (precautionary reject, no verified REST path yet — set via HC3 Web UI). Other array-valued properties like categories / uiCallbacks require the full current array to be submitted (partial submissions destroy omitted entries)."
         },
         "allowUnsafeViewLayout": {
           "type": "boolean",
@@ -2552,6 +2620,76 @@
     }
   },
   {
+    "name": "restore_quickapp_from_snapshot",
+    "description": "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. Covers files and variables only, not viewLayout or uiCallbacks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp id to write to (normally the same QA the snapshot holds)."
+        },
+        "commit": {
+          "type": "string",
+          "description": "Required, to make the source explicit: 'latest', 'before:<ISO date>', or a commit id."
+        },
+        "files": {
+          "description": "'differing' (default: files that differ or are missing live), 'all', 'none', or an array of file names.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "differing",
+                "all",
+                "none"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "variables": {
+          "description": "'none' (default), 'differing', or an array of variable names to restore from the snapshot.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "differing"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "sourceDeviceId": {
+          "type": "number",
+          "description": "Restore from a different QuickApp in the snapshot (e.g. a QA re-created under a new id). Default: deviceId."
+        },
+        "dryRunFirst": {
+          "type": "boolean",
+          "description": "Set the dryRun variable to \"true\" before writing files, and leave it there. Default false."
+        },
+        "preview": {
+          "type": "boolean",
+          "description": "Report the plan and write nothing. Default false."
+        }
+      },
+      "required": [
+        "deviceId",
+        "commit"
+      ]
+    }
+  },
+  {
     "name": "run_scene",
     "description": "Execute a scene by ID",
     "inputSchema": {
@@ -2755,7 +2893,7 @@
   },
   {
     "name": "set_quickapp_variable",
-    "description": "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). If you need a specific numeric-string literal preserved verbatim, write it via modify_device with a full properties.quickAppVariables array (include every existing variable — HC3 does a full-array replace on PUT, so any variable omitted from the submission will be destroyed). **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
+    "description": "Set a QuickApp variable via PUT /api/devices/{id} with the properties.quickAppVariables wrapper (the HC3 UI's save pattern). Reads the declared type first, writes with type preserved (avoids HC3's numeric-string coercion quirk), then verifies post-write state and throws on mismatch rather than silently succeeding. Variable must already exist; use create_quickapp_variable to add a new variable. Caveat: numeric-looking string values (e.g. \"3.0\") lose their exact lexical form crossing the MCP JSON boundary — the harness parses the input as a number, then this tool stringifies it (String(3.0) === \"3\"). No tool can recover the literal once the harness has parsed it; pass it as an explicit JSON string where your client allows. An UNTYPED variable (no declared type, as the HC3 web UI and a QuickApp's own setVariable create them) is written as a string: true becomes \"true\", 15 becomes \"15\", because that is what the QuickApp's getVariable returns and compares against. To change SEVERAL variables on one QuickApp use set_quickapp_variables: one write, one restart. (modify_device rejects quickAppVariables by design.) **Writing a QuickApp variable from outside RESTARTS the QuickApp** (verified on 5.210.12: the QA bounced within 4s). It restarts once per call, so creating eight variables in sequence restarts the QA eight times, and a write issued after another restarting call may never execute — order them accordingly. To push several FILES use update_multiple_quickapp_files, which restarts once rather than once per file.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2780,6 +2918,34 @@
         "deviceId",
         "name",
         "value"
+      ]
+    }
+  },
+  {
+    "name": "set_quickapp_variables",
+    "description": "Set SEVERAL existing QuickApp variables in ONE write, so the QuickApp restarts once instead of once per variable. Reads the full quickAppVariables array, merges your values in (each coerced to that variable's declared type; untyped variables are written as strings, exactly as set_quickapp_variable does), PUTs the complete array once, then reads it back and verifies every name, value and type. Every name must already exist, or nothing is written; use create_quickapp_variable for new ones. Variables you do not name are written back unchanged. **This still restarts the QuickApp, once.** Order it before any other restarting write (file pushes, restarts) so the restart cannot swallow it. On 13 Nov 2026 a restore needed five variables, which meant five restarts through set_quickapp_variable.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "QuickApp device ID"
+        },
+        "variables": {
+          "type": "object",
+          "description": "Map of variable name to new value, e.g. {\"dryRun\": \"false\", \"winterOutdoorC\": \"15\"}. Every name must already exist on the device.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "required": [
+        "deviceId",
+        "variables"
       ]
     }
   },

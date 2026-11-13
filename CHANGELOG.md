@@ -2,6 +2,63 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.34.0] - 2026-11-13
+
+After the Shading incident of 13 Nov: the HC3 rebooted at 03:46 and a spent,
+**disabled** copier QuickApp (4983) ran its `onInit` anyway, copying the
+retired Shading build (4953) over the live one (4984): every file and every
+variable. Recovery depended on a snapshot that existed only on a Mac, found by
+hand, and ~200 KB of Lua passed through the conversation one file at a time.
+The nightly snapshot now runs on the Pi (`hc3-snapshot.timer`, repo at
+`/var/lib/hc3-mcp/snapshot`, pushed to a private GitHub repo, secrets
+git-crypt-encrypted). This release lets the server use it.
+
+### Added
+
+- **`list_snapshots`, `get_snapshot_quickapp`, `diff_quickapp_vs_snapshot`,
+  `restore_quickapp_from_snapshot`** (new module `tools/snapshots.ts`). They
+  read the snapshot repo on the server's own host, so a diff and a restore are
+  two calls and **no file content crosses the conversation**. Restore writes in
+  the order used by hand on 13 Nov: one variable write first (with
+  `dryRunFirst`, `dryRun="true"` is set and left for the caller to clear), then
+  missing files are created, then one `update_multiple_quickapp_files`-style
+  push, then every file is re-read and its md5 checked against the snapshot.
+  `preview:true` reports the plan and writes nothing. Files only present live
+  are never deleted. Commits are named `latest`, `before:<ISO date>` or by id.
+  Secrets (git-crypt-encrypted `secrets/` in the snapshot repo, `«secret»`
+  placeholders in the clear files) are resolved server side for comparison and
+  restore and **never returned**; a test asserts no secret value appears in
+  any tool output. Files and variables only: viewLayout and uiCallbacks are
+  not restored.
+- **`set_quickapp_variables`**: several variables, one PUT, one restart, with
+  read-back verification of every value and type, and a check that no
+  unnamed variable was lost by the full-array write. The 13 Nov restore needed
+  five variables, which meant five restarts.
+- **Write log** (`writelog.ts`): every QuickApp/scene write attempt (success
+  or failure) is appended to `/var/lib/hc3-mcp/mcp-writes.jsonl`. The
+  snapshot job's change alert reads it, so code changed **outside** the MCP
+  is alerted and edits made through Claude are not. Same path rules as the
+  friction log; disabled by `MCP_WRITE_LOG_DISABLE` or `MCP_FRICTION_DISABLE`.
+- **QuickApp guide**: "A one-off helper QuickApp must delete or disarm itself
+  when done", because disabled was not inert on 13 Nov.
+
+### Fixed
+
+- **Untyped QuickApp variables are written as strings.** `set_quickapp_variable`
+  wrote `winterOutdoorC` as the number 15 and `winterMask`/`showDetail` as the
+  boolean true; a QuickApp comparing `getVariable("x") == "true"` read false.
+  Variables with no declared type now get `"15"` / `"true"`, which is what a
+  QuickApp's own `getVariable` returns. Typed variables are unchanged.
+- **Contradictory descriptions.** `set_quickapp_variable` said to use
+  `modify_device` with a full `quickAppVariables` array; `modify_device` rejects
+  `quickAppVariables` by design. Both now point at `set_quickapp_variables`.
+
+### Changed
+
+- `friction-verdicts.json`: verdicts for the four findings filed on 13 Nov.
+  One is **refuted**: it claimed an engine-only restart, inferred from CPU
+  counters; the gateway had in fact rebooted (uptime 12 h that afternoon).
+
 ## [4.33.1] - 2026-09-01
 
 ### Changed
