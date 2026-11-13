@@ -104,6 +104,10 @@ export function verifyWrite(
   for (const key of propertiesKeys) {
     const submitted = (properties as any)[key];
     const stored = afterProps[key];
+    // HC3 removes isLight (and the 'light' interface) when deviceRole makes
+    // the device something other than a light. A submitted false that comes
+    // back ABSENT is the outcome asked for, not a mismatch (friction, 17 Oct).
+    if (key === 'isLight' && submitted === false && stored === undefined) continue;
     const match = Array.isArray(submitted)
       ? deepEqual(submitted, stored)
       : (submitted !== null && typeof submitted === 'object'

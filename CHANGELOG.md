@@ -2,6 +2,49 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.36.0] - 2026-11-13
+
+Tier 2 of the 13 Nov friction triage: errors that misled, and tools that
+were awkward to use. Each checked live (throwaway QuickApp and global,
+deleted afterwards) and in `scripts/test/unit-tier2.mjs`.
+
+### Fixed
+
+- **`modify_device`**
+  - A 404 on an EXISTING device now says HC3 refused one of the fields,
+    naming the known causes: `type` cannot be changed after creation, and a
+    QuickApp child takes custom UI as `uiView`, not `viewLayout`. It used to
+    read as "wrong id".
+  - `topLevel`/`properties` sent as a JSON string are parsed instead of
+    crashing with "Cannot use 'in' operator".
+  - `isLight:false` that HC3 removes (because `deviceRole` is not a light)
+    no longer fails verification on a correct outcome.
+- **`get_device_info`** names a missing device instead of a bare 404.
+- **`get_device_property`** asked for `parentId`, `interfaces` and other
+  top-level fields says so, gives the value, and points at `get_device_info`.
+- **`control_device`** dispatches a QuickApp method that is not a declared
+  action when the method exists in the QuickApp's own Lua (the parent's, for
+  a child): `function <Class>:<method>(`. HC3 dispatches any QuickApp method
+  but silently drops one that does not exist, so a method found nowhere is
+  still refused. Live: the Daikin QA's `dumpCapabilities` found at main:2317.
+- **`create_global_variable`**: `value` is optional and defaults to `""`;
+  some clients drop an explicit empty string before it reaches the server.
+- **QuickApp child variables.** `set_quickapp_variable` and
+  `set_quickapp_variables` on a QuickApp child warn that the parent was not
+  restarted and may write its old copy back (two Daikin units kept links to
+  deleted thermostats on 1 Nov). New `restartParent:true` restarts the parent
+  after the write.
+- **`set_device_parameter`** no longer reads as failure on `cacheUpdated:false`.
+  A new `outcome` field explains that writes have transmitted with
+  `cacheUpdated:false` and `isSupportedByDevice:false` on this firmware, and
+  flags battery devices, which only receive a parameter at wake-up.
+
+### Changed
+
+- **`get_quickapps` is compact by default**: id, name, type, room, enabled,
+  visible, parentId, interfaces and a variable count. Live: 32 QuickApps in
+  6 KB, where full records were ~840 KB. `full:true` returns full records.
+
 ## [4.35.0] - 2026-11-13
 
 Tier 1 of the 13 Nov friction triage: the tools that gave wrong answers or

@@ -179,7 +179,9 @@
       "tool": "get_device_info",
       "signatureContains": "Not Found (GET /api/devices/<n>)",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bare 404 with none of the 'no device N on this HC3' wording the other tools gained in 4.27.0."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bare 404 with none of the 'no device N on this HC3' wording the other tools gained in 4.27.0.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "tool": "get_event_history",
@@ -219,7 +221,9 @@
       "tool": "modify_device",
       "signatureContains": "Cannot use '<v>' operator",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `properties` arrived as a JSON string, and the handler crashed with a TypeError instead of refusing clearly. Fix: parse a JSON-string object or refuse with a plain message."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `properties` arrived as a JSON string, and the handler crashed with a TypeError instead of refusing clearly. Fix: parse a JSON-string object or refuse with a plain message.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "tool": "patch_quickapp_file",
@@ -251,7 +255,9 @@
       "tool": "modify_device",
       "signatureContains": "Not Found (PUT /api/devices/<n>)",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 answers 404 for an EXISTING device when it refuses a field: a `type` change (finding 1786897950) and viewLayout on a QuickAppChild, which uses uiView (1793551362). Reads as 'wrong id'. Fix: on 404, re-read the device; if it exists, say a field was refused and name the known cases."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 answers 404 for an EXISTING device when it refuses a field: a `type` change (finding 1786897950) and viewLayout on a QuickAppChild, which uses uiView (1793551362). Reads as 'wrong id'. Fix: on 404, re-read the device; if it exists, say a field was refused and name the known cases.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "tool": "delete_device",
@@ -429,7 +435,9 @@
       "at": 1786897950,
       "tool": "modify_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 refuses a `type` change with a bare 404 on an existing device. Tool fix tracked under the modify_device 404 failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 refuses a `type` change with a bare 404 on an existing device. Tool fix tracked under the modify_device 404 failure row.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1786897966,
@@ -467,7 +475,9 @@
       "at": 1792001693,
       "tool": "create_global_variable",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An empty-string value is dropped by the client before it reaches the server. Fix: make value optional, defaulting to \"\"."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An empty-string value is dropped by the client before it reaches the server. Fix: make value optional, defaulting to \"\".",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1792013615,
@@ -485,7 +495,9 @@
       "at": 1792237341,
       "tool": "set_device_parameter",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). isSupportedByDevice:false and cacheUpdated:false do NOT mean failure on FGR223 parents (5.220.15): slats rotated after the write. The tool's result should stop reading as failure on those signals."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). isSupportedByDevice:false and cacheUpdated:false do NOT mean failure on FGR223 parents (5.220.15): slats rotated after the write. The tool's result should stop reading as failure on those signals.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1792258245,
@@ -503,19 +515,25 @@
       "at": 1792259521,
       "tool": "control_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The declared-actions pre-check blocks custom QuickApp methods (e.g. dumpCapabilities) on QAs whose type declares actions, though HC3 dispatches any QuickApp method. Fix: allow undeclared methods on QuickApps, with a note that delivery cannot be verified."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The declared-actions pre-check blocks custom QuickApp methods (e.g. dumpCapabilities) on QAs whose type declares actions, though HC3 dispatches any QuickApp method. Fix: allow undeclared methods on QuickApps, with a note that delivery cannot be verified.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1792259991,
       "tool": "modify_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Submitting isLight:false with a deviceRole: HC3 removes isLight and the light interface, and verify throws on a correct outcome. Fix: treat submitted false read back as absent as a match."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Submitting isLight:false with a deviceRole: HC3 removes isLight and the light interface, and verify throws on a correct outcome. Fix: treat submitted false read back as absent as a match.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1792336243,
       "tool": "set_quickapp_variable",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Writing a variable on a QuickAppChild does NOT restart the parent (and see 1793544288: the parent's in-memory copy later overwrites it). The restart warning should be scoped to parent QuickApps."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Writing a variable on a QuickAppChild does NOT restart the parent (and see 1793544288: the parent's in-memory copy later overwrites it). The restart warning should be scoped to parent QuickApps.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1792862720,
@@ -615,7 +633,9 @@
       "at": 1793544288,
       "tool": "set_quickapp_variable",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A child variable write is not seen by the running parent, and the parent's next child setVariable writes its stale copy back. Fix: on a QuickAppChild, warn and offer to restart the parent."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A child variable write is not seen by the running parent, and the parent's next child setVariable writes its stale copy back. Fix: on a QuickAppChild, warn and offer to restart the parent.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1793550898,
@@ -629,7 +649,9 @@
       "at": 1793551362,
       "tool": "modify_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout on a QuickAppChild: bare 404; children use uiView. Tool fix tracked under the modify_device 404 failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout on a QuickAppChild: bare 404; children use uiView. Tool fix tracked under the modify_device 404 failure row.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1793566471,
@@ -643,7 +665,9 @@
       "at": 1794057778,
       "tool": "get_quickapps",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). 842 KB for 33 QuickApps, every layout tree included. Fix: compact list by default (id, name, type, room, enabled), full records on request."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). 842 KB for 33 QuickApps, every layout tree included. Fix: compact list by default (id, name, type, room, enabled), full records on request.",
+      "resolvedIn": "4.36.0",
+      "resolvedAt": 1794611970
     },
     {
       "at": 1794096871,
