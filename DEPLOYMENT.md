@@ -646,7 +646,7 @@ sudo systemctl restart hc3-mcp
 sudo journalctl -u hc3-mcp -n 5 --no-pager
 ```
 
-The repo ships a wrapper that does exactly this: `sudo /opt/hc3-mcp/src/scripts/pi-update.sh`. One command, same effect, plus a brief journal tail at the end so you can confirm the "running on HTTP" / "HC3 reachable" banner.
+The repo ships a wrapper that does exactly this: `sudo /opt/hc3-mcp/src/scripts/pi-update.sh`. One command, same effect, plus a brief journal tail at the end so you can confirm the "running on HTTP" / "HC3 reachable" banner. It skips the rebuild and restart when the pull brought nothing new and the running build is from the current commit (since 4.34.2); pass `--force` to rebuild anyway.
 
 For an npm-install upgrade (alternative path):
 

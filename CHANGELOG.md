@@ -2,6 +2,21 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.34.2] - 2026-11-13
+
+### Fixed
+
+- **`scripts/pi-update.sh` no longer restarts the server every hour for
+  nothing.** `hc3-mcp-update.timer` runs it hourly, and every run did `npm ci`,
+  a full compile and a restart even when `git pull` brought no change: ~30 s of
+  CPU and a dropped MCP session each time. It now compares `HEAD` with the
+  commit the running build was made from (`out/.deployed-commit`, written only
+  after a successful rebuild and restart) and does nothing when they match.
+  A missing marker, or a build from another commit, still rebuilds. When
+  nothing changed it still starts `hc3-mcp` if the service is down.
+  `--force` rebuilds regardless. Every git call now runs as `hc3mcp`; as root,
+  git refuses the checkout ("dubious ownership").
+
 ## [4.34.1] - 2026-11-13
 
 ### Fixed
