@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.34.1] - 2026-11-13
+
+### Fixed
+
+- **`diff_quickapp_vs_snapshot` no longer floods the conversation.** Runtime
+  variables (JSON objects/arrays) are reported by status and size only, and
+  setting values over 300 bytes are clipped to a preview. The first live diff
+  of Shading ran to ~30 KB, almost all of it `env`, `decisions` and `state`.
+
 ## [4.34.0] - 2026-11-13
 
 After the Shading incident of 13 Nov: the HC3 rebooted at 03:46 and a spent,

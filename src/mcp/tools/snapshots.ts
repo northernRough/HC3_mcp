@@ -28,6 +28,8 @@ import { validateViewLayout, describeViewLayoutProblems } from '../viewlayout';
  *  On 13 Nov the copier replaced files and variables but left these new, so
  *  old code ran behind a new panel and every tap logged "Class does not have
  *  roomSlider function defined". */
+const VALUE_CLIP = 300;   // longest setting value a diff prints in full
+
 export const VIEW_PROPS = ['viewLayout', 'uiView', 'useUiView', 'uiCallbacks'] as const;
 
 /** JSON with object keys sorted, so key order never reads as a change. */
@@ -222,9 +224,17 @@ export function compare(snap: SnapQA, live: Awaited<ReturnType<typeof liveQA>>) 
     else if (!s) status = 'only-live';
     else if (secret && !s.resolved) status = 'unknown (secret not decryptable)';
     else status = String(s.value) === String(l.value) && (s.type ?? '') === (l.type ?? '') ? 'same' : 'differs';
-    return secret
-      ? { name: n, status, secret: true, ...runtime }
-      : { name: n, status, ...runtime, snapshot: s ? { type: s.type, value: s.value } : undefined, live: l ? { type: l.type, value: l.value } : undefined };
+    if (secret) return { name: n, status, secret: true, ...runtime };
+    // Runtime blobs are reported by size only: Shading's three ran to ~30 KB
+    // per diff, which is exactly the flood a mid-incident diff must not be.
+    // Long settings are clipped for the same reason.
+    const bytes = (v: any) => Buffer.byteLength(typeof v === 'string' ? v : JSON.stringify(v ?? null), 'utf8');
+    const show = (x: any) => !x ? undefined : 'runtime' in runtime
+      ? { type: x.type, bytes: bytes(x.value) }
+      : bytes(x.value) > VALUE_CLIP
+        ? { type: x.type, bytes: bytes(x.value), preview: String(typeof x.value === 'string' ? x.value : JSON.stringify(x.value)).slice(0, VALUE_CLIP) + '…' }
+        : { type: x.type, value: x.value };
+    return { name: n, status, ...runtime, snapshot: show(s), live: show(l) };
   });
   const view = VIEW_PROPS.map(k => {
     const inS = k in snap.view, inL = k in live.view;

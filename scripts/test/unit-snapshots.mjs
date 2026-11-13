@@ -175,6 +175,8 @@ await check('diff reports differing files and variables, secret by status only',
   assert.equal(r.variables.find(v => v.name === "winterMask").runtime, undefined);  // plain value = setting
   assert.equal(r.summary.variables.differs, 2);          // dryRun, winterMask; NOT state
   assert.equal(r.summary.variables.runtime, 1);
+  assert.equal(st.live.value, undefined);              // runtime: size only, no value
+  assert.equal(typeof st.live.bytes, 'number');
   assert.ok(!JSON.stringify(r).includes(SECRET), 'secret leaked');
 });
 await check('preview writes nothing', async () => {
