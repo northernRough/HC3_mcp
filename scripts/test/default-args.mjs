@@ -5,7 +5,7 @@
 //   - Scene 670 = roomManager Heartbeat Watchdog
 //   - Scene 645 = Watering (production scene with cron triggers)
 //   - Device 4742 = roomManager QA device
-//   - Device 2370 = a known FGRGBW442CC controller (child of 2367)
+//   - Device 4817 = "12V colours & rails", the FGRGBW442CC controller child of 2367 (was 2370 until the node was re-included; the stale id produced 21 harness failures in the friction log)
 //   - Room 367 = Default Room (where scenes live)
 //   - Global RoomMgrHeartbeat = numeric, refreshed every 60s
 
@@ -14,7 +14,7 @@ export const FIXTURES = {
     sceneCron: 645,
     sceneSimple: 670,
     device: 4742,
-    deviceChild: 2370,
+    deviceChild: 4817,
     deviceParent: 2367,
     room: 367,
     globalVar: 'RoomMgrHeartbeat',

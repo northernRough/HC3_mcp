@@ -27,7 +27,7 @@ const AUTH = 'Basic ' + Buffer.from(`${USER}:${PASS}`).toString('base64');
 const FIXTURES = {
     deviceId:     4742,    quickAppId: 4742,   devId:    4742,
     sceneId:      670,     roomId:     367,
-    childId:      2370,    parentId:   2367,
+    childId:      4817,    parentId:   2367,
     nodeId:       30,      userId:     2,
     name:         'RoomMgrHeartbeat',
     varName:      'RoomMgrHeartbeat',

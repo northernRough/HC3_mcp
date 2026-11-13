@@ -2,6 +2,47 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.37.0] - 2026-11-13
+
+Tier 3 of the 13 Nov friction triage: seventeen confirmed findings written
+into the guides where the next session will look, so they are not
+rediscovered the hard way. No tool behaviour changes.
+
+### Added
+
+- **QuickApp guide, gotchas:** writing your OWN variables through the device
+  API restarts the QuickApp (a restart loop in onInit) while self:setVariable
+  does not; `fibaro.getValue` returns no lastModified here; `fibaro.getDevicesID()`
+  is a list query, not a self-id; variable size (to 800 KB, ~1.2 ms per KB on
+  every read of the device) and keeping large state on a hidden child; a child's
+  variables written from outside are invisible to the running parent and get
+  written back; a QuickApp thermostat in a climate zone misses schedule slot
+  changes.
+- **QuickApp guide, tcp:** open one persistent socket. A socket per request
+  crashed the Ventilation QA ("Bad file descriptor") about 100 times in five
+  hours.
+- **QuickApp guide, ui:** `/plugins/updateView` changes a select's options and
+  hides components live with no restart; slider min/max/step are kept;
+  get_plugin_view renders from viewLayout, not uiView.
+- **Scenes guide:** the scene sandbox has no `net.TCPSocket` and no `load`;
+  `fibaro.getValue` returns no timestamp; an uncaught api error kills a scene
+  with no trace while run_scene_sync reports success; the QuickApp file
+  endpoint is `/quickApp/{id}/files/{name}`.
+- **API notes, silent_writes:** a non-numeric value on a numeric property is
+  silently declined; neighbour-update results are stamped before the node
+  answers; `associations: []` means unknown on Z-Wave engine 3 inclusions;
+  the device filter's broken hasNoProperty and dropped property attributes.
+- **`update_climate_zone`** states HC3's minimum heating/cooling gap rule.
+
+### Fixed
+
+- **Notification routing (QuickApp guide)** said passing the wrong id kind
+  "fails silently" for both mechanisms. Only `fibaro.alert` does;
+  `/mobile/push` answers 400/404 and can be asserted on (measured 13 Aug).
+- **Test harness fixture**: `deviceChild` 2370 no longer exists (the node was
+  re-included; it is now 4817). The stale id was 21 failures in the friction
+  log.
+
 ## [4.36.0] - 2026-11-13
 
 Tier 2 of the 13 Nov friction triage: errors that misled, and tools that

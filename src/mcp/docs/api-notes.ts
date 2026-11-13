@@ -122,6 +122,34 @@ issued after another restarting call **may never run**. Create all variables
 before any \`api.put\` that also restarts, or use
 \`update_multiple_quickapp_files\`, which restarts once for the whole batch.
 
+### A non-numeric value on a numeric property
+\`update_device_property\` (and \`self:updateProperty\` inside the QuickApp) writing a
+string such as "-" to \`value\` on a \`com.fibaro.multilevelSensor\` is **silently
+declined**: no error, a null result exactly as on success, and \`value\` and its
+\`modified\` unchanged (16 Aug 2026). A pcall cannot catch it. Read the property
+back and compare \`modified\`.
+
+### Neighbour-update results are stamped before the node answers
+After \`requestNodeNeighborUpdate\`, HC3 sets \`neighborListResponseTimestamp\` and
+resets \`lastWorkingRoute\` (often to [1], "direct") within seconds, **whether or
+not the node replied**. A Zniffer capture (24 Oct 2026) showed the HC3 still
+working through its queue long after the stamps, and nodes stamped that never
+returned Range Info. A read-back of these fields is not evidence the update ran.
+
+### Z-Wave associations read as empty
+\`properties.associations\` is \`[]\` on devices included under Z-Wave engine 3
+(no \`zwaveMigrated\` interface) **even when an association demonstrably works**
+(25 Oct 2026: a motion sensor's group-2 association to a dimmer, proven by event
+timing). The same model migrated from the old engine lists it. Treat \`[]\` as
+UNKNOWN, not none, before "fixing" an association that is working.
+
+### Device filter: hasNoProperty and property attributes
+\`POST /api/devices/filter\` with \`hasNoProperty\` returns **no devices, in any
+combination** (13 Nov 2026: 0 returned, 695 matching); \`hasProperty\` works. And
+property attributes (\`{"properties": [...]}\`) are dropped, returning id and name
+only. filter_devices evaluates both itself since 4.35.0; anything calling the
+endpoint directly gets a confident empty answer.
+
 ### Missing assets answer 200
 Not a write, but the same family and it breaks the same reasoning: HC3 does not
 404 a missing asset. It answers **200 with a placeholder** — a 1888-byte
