@@ -15,6 +15,7 @@ import { MCPRequest, MCPResponse, MCPTool } from './types';
 import { setupStdio } from './transport/stdio';
 import { setupHttp } from './transport/http';
 import { mergeHandlers } from './tools/registry';
+import { recordWrite } from './writelog';
 import { listResources, readResource } from './resources';
 import { recordFailure, invitesAFinding, FINDING_NUDGE } from './friction';
 import { deepEqual, deepMerge, verifyWrite, tolerantFetch } from './util';
@@ -38,12 +39,13 @@ import { intelligence } from './tools/intelligence';
 import { system, systemSchemas } from './tools/system';
 import { zwave, zwaveSchemas } from './tools/zwave';
 import { snapshot } from './tools/snapshot';
+import { snapshots } from './tools/snapshots';
 import { docs } from './tools/docs';
 import { plugins } from './tools/plugins';
 import { audit } from './tools/audit';
 import { SERVER_NAME, SERVER_VERSION } from './version';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, docs, plugins, audit];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, snapshots, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
 
 
@@ -216,6 +218,7 @@ class HC3MCPServer {
       usersSchemas.get_users,
 
       ...snapshot.schemas,
+      ...snapshots.schemas,
 
       ...icons.schemas,
       systemSchemas.get_diagnostics,
@@ -289,6 +292,8 @@ class HC3MCPServer {
         throw new Error(`Unknown tool: ${name}`);
       }
       result = await toolHandlers[name](this.hc3, args);
+      // Local, best-effort: lets the snapshot job tell our writes from others'.
+      recordWrite(name, args, result, true);
 
       return {
         jsonrpc: '2.0',
@@ -313,6 +318,7 @@ class HC3MCPServer {
       // reaches the model and the user verbatim.
       const errorMessage = error instanceof Error ? error.message : String(error);
       const toolName = (request.params as any)?.name ?? 'unknown';
+      recordWrite(toolName, (request.params as any)?.arguments, undefined, false);
       // Local, redacted, best-effort. Never allowed to affect the response.
       recordFailure(toolName, errorMessage);
       // An error is the moment a finding is cheapest to write and likeliest to

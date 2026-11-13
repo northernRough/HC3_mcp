@@ -234,6 +234,34 @@
       "tool": "get_ios_devices",
       "verdict": "confirmed",
       "note": "Settled 1 Sep by scripts/probe-ios-device-by-id.mjs. GET /api/iosDevices/951 returned all 14 registered devices, byte-identical to the bare list (1284 bytes both ways) — the id segment is ignored. Worse than a 404 because it looks like it worked: anything taking the first element gets device 937 whatever it asked for. The DELETE shape the report also names was NOT probed; it would deregister a real phone."
+    },
+    {
+      "at": 1794567980,
+      "tool": "general",
+      "verdict": "refuted",
+      "note": "Filed 13 Nov mid-investigation and wrong on its premise: it inferred 'the box stayed up, only the QuickApp engine restarted' from CPU jiffies in get_diagnostics. The HC3's own General settings showed uptime of 12 h that afternoon, i.e. a full reboot at 03:46. CPU counters are not an uptime signal. The cause was also not files failing to persist: disabled copier QA 4983 ran onInit on boot and copied 4953 over 4984 (see the finding at 1794582989). Kept, refuted, so nobody chases an engine-only restart."
+    },
+    {
+      "at": 1794582989,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Observed once, 13 Nov 2026 on 5.220.15: copier QA 4983 (enabled:false) ran onInit at boot and overwrote 4984 from 4953, files and variables; 4983 and 4953 since deleted, 4984 restored from the snapshot. Confirmed for that QA on that boot; NOT isolated whether every disabled QA runs onInit on boot. 4.34.0 puts the operational rule in the QuickApp guide (a one-off helper must delete or disarm itself) without claiming the general behaviour."
+    },
+    {
+      "at": 1794584348,
+      "tool": "general",
+      "verdict": "confirmed",
+      "resolvedIn": "4.34.0",
+      "resolvedAt": 1794591906,
+      "note": "Snapshot now runs on the Pi (hc3-snapshot.timer) into /var/lib/hc3-mcp/snapshot, pushed to a private GitHub repo with secrets git-crypt-encrypted. 4.34.0 adds list_snapshots, get_snapshot_quickapp, diff_quickapp_vs_snapshot and restore_quickapp_from_snapshot, which read that repo server side; the 13 Nov restore becomes one diff and one restore call."
+    },
+    {
+      "at": 1794584355,
+      "tool": "set_quickapp_variable",
+      "verdict": "confirmed",
+      "resolvedIn": "4.34.0",
+      "resolvedAt": 1794591906,
+      "note": "All three parts fixed in 4.34.0: set_quickapp_variables writes many with one PUT (one restart); set_quickapp_variable no longer points at modify_device, which rejects quickAppVariables by design; untyped variables are written as strings (true -> \"true\", 15 -> \"15\")."
     }
   ]
 }
