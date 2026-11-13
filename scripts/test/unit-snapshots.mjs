@@ -118,7 +118,7 @@ function writeSnap(mainSrc, engineSrc, vars, msg, date) {
 }
 const NEW_MAIN = 'local PASS = "«secret:hc3/password»"\nfunction QuickApp:onInit() self:winter() end\n';
 const NEW_MAIN_REAL = NEW_MAIN.replace('«secret:hc3/password»', SECRET);
-const vars = [{ name: 'dryRun', value: 'false' }, { name: 'winterMask', value: 'true' }, { name: 'apiKey', value: '«secret»' }];
+const vars = [{ name: 'dryRun', value: 'false' }, { name: 'winterMask', value: 'true' }, { name: 'apiKey', value: '«secret»' }, { name: 'state', value: '{"night":1}' }];
 writeSnap('-- old main\n', '-- old engine\n', vars, 'snapshot: 2026-11-12 01:24:00 UTC', '2026-11-12T01:24:00Z');
 writeSnap(NEW_MAIN, '-- new engine\n', vars, 'snapshot: 2026-11-13 01:24:00 UTC', '2026-11-13T01:24:00Z');
 process.env.HC3_SNAPSHOT_REPO = repo;
@@ -148,7 +148,7 @@ await check('a bad commit ref is refused before reaching git', async () => {
 
 // The 13 Nov situation: live has the OLD code and old variable values.
 const liveFiles = () => ({ main: '-- old main\n', engine: '-- old engine\n', extra: '-- live only\n' });
-const liveVars = () => [{ name: 'dryRun', value: 'true' }, { name: 'winterMask', value: 'false' }, { name: 'apiKey', value: SECRET }];
+const liveVars = () => [{ name: 'dryRun', value: 'true' }, { name: 'winterMask', value: 'false' }, { name: 'apiKey', value: SECRET }, { name: 'state', value: '{"now":2}' }];
 
 await check('diff reports differing files and variables, secret by status only', async () => {
   const hc3 = fakeHc3(liveVars(), liveFiles());
@@ -156,6 +156,11 @@ await check('diff reports differing files and variables, secret by status only',
   assert.deepEqual(r.summary.files, { same: 0, differs: 2, onlyInSnapshot: 0, onlyLive: 1 });
   assert.equal(r.variables.find(v => v.name === 'apiKey').status, 'same');
   assert.equal(r.variables.find(v => v.name === 'winterMask').status, 'differs');
+  const st = r.variables.find(v => v.name === 'state');
+  assert.equal(st.runtime, true);                       // JSON blob = runtime state
+  assert.equal(r.variables.find(v => v.name === "winterMask").runtime, undefined);  // plain value = setting
+  assert.equal(r.summary.variables.differs, 2);          // dryRun, winterMask; NOT state
+  assert.equal(r.summary.variables.runtime, 1);
   assert.ok(!JSON.stringify(r).includes(SECRET), 'secret leaked');
 });
 await check('preview writes nothing', async () => {
@@ -176,8 +181,15 @@ await check('restore: one variable write first (dryRun stays "true"), then one f
   const by = Object.fromEntries(hc3.state.vars.map(v => [v.name, v.value]));
   assert.equal(by.dryRun, 'true');                                    // dryRunFirst wins over the snapshot's "false"
   assert.equal(by.winterMask, 'true');
+  assert.equal(by.state, '{"now":2}');                                // runtime: skipped by 'differing'
+  assert.deepEqual(r.untouched.runtimeVariablesSkipped, ['state']);
   assert.equal(r.verified, true);
   assert.ok(!JSON.stringify(r).includes(SECRET), 'secret leaked');
+});
+await check('a runtime variable named explicitly IS restored', async () => {
+  const hc3 = fakeHc3(liveVars(), liveFiles());
+  await H.restore_quickapp_from_snapshot(hc3, { deviceId: 4984, commit: 'latest', files: 'none', variables: ['state'] });
+  assert.equal(hc3.state.vars.find(v => v.name === 'state').value, '{"night":1}');
 });
 await check('dryRunFirst on a QA without dryRun is refused, nothing written', async () => {
   const hc3 = fakeHc3([{ name: 'other', value: '1' }], liveFiles());

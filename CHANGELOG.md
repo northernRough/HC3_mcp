@@ -30,6 +30,16 @@ git-crypt-encrypted). This release lets the server use it.
   restore and **never returned**; a test asserts no secret value appears in
   any tool output. Files and variables only: viewLayout and uiCallbacks are
   not restored.
+
+  **Runtime state vs settings.** A variable holding a JSON object or array is
+  treated as runtime state (Shading's `env`, `decisions`, `state`, rewritten
+  every tick): the diff flags it `runtime:true` and keeps it out of the
+  "differs" count, and `variables:"differing"` skips it (listed in the
+  result); naming it explicitly still restores it. Plain values are settings.
+  Judged by value shape because the obvious alternative, scanning the source
+  for `self:setVariable("name")`, is backwards for Shading: its literal calls
+  are all panel settings (`winterMask`, `dryRun`, ...), and its blobs are
+  written dynamically by its State module.
 - **`set_quickapp_variables`**: several variables, one PUT, one restart, with
   read-back verification of every value and type, and a check that no
   unnamed variable was lost by the full-array write. The 13 Nov restore needed

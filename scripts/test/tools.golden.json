@@ -862,7 +862,7 @@
   },
   {
     "name": "diff_quickapp_vs_snapshot",
-    "description": "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
+    "description": "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2653,7 +2653,7 @@
           ]
         },
         "variables": {
-          "description": "'none' (default), 'differing', or an array of variable names to restore from the snapshot.",
+          "description": "'none' (default), 'differing' (settings only: runtime variables holding JSON objects/arrays are skipped and listed), or an array of names (restored even if runtime).",
           "anyOf": [
             {
               "type": "string",

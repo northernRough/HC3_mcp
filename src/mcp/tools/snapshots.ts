@@ -113,6 +113,27 @@ interface SnapFile { fileName: string; content: string; masked: string; md5: str
 interface SnapVar { name: string; type?: string; value: any; secret: boolean; resolved: boolean }
 interface SnapQA { commit: string; date: string; folder: string; name: string; files: SnapFile[]; variables: SnapVar[]; vaultAvailable: boolean }
 
+/**
+ * A variable holding a JSON object or array is runtime state, not
+ * configuration. Shading keeps its working memory (env, decisions, state) as
+ * JSON blobs rewritten every tick; its settings (dryRun, winterMask,
+ * winterMode, ...) are plain values. The blobs always differ from last night's
+ * snapshot, which buried real configuration changes in the diff, and restoring
+ * them rolls the QuickApp's memory back to 02:30.
+ *
+ * Judged by VALUE SHAPE on purpose. Scanning the source for
+ * self:setVariable("name") was tried first and is backwards for Shading: its
+ * literal setVariable calls are all panel settings, while the blobs are
+ * written dynamically by its State module and invisible to a scan.
+ */
+export function isRuntimeValue(v: any): boolean {
+  if (v !== null && typeof v === 'object') return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim();
+  if (!(t.startsWith('{') || t.startsWith('['))) return false;
+  try { const j = JSON.parse(t); return j !== null && typeof j === 'object'; } catch { return false; }
+}
+
 export async function loadSnapshotQA(deviceId: number, commitRef?: string): Promise<SnapQA> {
   const { commit, date } = await resolveCommit(commitRef);
   const tops = (await gitText(['ls-tree', '--name-only', commit, 'quickapps/'])).split('\n').filter(Boolean);
@@ -172,14 +193,15 @@ export function compare(snap: SnapQA, live: Awaited<ReturnType<typeof liveQA>>) 
   const variables = [...new Set([...sv.keys(), ...lv.keys()])].sort().map(n => {
     const s = sv.get(n), l: any = lv.get(n);
     const secret = !!s?.secret;
+    const runtime = !secret && (isRuntimeValue(s?.value) || isRuntimeValue(l?.value)) ? { runtime: true } : {};
     let status: string;
     if (!l) status = 'only-in-snapshot';
     else if (!s) status = 'only-live';
     else if (secret && !s.resolved) status = 'unknown (secret not decryptable)';
     else status = String(s.value) === String(l.value) && (s.type ?? '') === (l.type ?? '') ? 'same' : 'differs';
     return secret
-      ? { name: n, status, secret: true }
-      : { name: n, status, snapshot: s ? { type: s.type, value: s.value } : undefined, live: l ? { type: l.type, value: l.value } : undefined };
+      ? { name: n, status, secret: true, ...runtime }
+      : { name: n, status, ...runtime, snapshot: s ? { type: s.type, value: s.value } : undefined, live: l ? { type: l.type, value: l.value } : undefined };
   });
   return { files, variables };
 }
@@ -213,7 +235,7 @@ export const snapshots: ToolModule = {
     },
     {
       name: 'diff_quickapp_vs_snapshot',
-      description: "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
+      description: "Compare a live QuickApp with a snapshot, per file (md5 contentHash and size: same / differs / only-in-snapshot / only-live) and per variable (type and value; secret variables report only same/differs). Variables holding a JSON object or array (runtime state, e.g. Shading's env/decisions/state) are flagged runtime:true and left out of the 'differs' count: they are working memory and always differ from last night. Plain-valued variables are treated as settings. No file content is returned. Use it first when a QuickApp seems to have reverted or been changed unexpectedly, then restore_quickapp_from_snapshot with the same commit. Read-only. Covers files and variables only, not the tile's viewLayout or uiCallbacks.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -232,7 +254,7 @@ export const snapshots: ToolModule = {
           deviceId: { type: 'number', description: 'QuickApp id to write to (normally the same QA the snapshot holds).' },
           commit: { type: 'string', description: "Required, to make the source explicit: 'latest', 'before:<ISO date>', or a commit id." },
           files: { description: "'differing' (default: files that differ or are missing live), 'all', 'none', or an array of file names.", anyOf: [{ type: 'string', enum: ['differing', 'all', 'none'] }, { type: 'array', items: { type: 'string' } }] },
-          variables: { description: "'none' (default), 'differing', or an array of variable names to restore from the snapshot.", anyOf: [{ type: 'string', enum: ['none', 'differing'] }, { type: 'array', items: { type: 'string' } }] },
+          variables: { description: "'none' (default), 'differing' (settings only: runtime variables holding JSON objects/arrays are skipped and listed), or an array of names (restored even if runtime).", anyOf: [{ type: 'string', enum: ['none', 'differing'] }, { type: 'array', items: { type: 'string' } }] },
           sourceDeviceId: { type: 'number', description: 'Restore from a different QuickApp in the snapshot (e.g. a QA re-created under a new id). Default: deviceId.' },
           dryRunFirst: { type: 'boolean', description: 'Set the dryRun variable to "true" before writing files, and leave it there. Default false.' },
           preview: { type: 'boolean', description: 'Report the plan and write nothing. Default false.' },
@@ -285,13 +307,14 @@ export const snapshots: ToolModule = {
       const id = Number(args.deviceId);
       const [snap, live] = await Promise.all([loadSnapshotQA(id, args.commit), liveQA(hc3, id)]);
       const { files, variables } = compare(snap, live);
-      const count = (xs: any[], s: string) => xs.filter(x => x.status === s).length;
+      const count = (xs: any[], s: string) => xs.filter(x => x.status === s && !x.runtime).length;
       return {
         deviceId: id, liveName: live.name, snapshotName: snap.name,
         commit: snap.commit.slice(0, 10), snapshotDate: snap.date,
         summary: {
           files: { same: count(files, 'same'), differs: count(files, 'differs'), onlyInSnapshot: count(files, 'only-in-snapshot'), onlyLive: count(files, 'only-live') },
-          variables: { same: count(variables, 'same'), differs: count(variables, 'differs'), onlyInSnapshot: count(variables, 'only-in-snapshot'), onlyLive: count(variables, 'only-live') },
+          variables: { same: count(variables, 'same'), differs: count(variables, 'differs'), onlyInSnapshot: count(variables, 'only-in-snapshot'), onlyLive: count(variables, 'only-live'),
+                       runtime: variables.filter((v: any) => v.runtime).length },
         },
         files, variables,
         ...(snap.vaultAvailable ? {} : { warning: 'Encrypted secrets could not be read (git-crypt locked?); secret comparisons are unknown.' }),
@@ -331,7 +354,7 @@ export const snapshots: ToolModule = {
       const snapVars = new Map(snap.variables.map(v => [v.name, v]));
       let varNames: string[];
       if (varSel === 'none') varNames = [];
-      else if (varSel === 'differing') varNames = diff.variables.filter(v => v.status === 'differs' || v.status === 'only-in-snapshot').map(v => v.name);
+      else if (varSel === 'differing') varNames = diff.variables.filter((v: any) => !v.runtime && (v.status === 'differs' || v.status === 'only-in-snapshot')).map(v => v.name);
       else if (Array.isArray(varSel)) {
         const bad = varSel.filter(n => !snapVars.has(n));
         if (bad.length) throw new Error(`Variables not in the snapshot: ${bad.join(', ')}.`);
@@ -369,6 +392,7 @@ export const snapshots: ToolModule = {
           ...(toUpdate.length ? [{ step: 'update files (one write, one restart)', files: toUpdate.map(n => ({ fileName: n, from: diff.files.find(f => f.fileName === n)?.liveHash, to: snapFiles.get(n)!.md5 })) }] : []),
         ],
         untouched: {
+          ...(varSel === 'differing' ? { runtimeVariablesSkipped: diff.variables.filter((v: any) => v.runtime && v.status === 'differs').map(v => v.name) } : {}),
           filesOnlyLive: diff.files.filter(f => f.status === 'only-live').map(f => f.fileName),
           filesAlreadySame: diff.files.filter(f => f.status === 'same' && !chosen.includes(f.fileName)).map(f => f.fileName),
         },
