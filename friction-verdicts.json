@@ -140,6 +140,126 @@
       "signatureContains": "Post-write verification failed",
       "verdict": "confirmed",
       "note": "Not a defect in this tool — it is this tool catching HC3 accepting a write and storing something else. The underlying HC3 behaviour is the finding; each instance is worth reading on its own."
+    },
+    {
+      "tool": "get_device_property",
+      "signatureContains": "no device <n> on this HC3",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Not-found message working as intended. All 11 are device 2370, the harness fixture `deviceChild` in scripts/test/default-args.mjs, which no longer exists on this HC3: stale fixture, not a defect. Fix the fixture."
+    },
+    {
+      "tool": "get_device_parameters",
+      "signatureContains": "no device <n> on this HC3",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Same stale harness fixture (device 2370)."
+    },
+    {
+      "tool": "get_device_property",
+      "signatureContains": "requires a non-empty propertyName",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard; same harness run as the 2370 rows."
+    },
+    {
+      "tool": "delete_device",
+      "signatureContains": "post-delete verify failed",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Verify does ONE GET immediately after the DELETE. HC3 deletes asynchronously (child devices especially); callers confirmed 5070, 5071, 5072 gone moments later (findings 1793566471, 1794098351). A false failure invites a retry or a 'cannot delete' report. Fix: poll a few seconds before declaring failure."
+    },
+    {
+      "tool": "report_finding",
+      "signatureContains": "report_finding requires",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error."
+    },
+    {
+      "tool": "get_device_info",
+      "signatureContains": "Not Found (GET /api/devices/<n>)",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bare 404 with none of the 'no device N on this HC3' wording the other tools gained in 4.27.0."
+    },
+    {
+      "tool": "get_event_history",
+      "signatureContains": "aborted due to timeout",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3 takes 19-20 s for /api/events/history regardless of window (1 day: 19.1 s, 7 days: 20.4 s, one device with objectType). The HTTP client aborts at 15 s (hc3-client.ts). Fix: longer timeout for this endpoint."
+    },
+    {
+      "tool": "update_multiple_quickapp_files",
+      "signatureContains": "Internal Server Error (PUT /api/quickApp/<n>/files)",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HTTP 500 when any submitted file does not yet exist, and the write is PARTIAL: files that exist are written (finding 1794143327 saw the new main running). Fix: list files first, create missing ones via POST, then PUT the rest; report per file."
+    },
+    {
+      "tool": "update_climate_zone",
+      "signatureContains": "incorrect distance between temperatureCooling and temperatureHeating",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3's own validation (minimum gap between heating and cooling setpoints per slot), and the message names the slot. Worth stating the rule in the tool description."
+    },
+    {
+      "tool": "create_global_variable",
+      "signatureContains": "requires a non-empty varName",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard."
+    },
+    {
+      "tool": "get_device_property",
+      "signatureContains": "has no property",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Informative not-found listing the properties that exist. But two of these asked for 'interfaces' and 'parentId', which are top-level device fields, not properties: the message should say so and point at get_device_info."
+    },
+    {
+      "tool": "modify_device",
+      "signatureContains": "Cannot use '<v>' operator",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `properties` arrived as a JSON string, and the handler crashed with a TypeError instead of refusing clearly. Fix: parse a JSON-string object or refuse with a plain message."
+    },
+    {
+      "tool": "patch_quickapp_file",
+      "signatureContains": "Found <n>, expected",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: ambiguous `old`, nothing written."
+    },
+    {
+      "tool": "patch_quickapp_file",
+      "signatureContains": "edits must be a non-empty array",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard."
+    },
+    {
+      "tool": "patch_quickapp_file",
+      "signatureContains": "has changed since you read it",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). expectedHash guard working."
+    },
+    {
+      "tool": "filter_devices",
+      "signatureContains": "Bad Request (POST /api/devices/filter)",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 rejecting a filter with a null value. Probably the caller; the tool could refuse null filter values before sending."
+    },
+    {
+      "tool": "modify_device",
+      "signatureContains": "Not Found (PUT /api/devices/<n>)",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 answers 404 for an EXISTING device when it refuses a field: a `type` change (finding 1786897950) and viewLayout on a QuickAppChild, which uses uiView (1793551362). Reads as 'wrong id'. Fix: on 404, re-read the device; if it exists, say a field was refused and name the known cases."
+    },
+    {
+      "tool": "delete_device",
+      "signatureContains": "refuses device",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin."
+    },
+    {
+      "tool": "set_quickapp_variable",
+      "signatureContains": "does not exist on device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). \"QuickApp variable 'undefined'\": the call carried no name and nothing checked. Same missing-argument class as get_quickapp_variable's false 'exists:false' (finding 1794098612). Fix: require name."
+    },
+    {
+      "tool": "audit_id_references",
+      "signatureContains": "Either deviceId or name",
+      "verdict": "by-design",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard."
     }
   ],
   "findings": [
@@ -262,6 +382,296 @@
       "resolvedIn": "4.34.0",
       "resolvedAt": 1794591906,
       "note": "All three parts fixed in 4.34.0: set_quickapp_variables writes many with one PUT (one restart); set_quickapp_variable no longer points at modify_device, which rejects quickAppVariables by design; untyped variables are written as strings (true -> \"true\", 15 -> \"15\")."
+    },
+    {
+      "at": 1786649229,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Reporter tested every arm. /mobile/push VALIDATES (400 wrong id kind or category, 404 unknown id, 500 missing category or empty list); fibaro.alert returns nil and reports nothing. Corrects the 'both fail silently' assumption. Guide gap: the routing section covers id kinds, not this."
+    },
+    {
+      "at": 1786802207,
+      "tool": "upload_icon",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Path form works and is now in the QuickApp guide (properties.icon {path='/assets/userIcons/devices/User<N>/...', source='HC'}); get_icon's paths fixed in 4.21.2."
+    },
+    {
+      "at": 1786802239,
+      "tool": "get_hc3_lua_scenes_guide",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An uncaught api.* error kills a scene with no log at all, and run_scene_sync still reports success. QA files are /api/quickApp/{id}/files/{name}, not /devices/{id}/files. Guide gap: say both, and wrap api calls in pcall + log."
+    },
+    {
+      "at": 1786897923,
+      "tool": "modify_device",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout + uiCallbacks in one write left every eventBinding null on 5.210.12. NOT reproduced as such on 5.220.15: Shading's layout there carries no eventBinding blocks at all, and the 13 Nov tile-restore test (viewLayout + uiView + uiCallbacks in one write) rendered and stored identically. Different format, so neither confirms nor refutes."
+    },
+    {
+      "at": 1786897938,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). api.post('/plugins/updateView', {componentName, propertyName='options', newValue}) replaces select options live with no restart and nothing else disturbed. Guide gap."
+    },
+    {
+      "at": 1786897950,
+      "tool": "modify_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 refuses a `type` change with a bare 404 on an existing device. Tool fix tracked under the modify_device 404 failure row."
+    },
+    {
+      "at": 1786897966,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A QuickApp writing its OWN variables through the device API restarts itself, in a loop if done in onInit. Scope: self:setVariable does NOT restart (Shading writes state every tick; firmwareWatch relies on it), so the copier must have written via api.put on its own device. Guide gap: state the distinction."
+    },
+    {
+      "at": 1786918951,
+      "tool": "update_device_property",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A non-numeric value on a multilevelSensor is silently declined: no error, null result, modified unchanged; self:updateProperty does not throw either. Belongs in api notes silent_writes."
+    },
+    {
+      "at": 1790180016,
+      "tool": "create_backup",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). POST /api/service/backups answers 400 'unsupported action'. Not probed: a working call reboots the gateway. Needs the web UI's real request body captured before changing the tool."
+    },
+    {
+      "at": 1791894921,
+      "tool": "filter_devices",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's hasNoProperty filter returns 0 devices in every combination (alone, or with enabled/isPlugin), while 695 enabled non-plugin devices lack 'power'. A silent wrong answer. Fix: evaluate hasNoProperty in the tool, or refuse it. The 'omit attributes = ids only' half also holds."
+    },
+    {
+      "at": 1791903737,
+      "tool": "general",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Scene fibaro.getGlobalVariable on a missing global not returning nil. Plausible, not reproduced here; the exact return value was not logged."
+    },
+    {
+      "at": 1792001693,
+      "tool": "create_global_variable",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An empty-string value is dropped by the client before it reaches the server. Fix: make value optional, defaulting to \"\"."
+    },
+    {
+      "at": 1792013615,
+      "tool": "set_device_parameter",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Qubino param 71: isSupportedByDevice:false and cache unchanged, but 1792237341 later showed those signals do not mean the write failed. Whether calibration ran is unknown."
+    },
+    {
+      "at": 1792237011,
+      "tool": "set_device_parameter",
+      "verdict": "refuted",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Withdrawn by its reporter minutes later (1792237341): the write did transmit."
+    },
+    {
+      "at": 1792237341,
+      "tool": "set_device_parameter",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). isSupportedByDevice:false and cacheUpdated:false do NOT mean failure on FGR223 parents (5.220.15): slats rotated after the write. The tool's result should stop reading as failure on those signals."
+    },
+    {
+      "at": 1792258245,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). net.TCPSocket is nil in scenes (QuickApps have it, see 1792258320). Raw TCP probes need a temporary QuickApp. Guide gap."
+    },
+    {
+      "at": 1792258320,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Contrast to 1792258245: TCPSocket works in a QuickApp."
+    },
+    {
+      "at": 1792259521,
+      "tool": "control_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The declared-actions pre-check blocks custom QuickApp methods (e.g. dumpCapabilities) on QAs whose type declares actions, though HC3 dispatches any QuickApp method. Fix: allow undeclared methods on QuickApps, with a note that delivery cannot be verified."
+    },
+    {
+      "at": 1792259991,
+      "tool": "modify_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Submitting isLight:false with a deviceRole: HC3 removes isLight and the light interface, and verify throws on a correct outcome. Fix: treat submitted false read back as absent as a match."
+    },
+    {
+      "at": 1792336243,
+      "tool": "set_quickapp_variable",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Writing a variable on a QuickAppChild does NOT restart the parent (and see 1793544288: the parent's in-memory copy later overwrites it). The restart warning should be scoped to parent QuickApps."
+    },
+    {
+      "at": 1792862720,
+      "tool": "filter_devices",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's filter endpoint ignores requested property attributes and returns id/name only. Fix: fetch requested properties in the tool, or refuse."
+    },
+    {
+      "at": 1792867812,
+      "tool": "control_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Reporter's Zniffer capture: HC3 stamps neighborListResponseTimestamp and resets lastWorkingRoute before the node answers. Read-back after requestNodeNeighborUpdate is not evidence. Belongs in api notes."
+    },
+    {
+      "at": 1792934379,
+      "tool": "get_device_info",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Narrowed by 1792934622."
+    },
+    {
+      "at": 1792934622,
+      "tool": "get_device_info",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). properties.associations [] is UNKNOWN, not none, on devices included under Z-Wave engine 3 without zwaveMigrated (association demonstrably working). Belongs in api notes."
+    },
+    {
+      "at": 1792935118,
+      "tool": "set_quickapp_variable",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Untyped variable written as a boolean.",
+      "resolvedIn": "4.34.0",
+      "resolvedAt": 1794599023
+    },
+    {
+      "at": 1793050980,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Opening and closing a net.TCPSocket per request (~8/min) crashes the QuickApp with 'Bad file descriptor' after ~20 min, increasingly often. Guide gap: one persistent socket."
+    },
+    {
+      "at": 1793056898,
+      "tool": "set_device_parameter",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Whether a parameter write to a sleeping device is queued: nothing on the record shows it. Needs a wake-up observed."
+    },
+    {
+      "at": 1793057262,
+      "tool": "modify_device",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). PUT properties.wakeUpTime updates the record; whether it is ever transmitted is unknown, as with the parameters PUT."
+    },
+    {
+      "at": 1793099983,
+      "tool": "get_hc3_quickapp_programming_guide",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). updateView propertyName='visible' hides components at runtime; slider min/max/step survive from the layout; get_plugin_view renders from viewLayout, not uiView. Guide gap."
+    },
+    {
+      "at": 1793473750,
+      "tool": "get_device_parameters / set_device_parameter",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The web UI exports, imports and reads parameter profiles live. Feature request; the UI's endpoints need capturing first."
+    },
+    {
+      "at": 1793476768,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). fibaro.getValue returns only the value here, no modified timestamp (six devices). Guide gap."
+    },
+    {
+      "at": 1793486412,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Measured: QA variables to 800 KB work, cost linear (~1.2 ms per KB on every read of the device); QuickAppChild holds its own variables. Guide gap: keep large state on a hidden child."
+    },
+    {
+      "at": 1793488407,
+      "tool": "general",
+      "verdict": "untested",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). GET /api/temperature/{from}/{to}/summary-graph/devices/temperature/{id} serves history. Not probed here; candidate get_temperature_history tool."
+    },
+    {
+      "at": 1793489977,
+      "tool": "patch_quickapp_file",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). No multi-file patch: two patches mean two restarts, and the second lost startup writes on hardware. Feature: patch several files in one write with expectedHash."
+    },
+    {
+      "at": 1793494620,
+      "tool": "update_climate_zone",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A QuickApp thermostat in a climate zone gets setpoints on join, mode change and edit, NOT at schedule slot changes. Guide gap: read the zone's current setpoints."
+    },
+    {
+      "at": 1793544288,
+      "tool": "set_quickapp_variable",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A child variable write is not seen by the running parent, and the parent's next child setVariable writes its stale copy back. Fix: on a QuickAppChild, warn and offer to restart the parent."
+    },
+    {
+      "at": 1793550898,
+      "tool": "create_quickapp_file",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Unknown arguments are silently ignored (localPath on create; dryRun on update_multiple, which then wrote). Same class as find_devices_by_name's exact vs exactMatch (1794097426). Fix in the dispatcher: report unknown arguments."
+    },
+    {
+      "at": 1793551362,
+      "tool": "modify_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout on a QuickAppChild: bare 404; children use uiView. Tool fix tracked under the modify_device 404 failure row."
+    },
+    {
+      "at": 1793566471,
+      "tool": "delete_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row."
+    },
+    {
+      "at": 1794057778,
+      "tool": "get_quickapps",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). 842 KB for 33 QuickApps, every layout tree included. Fix: compact list by default (id, name, type, room, enabled), full records on request."
+    },
+    {
+      "at": 1794096871,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). fibaro.getDevicesID() is a device-list query returning a table, not a self-id; `fn and fn()` guards hide the wrong type. Guide gap."
+    },
+    {
+      "at": 1794097426,
+      "tool": "mcp__mallorn_MCP-HC3__find_devices_by_name",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Both halves confirmed in code: only parentId 0/1 kept, so every Z-Wave endpoint child is invisible to a name search; and the parameter is exactMatch, so `exact` was silently ignored."
+    },
+    {
+      "at": 1794098351,
+      "tool": "mcp__mallorn_MCP-HC3__delete_device",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row."
+    },
+    {
+      "at": 1794098612,
+      "tool": "mcp__mallorn_MCP-HC3__get_quickapp_variable",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The reported results carry no `name` key: the handler received no name and returned exists:false instead of refusing. A missing argument became a confident wrong answer about the user's system. Fix: require name."
+    },
+    {
+      "at": 1794137749,
+      "tool": "general",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `load` is not available in the scene sandbox. Guide gap; a server-side syntax check (luaparse) would be the real pre-flight."
+    },
+    {
+      "at": 1794143268,
+      "tool": "update_multiple_quickapp_files",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the update_multiple_quickapp_files failure row."
+    },
+    {
+      "at": 1794143327,
+      "tool": "update_multiple_quickapp_files",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Partial write reported as total failure. See the failure row."
+    },
+    {
+      "at": 1794432833,
+      "tool": "get_event_history",
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the get_event_history failure row: 19-20 s server time, 15 s client timeout."
     }
   ]
 }
