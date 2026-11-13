@@ -42,6 +42,19 @@ export const deleteDeviceSchema: MCPTool =
         }
       };
 
+/** Pick top-level fields and "properties.X" paths from a device record. */
+export function projectDevice(d: any, attrs: string[]): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const a of attrs) {
+    if (a === 'properties') out.properties = d?.properties ?? {};
+    else if (a.startsWith('properties.')) {
+      const k = a.slice('properties.'.length);
+      (out.properties ??= {})[k] = d?.properties?.[k];
+    } else out[a] = d?.[a];
+  }
+  return out;
+}
+
 export const devices: ToolModule = {
   schemas: [
       {
@@ -78,7 +91,7 @@ export const devices: ToolModule = {
               items: {
                 type: 'object',
                 properties: {
-                  filter: { type: 'string', description: 'Filter key, e.g. "deviceID", "enabled", "roomID", "type"' },
+                  filter: { type: 'string', description: 'Filter key, e.g. "deviceID", "enabled", "roomID", "type", "hasProperty", "hasNoProperty". hasNoProperty is evaluated by this tool (HC3\'s own returns nothing): a device matches if it lacks EVERY listed property.' },
                   value: { type: 'array', description: 'Values to match. Arrays of strings, numbers, or booleans.' }
                 },
                 required: ['filter', 'value']
@@ -87,7 +100,7 @@ export const devices: ToolModule = {
             attributes: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Attribute names to return per device. E.g. ["id", "name", "roomID", "type"]. Omit to get all.'
+              description: 'Attribute names to return per device, e.g. ["id", "name", "roomID", "type", "properties.value"]. Top-level fields, "properties" (the whole object) or "properties.<name>". OMIT to get ids only (that is what HC3 returns), not full records.'
             }
           },
           required: ['filters']
@@ -95,7 +108,7 @@ export const devices: ToolModule = {
       },
       {
         name: 'find_devices_by_name',
-        description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exact-match opt-in). Filters to parent/top-level devices only (parentId in {0, 1}) — i.e. system/root devices (QAs, HC3 controllers, grouping wrappers) and direct Z-Wave nodes (the physical device as a whole). Child endpoints of multi-endpoint parents (FGRGBW channels, ZEN52 endpoints 1/2, AEON MultiSensor\'s motion/temp/lux children, etc.) are excluded. For children-of-multi-endpoint-devices use find_device_by_endpoint (by endPointId). HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
+        description: 'Resolve a human-readable device name to one or more HC3 devices. Case-insensitive substring match by default (exactMatch:true for equality). Searches EVERY device, including Z-Wave endpoint children, which is where most controllable devices live (a dimmer channel, a sensor\'s motion child); each result carries parentId so you can tell a node from its endpoints. Until 4.35.0 only top-level devices (parentId 0 or 1) were searched, so an exactly-named endpoint child came back as [] and read as "no such device". Pass topLevelOnly:true for the old behaviour. HC3 has no native name-filter on /api/devices; this tool fetches the device list (optionally narrowed by roomId) and filters in-process, returning minimal records. Use this instead of get_devices when you have a name and want the id — dramatically smaller payload.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -114,6 +127,10 @@ export const devices: ToolModule = {
             visibleOnly: {
               type: 'boolean',
               description: 'If true, only return devices where visible === true. Defaults to false.'
+            },
+            topLevelOnly: {
+              type: 'boolean',
+              description: 'If true, only top-level devices (parentId 0 or 1: QuickApps, controllers, whole Z-Wave nodes). Defaults to false: endpoint children are searched too.'
             }
           },
           required: ['name']
@@ -328,11 +345,41 @@ export const devices: ToolModule = {
       if (!Array.isArray(args?.filters)) {
         throw new Error('filter_devices requires filters array.');
       }
-      const body: Record<string, any> = {
-        filters: args.filters,
-        attributes: { main: args.attributes && args.attributes.length > 0 ? args.attributes : [] }
-      };
-      return await hc3.request('/api/devices/filter', 'POST', body);
+      // A null value makes HC3 answer 400 "Invalid JSON: get_value<string>
+      // called on null Value", which names neither the filter nor the field.
+      for (const f of args.filters) {
+        if (!f || typeof f.filter !== 'string' || !Array.isArray(f.value) || f.value.some((v: any) => v === null || v === undefined)) {
+          throw new Error(`filter_devices: every filter must be {filter: string, value: [non-null values]}; got ${JSON.stringify(f)}.`);
+        }
+      }
+      // HC3's own hasNoProperty filter is broken: it returns NO devices in any
+      // combination (13 Nov 2026: 0 returned, 827 of 1008 devices actually
+      // lack 'power'; hasProperty is fine at 181). A silent empty result reads
+      // as "none lack it". Evaluate it here instead.
+      const clientSide = args.filters.filter(f => f.filter === 'hasNoProperty');
+      const serverSide = args.filters.filter(f => f.filter !== 'hasNoProperty');
+      const attrs = args.attributes ?? [];
+      // HC3 also drops property attributes ("properties.value", "properties")
+      // silently, returning id/name only. Project those here too.
+      const wantsProps = attrs.some(a => a === 'properties' || a.startsWith('properties.'));
+
+      if (clientSide.length === 0 && !wantsProps) {
+        const body: Record<string, any> = { filters: serverSide, attributes: { main: attrs } };
+        return await hc3.request('/api/devices/filter', 'POST', body);
+      }
+
+      // Server narrows by everything it handles correctly; we do the rest.
+      let ids: Set<number> | null = null;
+      if (serverSide.length) {
+        const hits: any[] = await hc3.request('/api/devices/filter', 'POST', { filters: serverSide, attributes: { main: ['id'] } });
+        ids = new Set((hits ?? []).map(h => h.id));
+      }
+      const all: any[] = await hc3.request('/api/devices');
+      const lacking = clientSide.flatMap(f => f.value.map(String));
+      const matched = all.filter(d =>
+        (ids === null || ids.has(d.id)) &&
+        lacking.every(prop => !(d?.properties && prop in d.properties)));
+      return matched.map(d => projectDevice(d, attrs.length ? attrs : ['id']));
     },
 
     async find_devices_by_name(hc3, args: {
@@ -340,10 +387,12 @@ export const devices: ToolModule = {
       roomId?: number;
       exactMatch?: boolean;
       visibleOnly?: boolean;
+      topLevelOnly?: boolean;
     }): Promise<any> {
       if (typeof args?.name !== 'string' || args.name.length === 0) {
         throw new Error('find_devices_by_name requires a non-empty name.');
       }
+      const topLevelOnly = args.topLevelOnly === true;
       const needle = args.name.toLowerCase();
       const exact = !!args.exactMatch;
       const visibleOnly = !!args.visibleOnly;
@@ -355,7 +404,7 @@ export const devices: ToolModule = {
 
       const matches = devices.filter(d => {
         const pid = d?.parentId;
-        if (pid !== 0 && pid !== 1) return false;
+        if (topLevelOnly && pid !== 0 && pid !== 1) return false;
         if (visibleOnly && d?.visible !== true) return false;
         const name: string = typeof d?.name === 'string' ? d.name.toLowerCase() : '';
         return exact ? name === needle : name.includes(needle);
@@ -364,6 +413,7 @@ export const devices: ToolModule = {
       return matches.map(d => ({
         id: d.id,
         name: d.name,
+        parentId: d.parentId,
         roomID: d.roomID,
         type: d.type,
         visible: d.visible,
@@ -522,16 +572,25 @@ export const devices: ToolModule = {
 
       await hc3.request(`/api/devices/${args.deviceId}`, 'DELETE');
 
-      let stillExists = false;
-      try {
-        await hc3.request(`/api/devices/${args.deviceId}`);
-        stillExists = true;
-      } catch (e: any) {
-        if (!isNotFound(e)) throw e;
+      // HC3 deletes asynchronously, child devices especially: a GET straight
+      // after the DELETE can still find the device, then 404 a moment later.
+      // Checking once reported failure on deletes that had worked (5070,
+      // 5071, 5072 on 1 and 8 Nov), which invites a retry or a false
+      // "cannot delete". Poll for up to ~6 s before calling it a failure.
+      let stillExists = true;
+      for (const waitMs of [0, 500, 1000, 1500, 3000]) {
+        if (waitMs) await new Promise(r => setTimeout(r, waitMs));
+        try {
+          await hc3.request(`/api/devices/${args.deviceId}`);
+        } catch (e: any) {
+          if (!isNotFound(e)) throw e;
+          stillExists = false;
+          break;
+        }
       }
       if (stillExists) {
         throw new Error(
-          `delete_device: post-delete verify failed — device ${args.deviceId} still exists after DELETE.`
+          `delete_device: post-delete verify failed — device ${args.deviceId} still exists 6 s after DELETE.`
         );
       }
 

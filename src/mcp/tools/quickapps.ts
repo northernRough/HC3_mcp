@@ -217,7 +217,7 @@ export const quickappsExtSchemas: MCPTool[] = [
       },
       {
         name: "update_multiple_quickapp_files",
-        description: "Update multiple QuickApp source files at once.",
+        description: "Update several QuickApp source files in one write, so the QuickApp restarts once rather than once per file. Files that do not exist yet are created first (one POST each; HC3 answers the multi-file PUT with HTTP 500 if any named file is missing, after writing the ones that exist). Every file is then read back and byte-compared; the result carries each file's contentHash. If the PUT fails, the error lists which files were WRITTEN, left unchanged or missing, so a partial write is never reported as nothing written.",
         inputSchema: {
           type: "object",
           properties: {
@@ -816,20 +816,51 @@ export const quickapps: ToolModule = {
       files: Array<{ fileName: string; content: string; type?: string; isOpen?: boolean }>
     }): Promise<any> {
       const { deviceId, files } = args;
+      if (!Array.isArray(files) || files.length === 0) {
+        throw new Error('update_multiple_quickapp_files needs a non-empty files array.');
+      }
       const existing = await hc3.request(`/api/quickApp/${deviceId}/files`);
       const isMainByName = new Map<string, boolean>(
         (existing ?? []).map((f: any) => [f.name, !!f.isMain])
       );
+
+      // HC3 answers the multi-file PUT with HTTP 500 if ANY submitted file
+      // does not exist yet, and the write is PARTIAL: the files that did exist
+      // are stored (8 Nov 2026, QA 5073: the new main crash-looped while the
+      // tool reported total failure). Create missing files first, one POST
+      // each, so the PUT only ever names files that exist.
+      const created: string[] = [];
+      for (const f of files.filter(f => !isMainByName.has(f.fileName))) {
+        await hc3.request(`/api/quickApp/${deviceId}/files`, 'POST', {
+          name: f.fileName, type: f.type || 'lua', content: f.content, isOpen: f.isOpen || false, isMain: false,
+        });
+        created.push(f.fileName);
+      }
+      const toPut = files.filter(f => !created.includes(f.fileName));
+
       // The MCP arg uses fileName; HC3's wire shape uses `name` for the file's
       // own name. Remap on the way out.
-      const filesData = files.map(file => ({
+      const filesData = toPut.map(file => ({
         name: file.fileName,
         content: file.content,
         type: file.type || 'lua',
         isOpen: file.isOpen || false,
         isMain: isMainByName.get(file.fileName) ?? false
       }));
-      const putResult = await hc3.request(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
+      let putResult: any = null;
+      if (filesData.length) {
+        try {
+          putResult = await hc3.request(`/api/quickApp/${deviceId}/files`, 'PUT', filesData);
+        } catch (e: any) {
+          // Say what actually landed, so nobody believes a half-written QA is
+          // unchanged.
+          const state = await Promise.all(files.map(async f => {
+            const v = await hc3.request(`/api/quickApp/${deviceId}/files/${encodeURIComponent(f.fileName)}`).catch(() => null);
+            return `  - '${f.fileName}': ${v?.content === f.content ? 'WRITTEN' : v ? 'unchanged' : 'missing'}${created.includes(f.fileName) ? ' (created first)' : ''}`;
+          }));
+          throw new Error(`update_multiple_quickapp_files: the PUT failed (${e?.message ?? e}). State of each file now:\n${state.join('\n')}`);
+        }
+      }
 
       const stored = await Promise.all(
         files.map(f =>
@@ -864,6 +895,7 @@ export const quickapps: ToolModule = {
       return {
         deviceId,
         filesWritten: files.length,
+        ...(created.length ? { created } : {}),
         files: files.map(f => {
           const stored = storedByName.get(f.fileName) ?? '';
           return { fileName: f.fileName, bytes: stored.length, contentHash: contentHash(stored) };
@@ -883,6 +915,9 @@ export const quickapps: ToolModule = {
 
     async get_quickapp_variable(hc3, args: { deviceId: number; name: string }): Promise<any> {
       const { deviceId, name } = args;
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error('get_quickapp_variable requires a variable name (argument `name`).');
+      }
       const device = await hc3.request(`/api/devices/${deviceId}`);
       const vars: any[] = device?.properties?.quickAppVariables ?? [];
       const found = vars.find(v => v.name === name);
@@ -904,6 +939,9 @@ export const quickapps: ToolModule = {
       value: string | number | boolean;
     }): Promise<any> {
       const { deviceId, name, value } = args;
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error('set_quickapp_variable requires a variable name (argument `name`).');
+      }
 
       const device = await hc3.request(`/api/devices/${deviceId}`);
       const vars: any[] = device?.properties?.quickAppVariables ?? [];
@@ -1059,6 +1097,9 @@ export const quickapps: ToolModule = {
       name: string;
     }): Promise<any> {
       const { deviceId, name } = args;
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error('delete_quickapp_variable requires a variable name (argument `name`).');
+      }
 
       const device = await hc3.request(`/api/devices/${deviceId}`);
       const vars: any[] = device?.properties?.quickAppVariables ?? [];

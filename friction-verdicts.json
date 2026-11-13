@@ -163,13 +163,17 @@
       "tool": "delete_device",
       "signatureContains": "post-delete verify failed",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Verify does ONE GET immediately after the DELETE. HC3 deletes asynchronously (child devices especially); callers confirmed 5070, 5071, 5072 gone moments later (findings 1793566471, 1794098351). A false failure invites a retry or a 'cannot delete' report. Fix: poll a few seconds before declaring failure."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Verify does ONE GET immediately after the DELETE. HC3 deletes asynchronously (child devices especially); callers confirmed 5070, 5071, 5072 gone moments later (findings 1793566471, 1794098351). A false failure invites a retry or a 'cannot delete' report. Fix: poll a few seconds before declaring failure.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "report_finding",
       "signatureContains": "report_finding requires",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "get_device_info",
@@ -181,13 +185,17 @@
       "tool": "get_event_history",
       "signatureContains": "aborted due to timeout",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3 takes 19-20 s for /api/events/history regardless of window (1 day: 19.1 s, 7 days: 20.4 s, one device with objectType). The HTTP client aborts at 15 s (hc3-client.ts). Fix: longer timeout for this endpoint."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3 takes 19-20 s for /api/events/history regardless of window (1 day: 19.1 s, 7 days: 20.4 s, one device with objectType). The HTTP client aborts at 15 s (hc3-client.ts). Fix: longer timeout for this endpoint.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "update_multiple_quickapp_files",
       "signatureContains": "Internal Server Error (PUT /api/quickApp/<n>/files)",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HTTP 500 when any submitted file does not yet exist, and the write is PARTIAL: files that exist are written (finding 1794143327 saw the new main running). Fix: list files first, create missing ones via POST, then PUT the rest; report per file."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HTTP 500 when any submitted file does not yet exist, and the write is PARTIAL: files that exist are written (finding 1794143327 saw the new main running). Fix: list files first, create missing ones via POST, then PUT the rest; report per file.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "update_climate_zone",
@@ -234,8 +242,10 @@
     {
       "tool": "filter_devices",
       "signatureContains": "Bad Request (POST /api/devices/filter)",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 rejecting a filter with a null value. Probably the caller; the tool could refuse null filter values before sending."
+      "verdict": "confirmed",
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 rejecting a filter with a null value. Probably the caller; the tool could refuse null filter values before sending.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "modify_device",
@@ -253,7 +263,9 @@
       "tool": "set_quickapp_variable",
       "signatureContains": "does not exist on device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). \"QuickApp variable 'undefined'\": the call carried no name and nothing checked. Same missing-argument class as get_quickapp_variable's false 'exists:false' (finding 1794098612). Fix: require name."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). \"QuickApp variable 'undefined'\": the call carried no name and nothing checked. Same missing-argument class as get_quickapp_variable's false 'exists:false' (finding 1794098612). Fix: require name.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "tool": "audit_id_references",
@@ -441,7 +453,9 @@
       "at": 1791894921,
       "tool": "filter_devices",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's hasNoProperty filter returns 0 devices in every combination (alone, or with enabled/isPlugin), while 695 enabled non-plugin devices lack 'power'. A silent wrong answer. Fix: evaluate hasNoProperty in the tool, or refuse it. The 'omit attributes = ids only' half also holds."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's hasNoProperty filter returns 0 devices in every combination (alone, or with enabled/isPlugin), while 695 enabled non-plugin devices lack 'power'. A silent wrong answer. Fix: evaluate hasNoProperty in the tool, or refuse it. The 'omit attributes = ids only' half also holds.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1791903737,
@@ -507,7 +521,9 @@
       "at": 1792862720,
       "tool": "filter_devices",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's filter endpoint ignores requested property attributes and returns id/name only. Fix: fetch requested properties in the tool, or refuse."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's filter endpoint ignores requested property attributes and returns id/name only. Fix: fetch requested properties in the tool, or refuse.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1792867812,
@@ -605,7 +621,9 @@
       "at": 1793550898,
       "tool": "create_quickapp_file",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Unknown arguments are silently ignored (localPath on create; dryRun on update_multiple, which then wrote). Same class as find_devices_by_name's exact vs exactMatch (1794097426). Fix in the dispatcher: report unknown arguments."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Unknown arguments are silently ignored (localPath on create; dryRun on update_multiple, which then wrote). Same class as find_devices_by_name's exact vs exactMatch (1794097426). Fix in the dispatcher: report unknown arguments.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1793551362,
@@ -617,7 +635,9 @@
       "at": 1793566471,
       "tool": "delete_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794057778,
@@ -635,19 +655,25 @@
       "at": 1794097426,
       "tool": "mcp__mallorn_MCP-HC3__find_devices_by_name",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Both halves confirmed in code: only parentId 0/1 kept, so every Z-Wave endpoint child is invisible to a name search; and the parameter is exactMatch, so `exact` was silently ignored."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Both halves confirmed in code: only parentId 0/1 kept, so every Z-Wave endpoint child is invisible to a name search; and the parameter is exactMatch, so `exact` was silently ignored.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794098351,
       "tool": "mcp__mallorn_MCP-HC3__delete_device",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794098612,
       "tool": "mcp__mallorn_MCP-HC3__get_quickapp_variable",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The reported results carry no `name` key: the handler received no name and returned exists:false instead of refusing. A missing argument became a confident wrong answer about the user's system. Fix: require name."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The reported results carry no `name` key: the handler received no name and returned exists:false instead of refusing. A missing argument became a confident wrong answer about the user's system. Fix: require name.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794137749,
@@ -659,19 +685,25 @@
       "at": 1794143268,
       "tool": "update_multiple_quickapp_files",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the update_multiple_quickapp_files failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the update_multiple_quickapp_files failure row.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794143327,
       "tool": "update_multiple_quickapp_files",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Partial write reported as total failure. See the failure row."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Partial write reported as total failure. See the failure row.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     },
     {
       "at": 1794432833,
       "tool": "get_event_history",
       "verdict": "confirmed",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the get_event_history failure row: 19-20 s server time, 15 s client timeout."
+      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the get_event_history failure row: 19-20 s server time, 15 s client timeout.",
+      "resolvedIn": "4.35.0",
+      "resolvedAt": 1794601741
     }
   ]
 }

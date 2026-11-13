@@ -125,7 +125,7 @@ content hash before overwriting), so a second run cannot do damage.
 
 Any discovery, audit or dead-device watchdog logic must filter with
 \`not d.parentId\`. Without it you detect things you do not manage, spam the log,
-and act on the wrong objects. find_devices_by_name already filters this way.
+and act on the wrong objects. (find_devices_by_name searches children too since 4.35.0; pass topLevelOnly:true for the filtered view.)
 
 ## Notification routing takes two different kinds of id
 

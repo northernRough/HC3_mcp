@@ -45,6 +45,12 @@ function fakeFileHc3() {
       if (endpoint.endsWith('/files') && method === 'GET') {
         return [...store.keys()].map(name => ({ name, isMain: name === 'main', isOpen: false }));
       }
+      if (endpoint.endsWith('/files') && method === 'POST') {
+        // Since 4.35.0 update_multiple_quickapp_files creates missing files
+        // first, as real HC3 requires (its multi-file PUT 500s on a missing one).
+        store.set(body.name, body.content);
+        return { name: body.name };
+      }
       if (endpoint.endsWith('/files') && method === 'PUT') {
         for (const f of body) store.set(f.name, f.content);
         return body.map(f => ({ name: f.name, isMain: f.isMain, isOpen: f.isOpen }));

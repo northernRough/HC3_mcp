@@ -2,6 +2,52 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.35.0] - 2026-11-13
+
+Tier 1 of the 13 Nov friction triage: the tools that gave wrong answers or
+false failures. Each fix was checked against the live HC3 as well as in
+`scripts/test/unit-tier1.mjs`.
+
+### Fixed
+
+- **Unknown arguments are refused, before anything runs** (dispatcher,
+  `src/mcp/args.ts`). They used to be dropped silently: `exact` on
+  `find_devices_by_name` (the parameter is `exactMatch`) quietly did a
+  substring search, `localPath` on `create_quickapp_file` created an empty
+  file, and `dryRun` on `update_multiple_quickapp_files` was ignored and the
+  write went ahead. The error names the closest declared parameter. Checked
+  first that no handler reads an argument its schema does not declare.
+- **Missing required arguments are refused, all named at once.**
+  `get_quickapp_variable` without `name` answered `exists:false` about
+  variables that exist, and a session reported that to the user as a fact
+  about their system; `set_quickapp_variable` looked up a variable called
+  `undefined`; `report_finding` refused one missing field per call.
+- **`get_event_history` timeouts.** HC3 takes 19-20 s per
+  `/api/events/history` call on this gateway whatever the window; the client
+  gave up at 15 s. Event history now allows 45 s per page and stops paging
+  after ~100 s, returning `{truncated:true, note, coveredFrom, events}` so a
+  partial window is never passed off as complete (previously stderr only).
+  Live: 7 days for one device, 80 events in 21.8 s. Client timeouts now say
+  which call and what limit instead of "The operation was aborted due to
+  timeout".
+- **`filter_devices`.** HC3's own `hasNoProperty` filter returns no devices,
+  ever (live: 0, against 695 that match); it is now evaluated by the tool.
+  HC3 also drops property attributes silently; `"properties.<name>"` and
+  `"properties"` are now projected by the tool. Null filter values are refused
+  before HC3 can answer an opaque "Invalid JSON". The description no longer
+  claims that omitting `attributes` returns full records (HC3 returns ids).
+- **`find_devices_by_name` searches endpoint children.** Only parentId 0/1
+  devices were searched, so an exactly named Z-Wave endpoint (most of the
+  controllable devices here) came back `[]` and read as "no such device".
+  Results now carry `parentId`; `topLevelOnly:true` gives the old view.
+- **`delete_device` false failures.** HC3 deletes asynchronously; the single
+  GET straight after the DELETE could still see the device. It now polls for
+  up to ~6 s.
+- **`update_multiple_quickapp_files`** creates files that do not exist yet
+  (POST) before its one PUT; HC3 answered the PUT with a 500 after writing the
+  files that did exist. If the PUT still fails, the error lists which files
+  were written, unchanged or missing.
+
 ## [4.34.2] - 2026-11-13
 
 ### Fixed

@@ -114,7 +114,7 @@ export const systemSchemas: Record<string, MCPTool> = {
   get_event_history:
       {
         name: 'get_event_history',
-        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event\'s objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call. When scoping to object_id(s) over a bounded window (from set), the window is paged through in full so a device\'s older in-window events are not truncated by HC3\'s newest-first response cap.',
+        description: 'Fetch HC3 system events: scene starts, device property changes (state/value/power/etc), device actions, and other gateway events. This is the feed behind the /app/history page and the primary tool for answering "what happened?" on the HC3 — both "what just happened?" and retrospective "did the watering scene fire zones X, Y, Z this morning between 06:00 and 10:00?" queries. Complements get_debug_messages (QA/scene debug logs), get_notifications (user-facing notifications) and get_alarm_history (alarm-only events). Returns events newest-first. The from/to time window is forwarded to HC3 server-side (so a retrospective window reaches arbitrarily far back, not just the most recent N events); the object_id(s) filter is enforced client-side against each event\'s objects[].id (HC3 silently ignores objectId unless objectType is also supplied, and has no server-side filter for a set of ids), so you can bound a query in time and scope it to a set of devices in one call. When scoping to object_id(s) over a bounded window (from set), the window is paged through so a device\'s older in-window events are not truncated by HC3\'s newest-first response cap. HC3 answers each page slowly (~20 s on a busy gateway), so paging stops after ~100 s: the result is then an object {truncated:true, note, coveredFrom, events} instead of a bare array, saying how far back it got. Narrow the window to cover the rest.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -472,9 +472,17 @@ export const system: ToolModule = {
       const seen = new Set<unknown>();
       let cursorTo = upperBound;
       let truncated = false;
+      let truncatedBy: 'pages' | 'time' | 'stalled' | undefined;
+      // HC3 takes 19-20 s per /api/events/history call on this gateway
+      // (measured 13 Nov 2026, any window size), so 20 pages could run ~7
+      // minutes: far past any MCP client's patience. Stop paging after a
+      // budget and SAY so in the result, rather than time out with nothing.
+      const PAGE_TIMEOUT_MS = 45_000;
+      const BUDGET_MS = Number(process.env.HC3_EVENT_HISTORY_BUDGET_MS) || 100_000;
+      const started = Date.now();
 
       for (let page = 0; ; page++) {
-        const batch = asEvents(await hc3.request(`/api/events/history?${buildQuery(cursorTo)}`));
+        const batch = asEvents(await hc3.request(`/api/events/history?${buildQuery(cursorTo)}`, 'GET', undefined, { timeoutMs: PAGE_TIMEOUT_MS }));
         let oldest = Infinity;
         for (const e of batch) {
           const ts = e?.timestamp ?? 0;
@@ -489,9 +497,10 @@ export const system: ToolModule = {
         if (!paginate) break;
         if (batch.length < PAGE) break;                 // window fully covered
         if (oldest <= (lowerBound as number)) break;    // paged down to `from`
-        if (page + 1 >= MAX_PAGES) { truncated = true; break; }
+        if (page + 1 >= MAX_PAGES) { truncated = true; truncatedBy = 'pages'; break; }
         // No progress (>PAGE events share one timestamp): stop rather than loop.
-        if (cursorTo !== undefined && oldest >= cursorTo) { truncated = true; break; }
+        if (cursorTo !== undefined && oldest >= cursorTo) { truncated = true; truncatedBy = 'stalled'; break; }
+        if (Date.now() - started > BUDGET_MS) { truncated = true; truncatedBy = 'time'; break; }
         cursorTo = oldest; // next page ends at the oldest seen; dedupe handles overlap
       }
 
@@ -512,13 +521,21 @@ export const system: ToolModule = {
 
       events.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
       if (truncated) {
-        // Return contract is a bare array, so surface the cap on stderr rather
-        // than silently dropping the oldest slice of the window.
-        console.error(
-          `get_event_history: hit ${MAX_PAGES}-page safety cap (~${MAX_PAGES * PAGE} events) ` +
-          `before covering [${lowerBound}, ${upperBound ?? 'now'}]; ` +
-          'oldest part of the window may be incomplete — narrow the range.',
-        );
+        // Until 4.35.0 this went to stderr only, which no caller sees, so a
+        // partial window read as a complete one. A complete result is still a
+        // bare array; an incomplete one says so in the result itself.
+        const oldestSeen = collected.reduce((m, e) => Math.min(m, e?.timestamp ?? Infinity), Infinity);
+        const why = truncatedBy === 'time'
+          ? `stopped after ${Math.round((Date.now() - started) / 1000)} s (HC3 answers each page slowly)`
+          : truncatedBy === 'pages' ? `hit the ${MAX_PAGES}-page safety cap` : 'paging made no progress';
+        return {
+          truncated: true,
+          note: `Window NOT fully covered: ${why}. Events older than ${Number.isFinite(oldestSeen) ? oldestSeen : 'the last page'} ` +
+                `may be missing. Narrow the window (from/to) or the object set and call again.`,
+          coveredFrom: Number.isFinite(oldestSeen) ? oldestSeen : null,
+          requested: { from: lowerBound ?? null, to: upperBound ?? null },
+          events: events.slice(0, cappedLimit),
+        };
       }
       return events.slice(0, cappedLimit);
     },
