@@ -73,7 +73,8 @@ await check('an out-of-range write: transmitted, refused by the device', async (
   assert.equal(r.transmitted, true);
   assert.equal(r.cacheUpdated, false);
   assert.match(r.outcome, /cache still holds 3600/);
-  assert.match(r.outcome, /most likely REFUSED/);
+  assert.match(r.outcome, /REFUSED/);
+  assert.match(r.outcome, /TRIGGER parameter/);
 });
 await check('no frames sent: says it did not reach the device', async () => {
   const r = await Z.set_device_parameter(node187({ deaf: true }), { deviceId: 4817, parameterNumber: 66, size: 2, value: 3000 });
