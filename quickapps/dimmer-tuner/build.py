@@ -87,7 +87,7 @@ fqa = {
         "uiCallbacks": ui_callbacks(),
         "quickAppVariables": [
             {"name": "step", "type": "string", "value": "1"},
-            {"name": "margin", "type": "string", "value": "2"},
+            {"name": "margin", "type": "string", "value": "0"},
             {"name": "dimmers", "type": "string", "value": "[]"},
         ],
         "typeTemplateInitialized": True,
