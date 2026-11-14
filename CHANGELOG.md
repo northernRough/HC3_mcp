@@ -13,8 +13,8 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
   writes only the differences, max before min, and reports radio frames.
   `remap` carries an old node's values and tuning to a replaced or re-included
   dimmer. Refuses model mismatches and impossible values, and updates the
-  register afterwards. A power cut does not need it: dimmers keep their
-  parameters in their own memory.
+  register afterwards. After a power cut, run the dry run to check: whether
+  these dimmers keep their parameters through one is untested.
 
 ## [4.40.6] - 2026-11-14
 

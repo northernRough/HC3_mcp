@@ -1818,6 +1818,7 @@ tested. Some items predate MCP improvements that have since landed.
 | **untested** | `Style.color` is ignored on 5.210.12; carry state in caption text | Already recorded as not-adopted in 4.16.0. The new report adds a firmware number but still no isolation test. |
 | **untested** | FGS-2x3: params 10/15 are operating mode (0 disables); time params 12/17 at 0 mean 0.1s, not disabled | Check the device manual first — that is free. |
 | **untested** | FGR223 unresponsive-but-confirmed means lost calibration after a power cut; HC3 reports stale position | |
+| **untested** | Qubino Mini Dimmer / FGD212 / ZEN54 keep their configuration parameters (min 60/61, 1/2, 4/5) through a power cut | Z-Wave devices normally store parameters in non-volatile memory, but the owner suspects these get wiped. Test after the next cut: `restore_dimmer_settings` dry run against the register; any change it plans is the answer. |
 
 #### Resolved
 
