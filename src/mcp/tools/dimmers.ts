@@ -54,6 +54,8 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export interface DimmerEntry {
   node: number; lightId: number; rootId: number; name: string; room: string;
   model: string; min?: number; max?: number;
+  report?: number;      // power-report threshold, so the QuickApp's Auto top can put it back
+  meters: boolean;
 }
 
 /** The light of a node: its multilevel child, preferring one that meters power. */
@@ -103,7 +105,8 @@ export async function discoverDimmers(hc3: any): Promise<DimmerEntry[]> {
     if (!p) continue;
     const mm = await readMinMax(hc3, node, p);
     out.push({ node, lightId: light.id, rootId: Number(light.parentId), name: light.name,
-               room: roomName.get(light.roomID) ?? '?', model: p.key, min: mm.min, max: mm.max });
+               room: roomName.get(light.roomID) ?? '?', model: p.key, min: mm.min, max: mm.max,
+               report: mm.report, meters: light.properties?.power !== undefined });
   }
   return out.sort((a, b) => (a.room + a.name).localeCompare(b.room + b.name));
 }

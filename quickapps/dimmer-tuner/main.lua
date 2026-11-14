@@ -9,9 +9,14 @@ Dimmer Tuner — set a dimmer's LOW END by eye, from your phone.
 
 The low end is the dimmer's own "minimum level" parameter: what it outputs at
 slider 1%. The slider is spread between that and the "maximum level", so after
-saving, 1% is always the lowest clean level. The TOP end is tuned by measuring
-power instead (the HC3 MCP tool calibrate_dimmer) — a person is only needed
-here, because flicker and a lamp that will not strike are things you see.
+saving, 1% is always the lowest clean level.
+
+The TOP end is measured, not judged: "Auto top" steps the light, reads the
+power it draws, finds where power stops rising (LED lamps often reach full
+output at 50-60% of the slider), sets the maximum level just above it, and
+sweeps again until 99% still reaches 97% of full power. It is the same method
+as the HC3 MCP tool calibrate_dimmer, minus the dimmer's own built-in
+calibration (afterwards a QuickApp could not read back the min/max it chose).
 
 THE REGISTER. A QuickApp cannot read Z-Wave parameters: inside a QuickApp
 api.get answers 501 for every /zwave/ endpoint (5.220.15, 14 Nov 2026), and
@@ -27,16 +32,18 @@ Writes go out as setConfiguration on the Z-Wave root device, the path proven
 to transmit (radio frame counters, 14 Nov 2026).
 --]]
 
-local VERSION = "1.1.0"
+local VERSION = "1.2.0"
 
 -- Dimmer models, matched against the HC3 parameter template description.
 local PROFILES = {
-  { key = "qubino", match = "Mini Dimmer", label = "Qubino Mini Dimmer", min = 60, max = 61, size = 1, minLo = 0, minHi = 98 },
-  { key = "fgd212", match = "FGD212",      label = "Fibaro FGD212",      min = 1,  max = 2,  size = 1, minLo = 1, minHi = 98 },
-  { key = "zen54",  match = "ZEN54",       label = "Zooz ZEN54",         min = 4,  max = 5,  size = 1, minLo = 1, minHi = 45 },
+  { key = "qubino", match = "Mini Dimmer", label = "Qubino Mini Dimmer", min = 60, max = 61, size = 1, minLo = 0, minHi = 98, maxLo = 2,  maxHi = 99, report = 40 },
+  { key = "fgd212", match = "FGD212",      label = "Fibaro FGD212",      min = 1,  max = 2,  size = 1, minLo = 1, minHi = 98, maxLo = 2,  maxHi = 99, report = 50 },
+  { key = "zen54",  match = "ZEN54",       label = "Zooz ZEN54",         min = 4,  max = 5,  size = 1, minLo = 1, minHi = 45, maxLo = 55, maxHi = 99 },
 }
 
 local IDLE_CANCEL_MS = 10 * 60 * 1000   -- an abandoned session puts the old value back
+local SWEEP = { 20, 30, 40, 50, 60, 70, 80, 90, 99 }
+local SETTLE_MS = 6000                   -- after a level change, before reading power
 
 local function profileByKey(key)
   for _, p in ipairs(PROFILES) do if p.key == key then return p end end
@@ -101,7 +108,7 @@ function QuickApp:saveRegister()
 end
 
 function QuickApp:select(lightId)
-  if self.session then self:say("Save or Cancel the current dimmer first.") return end
+  if self.session or self.auto then self:say("Finish or Cancel the current dimmer first.") return end
   for _, e in ipairs(self.dimmers or {}) do
     if e.lightId == lightId then
       self.sel = e
@@ -142,6 +149,7 @@ function QuickApp:start()
   if not s then self:say("Pick a dimmer first.") return end
   if s.min == nil then self:say("Its current minimum is unknown. Ask Claude to run sync_dimmer_tuner.") return end
   if self.session then self:say("Already tuning. Lower / Higher, then Save or Cancel.") return end
+  if self.auto then self:say("Measuring the top end. Wait, or Cancel.") return end
   local light = api.get("/devices/" .. s.lightId) or {}
   local lp = light.properties or {}
   self.session = { origMin = s.min, origValue = tonumber(lp.value) or 0, origOn = lp.state == true or (tonumber(lp.value) or 0) > 0 }
@@ -195,6 +203,7 @@ function QuickApp:save()
 end
 
 function QuickApp:cancel(why)
+  if self.auto then self.auto.abort = true; self:say("Stopping after this reading…") return end
   local s, sess = self.sel, self.session
   if not sess then self:say("Nothing to cancel.") return end
   self:writeMin(sess.origMin, false)
@@ -203,6 +212,126 @@ function QuickApp:cancel(why)
   if self.idleTimer then clearTimeout(self.idleTimer); self.idleTimer = nil end
   self:showSelected()
   self:say(why or string.format("Cancelled: min back to %d, light put back.", sess.origMin))
+end
+
+-- ---------------------------------------------------------------- auto top
+
+function QuickApp:power(lightId)
+  local d = api.get("/devices/" .. lightId) or {}
+  return tonumber((d.properties or {}).power)
+end
+
+-- Set a level, wait, and read power until two readings agree (or 3 tries).
+function QuickApp:measure(level, cb)
+  local s = self.sel
+  fibaro.call(s.lightId, "setValue", level)
+  fibaro.setTimeout(SETTLE_MS, function()
+    local tries, last = 0, self:power(s.lightId)
+    local function again()
+      tries = tries + 1
+      fibaro.setTimeout(2000, function()
+        local now = self:power(s.lightId)
+        if now == last or tries >= 2 then cb(now) else last = now; again() end
+      end)
+    end
+    again()
+  end)
+end
+
+function QuickApp:sweep(levels, label, cb)
+  local out, i = {}, 0
+  local function nxt()
+    if self.auto.abort then return self:autoFinish("Stopped. Maximum put back, light put back.", true) end
+    i = i + 1
+    if i > #levels then return cb(out) end
+    self:say(string.format("%s: level %d%% (%d of %d)…", label, levels[i], i, #levels))
+    self:measure(levels[i], function(w) out[#out + 1] = { levels[i], w or 0 }; nxt() end)
+  end
+  nxt()
+end
+
+local function table2text(t)
+  local parts = {}
+  for _, r in ipairs(t) do parts[#parts + 1] = string.format("%d%%=%sW", r[1], tostring(r[2])) end
+  return table.concat(parts, " ")
+end
+
+function QuickApp:autoTop()
+  local s = self.sel
+  if not s then self:say("Pick a dimmer first.") return end
+  if self.session then self:say("Save or Cancel the low-end tuning first.") return end
+  if self.auto then self:say("Already measuring. Cancel stops it.") return end
+  local p = s.profile
+  local light = api.get("/devices/" .. s.lightId) or {}
+  local lp = light.properties or {}
+  if lp.power == nil or not p.report then
+    self:say(s.name .. " does not measure power, so its top end cannot be measured.") return
+  end
+  self.auto = {
+    origOn = lp.state == true or (tonumber(lp.value) or 0) > 0,
+    origValue = tonumber(lp.value) or 0,
+    origMax = s.max, origReport = s.report or 10,
+  }
+  local function setParam(n, v) fibaro.call(s.rootId, "setConfiguration", n, p.size, v) end
+  self:debug(string.format("auto top: node %d (%s)", s.node, s.name))
+
+  setParam(p.report, 5)                       -- fresh power readings during the sweep
+  setParam(p.max, p.maxHi); s.max = p.maxHi   -- open the maximum
+  self:showSelected()
+  fibaro.setTimeout(1500, function()
+    self:sweep(SWEEP, "Measuring", function(open)
+      local full = 0
+      for _, r in ipairs(open) do if r[2] > full then full = r[2] end end
+      if full < 1 then return self:autoFinish("The light drew no measurable power. Maximum put back.", true) end
+      local plateau = 99
+      for _, r in ipairs(open) do if r[2] >= 0.97 * full then plateau = r[1]; break end end
+      self.auto.open, self.auto.full, self.auto.plateau = open, full, plateau
+      self:debug("open sweep: " .. table2text(open))
+      if plateau >= 90 then
+        return self:autoFinish(string.format("Power rises right up to %d%% (%sW): nothing to reclaim. Maximum %d.", plateau, full, p.maxHi), false)
+      end
+      local chosen = clamp(plateau + 10, p.maxLo, p.maxHi)
+      local tries = 0
+      local function try()
+        tries = tries + 1
+        setParam(p.max, chosen); s.max = chosen; self:showSelected()
+        fibaro.setTimeout(1500, function()
+          self:sweep(SWEEP, "Checking max " .. chosen, function(verify)
+            local top = verify[#verify][2]
+            self:debug(string.format("max %d sweep: %s", chosen, table2text(verify)))
+            if top >= 0.97 * full or chosen >= p.maxHi or tries >= 6 then
+              self.auto.verify = verify
+              return self:autoFinish(string.format(
+                "Done: power stopped rising at %d%% (%sW). Max %d → %d; 99%% now draws %sW. Half way: %sW.",
+                plateau, full, self.auto.origMax or 99, chosen, top, verify[4] and verify[4][2] or "?"), false)
+            end
+            chosen = math.min(p.maxHi, chosen + 5)
+            try()
+          end)
+        end)
+      end
+      try()
+    end)
+  end)
+end
+
+-- Put the reporting threshold and the light back; on failure the maximum too.
+function QuickApp:autoFinish(message, revert)
+  local s, a, p = self.sel, self.auto, self.sel.profile
+  if not a then return end
+  if revert and a.origMax then
+    fibaro.call(s.rootId, "setConfiguration", p.max, p.size, a.origMax); s.max = a.origMax
+  end
+  fibaro.call(s.rootId, "setConfiguration", p.report, p.size, a.origReport)
+  if a.origOn then fibaro.call(s.lightId, "setValue", a.origValue) else fibaro.call(s.lightId, "turnOff") end
+  if not revert then
+    s.maxCalibratedAt = os.date("%Y-%m-%d %H:%M")
+    self:saveRegister()
+  end
+  self.auto = nil
+  self:showSelected()
+  self:say(message)
+  self:debug(message)
 end
 
 -- ---------------------------------------------------------------- events
@@ -218,12 +347,13 @@ function QuickApp:UIAction(a1, a2, a3)
     while type(v) == "table" do v = v[1] end
     if v then self:select(tonumber(v)) end
   elseif element == "startButton"  then self:start()
+  elseif element == "autoTopButton" then self:autoTop()
   elseif element == "lowerButton"  then self:nudge(-1)
   elseif element == "higherButton" then self:nudge(1)
   elseif element == "saveButton"   then self:save()
   elseif element == "cancelButton" then self:cancel()
   elseif element == "rescanButton" then   -- "Reload": re-read the register
-    if self.session then self:say("Save or Cancel first.") else self:scan() end
+    if self.session or self.auto then self:say("Finish or Cancel first.") else self:scan() end
   end
 end
 
@@ -232,7 +362,6 @@ function QuickApp:onInit()
   if (self:getVariable("step") or "") == "" then self:setVariable("step", "1") end
   if (self:getVariable("margin") or "") == "" then self:setVariable("margin", "0") end
   if (self:getVariable("dimmers") or "") == "" then self:setVariable("dimmers", "[]") end
-  self:updateView("rescanButton", "text", "Reload dimmer list")
   self:info("No dimmer selected")
   self:scan()
 end
