@@ -50,6 +50,8 @@ const num = (v: any) => (v === undefined || v === null || v === '' ? NaN : Numbe
 const isMultilevel = (d: any) => d?.type === 'com.fibaro.multilevelSwitch' || d?.baseType === 'com.fibaro.multilevelSwitch';
 const settleMs = () => Number(process.env.HC3_DIMMER_SETTLE_MS ?? 6000);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** "Full power" means within 5% of the peak: warm LED drivers drift a few %. */
+const REACH = 0.95;
 
 export interface DimmerEntry {
   node: number; lightId: number; rootId: number; name: string; room: string;
@@ -60,8 +62,13 @@ export interface DimmerEntry {
 
 /** The light of a node: its multilevel child, preferring one that meters power. */
 function pickLight(devs: any[]): any | undefined {
-  const ml = devs.filter(d => isMultilevel(d) && Number(d.parentId) > 1);
-  return ml.find(d => d.properties?.power !== undefined) ?? ml.sort((a, b) => a.id - b.id)[0];
+  // An FGD212 shows up to three multilevel devices: endpoint 0 (hidden), 1 (the
+  // light you see) and 2. The hidden endpoint-0 one carries a `power` property
+  // that never moves (corridor wall wash, 14 Nov 2026: 0 W at every level), so
+  // prefer the VISIBLE device that meters, then any that meters, then lowest id.
+  const ml = devs.filter(d => isMultilevel(d) && Number(d.parentId) > 1).sort((a, b) => a.id - b.id);
+  const meters = (d: any) => d.properties?.power !== undefined;
+  return ml.find(d => meters(d) && d.visible !== false) ?? ml.find(meters) ?? ml[0];
 }
 
 /** Read min/max for a node, polling the device for any HC3 has never read. */
@@ -145,7 +152,7 @@ export const dimmers: ToolModule = {
     },
     {
       name: 'calibrate_dimmer',
-      description: "Tune a dimmer's TOP end by measurement. Steps the light through its levels, reads the power it draws at each, finds where power stops rising (LED lamps often reach full output at 50-60% of the slider, leaving the top half dead), then sets the dimmer's MAXIMUM level parameter so the whole slider is useful while 99% keeps full output — and sweeps again to verify, raising the maximum in steps of 5 until 99% reaches 97% of full power. Verified by hand on 14 Nov 2026: two kitchen Qubinos plateaued at 55% and 60%; a maximum of 70 fixed both. Optional `deviceCalibration: true` first runs the dimmer's own calibration (Qubino 71=2, FGD212 13=1) and checks its status parameter; an FGD212's calibration OVERWRITES its min and max, so the previous minimum (likely tuned by a person) is written back unless keepMinimum is false.\n\nTHE LIGHTS VISIBLY CHANGE for about 2-3 minutes: ask the user before running it, and say which lights. Restores the light's on/off state and level, and the power-report threshold (lowered to 5% during the sweep so readings are fresh). Needs a dimmer that meters power (not the ZEN54). Does NOT tune the low end: use the Dimmer Tuner QuickApp for that, then re-run this, since the minimum shifts the slider. If a Dimmer Tuner QuickApp exists, its register is updated with the new maximum.",
+      description: "Tune a dimmer's TOP end by measurement. Steps the light through its levels, reads the power it draws at each, finds where power stops rising (LED lamps often reach full output at 50-60% of the slider, leaving the top half dead), then sets the dimmer's MAXIMUM level parameter so the whole slider is useful while 99% keeps full output — and sweeps again to verify, raising the maximum in steps of 5 until 99% reaches 95% of full power (lamps are warmed for a minute first). Verified by hand on 14 Nov 2026: two kitchen Qubinos plateaued at 55% and 60%; a maximum of 70 fixed both. Optional `deviceCalibration: true` first runs the dimmer's own calibration (Qubino 71=2, FGD212 13=1) and checks its status parameter; an FGD212's calibration OVERWRITES its min and max, so the previous minimum (likely tuned by a person) is written back unless keepMinimum is false.\n\nTHE LIGHTS VISIBLY CHANGE for about 2-3 minutes: ask the user before running it, and say which lights. Restores the light's on/off state and level, and the power-report threshold (lowered to 5% during the sweep so readings are fresh). Needs a dimmer that meters power (not the ZEN54). Does NOT tune the low end: use the Dimmer Tuner QuickApp for that, then re-run this, since the minimum shifts the slider. If a Dimmer Tuner QuickApp exists, its register is updated with the new maximum.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -214,6 +221,7 @@ export const dimmers: ToolModule = {
       busy = true;
       const writes: any[] = [];
       const setParam = async (param: number, size: number, value: number, why: string) => {
+        if (param === p.max) maxTouched = true;
         const r = await zwave.handlers.set_device_parameter(hc3, { deviceId: rootId, parameterNumber: param, size, value });
         writes.push({ param, value, why, transmitted: r.transmitted, cacheNow: r.after?.value ?? null });
         return r;
@@ -254,6 +262,8 @@ export const dimmers: ToolModule = {
       const before = await readMinMax(hc3, node, p);
       const result: any = { light: { id: light.id, name: light.name }, rootId, node, model: p.label, before: { min: before.min, max: before.max } };
       let reportChanged = false;
+      let maxTouched = false;   // a sweep opened or changed the maximum
+      let completed = false;    // the run reached a result that set the maximum on purpose
 
       try {
         // 1. The dimmer's own calibration.
@@ -269,12 +279,18 @@ export const dimmers: ToolModule = {
             await sleep(Math.min(settleMs(), 3500));
             const st = num((await readNodeParameters(hc3, node, 0)).items.find((i: any) => i.parameterNumber === p.calibrate!.status)?.configurationValue);
             result.deviceCalibration = { status: Number.isNaN(st) ? null : st, succeeded: st === p.calibrate.ok, minAfter: after.min, maxAfter: after.max };
-            if (p.calibrate.overwritesMinMax && args.keepMinimum !== false && before.min !== undefined && after.min !== before.min) {
+            if (p.calibrate.overwritesMinMax && st !== p.calibrate.ok) {
+              // A failed calibration (FGD212 status 0 = "manual settings") still
+              // rewrote min and max: put both back rather than keep its guesses.
+              if (before.min !== undefined && after.min !== before.min) await setParam(p.min, p.size, before.min, 'calibration failed: restore minimum');
+              if (before.max !== undefined && after.max !== before.max) await setParam(p.max, p.size, before.max, 'calibration failed: restore maximum');
+              result.deviceCalibration.restoredAfterFailure = { min: before.min, max: before.max };
+            } else if (p.calibrate.overwritesMinMax && args.keepMinimum !== false && before.min !== undefined && after.min !== before.min) {
               await setParam(p.min, p.size, before.min, 'restore the minimum the calibration overwrote');
               result.deviceCalibration.minimumRestored = before.min;
             }
           }
-          if (!meters) { result.note = 'Device calibration only: this dimmer does not meter power.'; result.writes = writes; return result; }
+          if (!meters) { completed = true; result.note = 'Device calibration only: this dimmer does not meter power.'; result.writes = writes; return result; }
         }
 
         // 2. Fresh power readings for the sweep.
@@ -283,6 +299,12 @@ export const dimmers: ToolModule = {
 
         // 3. Sweep with the maximum wide open.
         if (before.max !== p.maxHi) await setParam(p.max, p.size, p.maxHi, 'open the maximum for the sweep');
+        // Warm the lamps first. Guest ensuite, 14 Nov 2026: cold lamps peaked at
+        // 24.5 W, the same lamps eight minutes later at 22.9 W (-6%), so the
+        // verify sweeps never "reached full power" and the maximum was raised
+        // back to 99 for nothing.
+        await setLevel(99);
+        await sleep(10 * settleMs());
         const openRun = await sweep(levels);
         const open = openRun.out;
         const full = Math.max(...open.map(([, w]) => w));
@@ -292,11 +314,12 @@ export const dimmers: ToolModule = {
           result.chosenMax = before.max ?? p.maxHi;
           result.reliable = false;
           result.summary = `Readings did not make sense (power fell as the level rose, even when re-measured): maximum left at ${result.chosenMax}. Try again when the mesh is quieter.`;
+          completed = true;
           result.writes = writes;
           return result;
         }
         if (!(full >= 1)) throw new Error(`calibrate_dimmer: the light drew no measurable power (max ${full} W). Is the load connected, or its power reporting off?`);
-        const plateau = open.find(([, w]) => w >= 0.97 * full)![0];
+        const plateau = open.find(([, w]) => w >= REACH * full)![0];
         result.fullPowerW = full;
         result.plateauAtLevel = plateau;
 
@@ -309,7 +332,7 @@ export const dimmers: ToolModule = {
             await setParam(p.max, p.size, chosen, i === 0 ? 'maximum just above the plateau' : 'raise: 99% fell short of full power');
             verify = (await sweep(levels)).out;
             const top = verify[verify.length - 1][1];
-            if (top >= 0.97 * full || chosen >= p.maxHi) break;
+            if (top >= REACH * full || chosen >= p.maxHi) break;
             chosen = Math.min(p.maxHi, chosen + 5);
           }
         }
@@ -333,14 +356,18 @@ export const dimmers: ToolModule = {
             }
           }
         } catch (e: any) { result.tunerRegisterError = String(e?.message ?? e); }
+        completed = true;
         result.writes = writes;   // the same object the finally block adds `restored` to
         return result;
       } finally {
         try {
           // Never read before (a blank HC3 never polled): fall back to the maker's default, 10%.
           if (reportChanged) await setParam(p.report!.param, p.report!.size, before.report ?? 10, 'restore power-report threshold');
+          // Stopped by an error after the sweep opened the maximum: put it back.
+          if (!completed && maxTouched && before.max !== undefined) await setParam(p.max, p.size, before.max, 'run stopped: restore maximum');
           if (orig.on) await setLevel(orig.value || 99); else await hc3.request(`/api/devices/${light.id}/action/turnOff`, 'POST', {});
-          result.restored = { light: orig.on ? orig.value : 'off', reportThreshold: reportChanged ? (before.report ?? 10) : 'unchanged' };
+          result.restored = { light: orig.on ? orig.value : 'off', reportThreshold: reportChanged ? (before.report ?? 10) : 'unchanged',
+                              ...(!completed && maxTouched ? { max: before.max } : {}) };
         } finally { busy = false; }
       }
     },
