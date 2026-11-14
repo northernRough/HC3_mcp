@@ -42,12 +42,13 @@ import { zwave, zwaveSchemas } from './tools/zwave';
 import { snapshot } from './tools/snapshot';
 import { snapshots } from './tools/snapshots';
 import { history } from './tools/history';
+import { dimmers } from './tools/dimmers';
 import { docs } from './tools/docs';
 import { plugins } from './tools/plugins';
 import { audit } from './tools/audit';
 import { SERVER_NAME, SERVER_VERSION } from './version';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, snapshots, history, docs, plugins, audit];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, snapshots, history, dimmers, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
 
 
@@ -236,6 +237,7 @@ class HC3MCPServer {
       zwaveSchemas.set_device_parameter,
       zwaveSchemas.get_zwave_reconfiguration_tasks,
       zwaveSchemas.get_zwave_node_diagnostics,
+      ...dimmers.schemas,
 
       // Weather Information
       systemSchemas.get_weather,
