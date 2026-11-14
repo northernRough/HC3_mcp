@@ -108,6 +108,41 @@ their LED lamps reached full power at 55-60%. Setting the maximum level (61) to
 - QuickApps get 501 from every /zwave/ route; a poll fills a value HC3 never
   read.
 
+## [4.39.2] - 2026-11-14
+
+### Fixed
+
+- A write that was transmitted but doesn't show in HC3's cache may be a trigger
+  parameter (Qubino 71 = 2 forces a calibration and reads 0 again). The
+  outcome no longer calls it "most likely refused".
+
+## [4.39.1] - 2026-11-14
+
+### Fixed
+
+- `refreshFromDevice` accepts a JSON string or a comma list, for clients that
+  cached the tool list before 4.39.0.
+
+## [4.39.0] - 2026-11-14
+
+### Fixed
+
+- Parameters are read at the node root `{nodeId}.0`. An endpoint child's own
+  address answers 404, so both parameter tools came back empty for 307 of 709
+  parameterised devices.
+
+### Added
+
+- `set_device_parameter` returns the node's radio frame deltas (`radio`,
+  `transmitted`) and an `outcome` that tells a value the device refused from
+  one that never left the controller. Proven live on node 187: counters
+  stay still while idle, move 1 out / 1 in per poll and 2-3 out per write.
+  HC3's cache follows the device.
+- `get_device_parameters` adds `refreshFromDevice`, which polls the listed
+  parameters from the device first and reports what changed.
+- API notes and server instructions corrected. A device-record PUT of
+  parameters is ignored on 5.220.15.
+
 ## [4.38.0] - 2026-11-14
 
 The untested findings from the 13 Nov triage, settled where it could be done
