@@ -2,6 +2,16 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.6] - 2026-11-14
+
+### Fixed
+
+- After an FGD212's own calibration, `calibrate_dimmer` waits (up to 3 min)
+  for parameter 13 to return to 0 before writing again; a calibrating FGD212
+  answers nothing and the next write sat in HC3's queue (three bedroom dimmers).
+- With every device of an FGD212 hidden, the endpoint-1 device is measured
+  rather than the endpoint-0 twin whose power never moves.
+
 ## [4.40.5] - 2026-11-14
 
 ### Fixed

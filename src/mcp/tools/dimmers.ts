@@ -68,7 +68,13 @@ function pickLight(devs: any[]): any | undefined {
   // prefer the VISIBLE device that meters, then any that meters, then lowest id.
   const ml = devs.filter(d => isMultilevel(d) && Number(d.parentId) > 1).sort((a, b) => a.id - b.id);
   const meters = (d: any) => d.properties?.power !== undefined;
-  return ml.find(d => meters(d) && d.visible !== false) ?? ml.find(meters) ?? ml[0];
+  // Mae Suite main spots: every device hidden, so fall back to endpoint 1 (the
+  // load) before the endpoint-0 twin whose power never moves.
+  const ep = (d: any) => Number(d.properties?.endPointId ?? 0);
+  return ml.find(d => meters(d) && d.visible !== false)
+      ?? ml.find(d => meters(d) && ep(d) === 1)
+      ?? ml.find(d => meters(d) && ep(d) > 0)
+      ?? ml.find(meters) ?? ml[0];
 }
 
 /** Read min/max for a node, polling the device for any HC3 has never read. */
@@ -287,6 +293,22 @@ export const dimmers: ToolModule = {
           } else {
             await setParam(p.calibrate.param, 1, p.calibrate.value, 'device calibration');
             await sleep(Math.max(settleMs(), 5000) * (p.calibrate.overwritesMinMax ? 2 : 1));
+            if (p.calibrate.overwritesMinMax) {
+              // An FGD212 calibrates for far longer than 10 s and answers nothing
+              // meanwhile: the next write sat in HC3's queue and read as "no
+              // frames" on three bedrooms' dimmers (14 Nov 2026). Parameter 13
+              // reads 1 while it works and returns to 0 when done; wait for that.
+              const addr = (await readNodeParameters(hc3, node, 0)).addr;
+              const until = Date.now() + 180 * Math.min(1000, settleMs());
+              let calibrating: boolean;
+              do {   // always check at least once
+                await hc3.request(`/api/zwave/polling/configuration_parameters/${encodeURIComponent(addr)}/${p.calibrate.param}`, 'POST', {}).catch(() => null);
+                await sleep(Math.min(5000, settleMs()));
+                const v = num((await readNodeParameters(hc3, node, 0)).items.find((i: any) => i.parameterNumber === p.calibrate!.param)?.configurationValue);
+                calibrating = v !== 0;
+              } while (calibrating && Date.now() < until);
+              if (calibrating) throw new Error(`calibrate_dimmer: ${light.name} was still calibrating itself after 3 minutes (parameter ${p.calibrate.param} not back to 0). Try again later.`);
+            }
             const r = await readNodeParameters(hc3, node, 0);
             await hc3.request(`/api/zwave/polling/configuration_parameters/${encodeURIComponent(r.addr)}/${p.calibrate.status}`, 'POST', {}).catch(() => null);
             const after = await readMinMax(hc3, node, p);
