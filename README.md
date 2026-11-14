@@ -504,19 +504,6 @@ Each tool includes input validation, error handling, and detailed response data 
 - **Standalone**, no dependency on plua or any local development toolchain. Works out of the box with `npx`.
 - **Audit family** (3.5.0+): `audit_id_references`, `audit_qa_devices` (with optional bind-aware L0-L4 resolver waterfall), `introspect_device_group` (json / markdown-table / bind-lua / yaml outputs). Read-only batch tools that walk QAs + scenes + globals + devices to surface drift across surfaces.
 
-## Migrating from 3.x to 4.x
-
-Single breaking change. The QuickApp file-arg was inconsistently named across the QA-file tools — three used `fileName`, two used `name`. 4.0.0 settles on **`fileName` everywhere**, immediately, with no deprecation shim.
-
-If you're upgrading from any 3.x release:
-
-- `create_quickapp_file` — rename argument `name` → `fileName`.
-- `update_multiple_quickapp_files` — within each item in the `files` array, rename `name` → `fileName`.
-
-The other QA-file tools (`get_quickapp_file`, `update_quickapp_file`, `delete_quickapp_file`, `list_quickapp_files`) already used `fileName` and need no change. HC3's wire shape still uses `name` for the file's own name in the request body; the wrapper now remaps automatically — callers don't see HC3's wire form.
-
-If you are happy on a smaller core surface, the unscoped `mcp-server-hc3` may suit you better. If you maintain a household HC3 with QuickApps, scenes, and Z-Wave actors and want the agent to be able to do meaningful, safe work over the full system, this is what you want.
-
 ## Security
 
 This server runs with your HC3 admin credentials and exposes write access to your home: devices, scenes, QuickApps, global variables, profiles, users, rooms, alarm partitions, and the notification centre. Any MCP client (Claude Code, Claude Desktop, Cursor, Cline, etc.) connected to it can read and mutate that state. Treat the credentials and the agent's prompts accordingly.
