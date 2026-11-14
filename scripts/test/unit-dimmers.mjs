@@ -28,7 +28,7 @@ const TEMPLATES = {
  * One dimmer on node 72 (root 3749, light 3750), plus a Dimmer Tuner QA 5079.
  * Light output = min + (level-1)/98 * (max-min); lamp power saturates at `sat`.
  */
-function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false } = {}) {
+function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false, glitch = {} } = {}) {
   const P = params ?? (model === 'qubino' ? { 40: 50, 60: 20, 61: 99, 71: 0, 72: 1 }
                     : model === 'fgd212' ? { 1: 12, 2: 79, 13: 0, 14: 1, 50: 10, 53: 10 } : { 4: 1, 5: 99 });
   const minP = model === 'qubino' ? 60 : model === 'fgd212' ? 1 : 4, maxP = model === 'qubino' ? 61 : model === 'fgd212' ? 2 : 5;
@@ -37,6 +37,8 @@ function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, l
   const calls = [];
   const power = () => {
     if (!s.on || s.level === 0) return 0;
+    // glitch: level -> readings served (once each, per read) before the true value
+    if (glitch[s.level]?.length) return glitch[s.level].shift();
     // topLoss: lowering the maximum costs more output than linear, as real lamps did
     const max = topLoss ? P[maxP] * P[maxP] / 99 : P[maxP];
     const out = P[minP] + (s.level - 1) / 98 * (max - P[minP]);
@@ -154,6 +156,29 @@ await check('bad levels are refused before anything changes', async () => {
   const hc3 = rig();
   await assert.rejects(H.calibrate_dimmer(hc3, { deviceId: 3750, levels: [0, 50] }), /levels must be/);
   assert.ok(!hc3.calls.some(c => c.method === 'POST'));
+});
+
+await check('a reading that falls as the level rises is re-measured, then the run continues', async () => {
+  // Two stale reads (measure reads until two agree) at level 60, then the truth.
+  const hc3 = rig({ glitch: { 60: [5, 5] } });
+  const r = await H.calibrate_dimmer(hc3, { deviceId: 3750 });
+  assert.equal(r.reliable, true);
+  assert.equal(r.chosenMax, 60);
+  assert.ok(r.sweepOpen.every(([, w], i, a) => i === 0 || w >= a[i - 1][1] * 0.93));
+});
+await check('readings that stay inconsistent leave the maximum as it was', async () => {
+  const hc3 = rig({ params: { 40: 10, 60: 20, 61: 70, 71: 0, 72: 1 }, glitch: { 60: Array(40).fill(5) } });
+  const r = await H.calibrate_dimmer(hc3, { deviceId: 3750 });
+  assert.equal(r.reliable, false);
+  assert.equal(r.chosenMax, 70);
+  assert.equal(hc3.P[61], 70);
+  assert.equal(hc3.P[40], 10);
+  assert.match(r.summary, /did not make sense/);
+});
+await check('a plateau at 85% or above is left alone', async () => {
+  const r = await H.calibrate_dimmer(rig({ sat: 92 }), { deviceId: 3750 });
+  assert.equal(r.chosenMax, 99);
+  assert.match(r.summary, /no headroom/);
 });
 
 console.log('sync_dimmer_tuner');

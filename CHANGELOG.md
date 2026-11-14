@@ -2,6 +2,18 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.2] - 2026-11-14
+
+### Fixed
+
+- `calibrate_dimmer` and the Dimmer Tuner's Auto top measured badly on the
+  first live run (Ben ensuite spots): at a 5% report threshold a gradually
+  brightening lamp read as flat stretches and jumps, and a busy node confirmed
+  levels seconds late. Now: 2% threshold during the sweep, wait for the dimmer
+  to confirm each level, re-measure any step where power falls, and leave the
+  maximum as it was if the readings still do not make sense. A plateau at 85%
+  or above is left alone (was 90%).
+
 ## [4.40.1] - 2026-11-14
 
 ### Added
