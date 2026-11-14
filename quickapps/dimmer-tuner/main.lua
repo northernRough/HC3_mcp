@@ -32,7 +32,7 @@ Writes go out as setConfiguration on the Z-Wave root device, the path proven
 to transmit (radio frame counters, 14 Nov 2026).
 --]]
 
-local VERSION = "1.4.0"
+local VERSION = "1.4.1"
 
 -- Dimmer models, matched against the HC3 parameter template description.
 local PROFILES = {
@@ -261,7 +261,9 @@ function QuickApp:sweep(levels, label, cb)
   local out, i, rechecks = {}, 0, 0
   local function finish()
     local bad = firstFall(out)
-    if not bad then return cb(out, true) end
+    local seen, distinct = {}, 0
+    for _, r in ipairs(out) do if not seen[r[2]] then seen[r[2]] = true; distinct = distinct + 1 end end
+    if not bad then return cb(out, distinct >= 3) end   -- one or two values: power not reporting
     if rechecks >= 3 then return cb(out, false) end
     rechecks = rechecks + 1
     self:say(string.format("%s: re-measuring %d%%…", label, out[bad][1]))
