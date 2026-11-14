@@ -28,7 +28,7 @@ const TEMPLATES = {
  * One dimmer on node 72 (root 3749, light 3750), plus a Dimmer Tuner QA 5079.
  * Light output = min + (level-1)/98 * (max-min); lamp power saturates at `sat`.
  */
-function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false, glitch = {}, calFails = false, hiddenEp0 = false, deafParams = [] } = {}) {
+function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false, glitch = {}, calFails = false, hiddenEp0 = false, deafParams = [], allHidden = false, calStuck = false } = {}) {
   const P = params ?? (model === 'qubino' ? { 40: 50, 60: 20, 61: 99, 71: 0, 72: 1 }
                     : model === 'fgd212' ? { 1: 12, 2: 79, 13: 0, 14: 1, 50: 10, 53: 10 } : { 4: 1, 5: 99 });
   const minP = model === 'qubino' ? 60 : model === 'fgd212' ? 1 : 4, maxP = model === 'qubino' ? 61 : model === 'fgd212' ? 2 : 5;
@@ -45,11 +45,12 @@ function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, l
     return Math.round(full * Math.min(1, out / sat) * 10) / 10;
   };
   const light = () => ({ id: 3750, name: 'island spots', type: 'com.fibaro.multilevelSwitch', parentId: 3749, roomID: 7,
-    properties: { nodeId: 72, value: s.level, state: s.on, ...(meters ? { power: power() } : {}) } });
+    ...(allHidden ? { visible: false } : {}),
+    properties: { nodeId: 72, endPointId: allHidden ? 1 : 0, value: s.level, state: s.on, ...(meters ? { power: power() } : {}) } });
   const root = { id: 3749, name: 'kitchen island spots', type: 'com.fibaro.zwaveDevice', parentId: 1, properties: { nodeId: 72 } };
   return { calls, P, s, get vars() { return vars; }, async request(ep, method = 'GET', body) {
     calls.push({ ep, method, body });
-    if (ep === '/api/devices?interface=zwave') return [root, ...(hiddenEp0 ? [{ id: 3700, name: 'ep0', type: 'com.fibaro.multilevelSwitch', parentId: 3749, visible: false, properties: { nodeId: 72, value: 0, power: 0 } }] : []), light()];
+    if (ep === '/api/devices?interface=zwave') return [root, ...(allHidden ? [{ id: 3701, name: 'ep0', type: 'com.fibaro.multilevelSwitch', parentId: 3749, visible: false, properties: { nodeId: 72, endPointId: 0, value: 0, power: 0 } }] : []), ...(hiddenEp0 ? [{ id: 3700, name: 'ep0', type: 'com.fibaro.multilevelSwitch', parentId: 3749, visible: false, properties: { nodeId: 72, value: 0, power: 0 } }] : []), light()];
     if (ep === '/api/rooms') return [{ id: 7, name: 'Kitchen' }];
     if (ep === '/api/devices?interface=quickApp') return [{ id: 5079, name: 'Dimmer Tuner' }];
     if (ep === '/api/devices/5079') {
@@ -69,6 +70,7 @@ function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, l
       const [n, , v] = body.args;
       if (deafParams.includes(n)) return { result: null };   // never left the controller
       s.frames.out += 2; s.frames.in += 1;
+      if (model === 'fgd212' && n === 13 && v === 1 && calStuck) { P[13] = 1; return { result: null }; }
       if (model === 'fgd212' && n === 13 && v === 1) { P[1] = calFails ? 8 : 30; P[2] = calFails ? 99 : 85; P[14] = calFails ? 0 : 1; return { result: null }; }   // calibration overwrites min/max
       if (model === 'qubino' && n === 71 && v === 2) { P[72] = 1; return { result: null }; }                          // trigger resets itself
       P[n] = v; return { result: null };
@@ -140,6 +142,11 @@ await check('FGD212 device calibration: the overwritten minimum is put back', as
   assert.equal(r.deviceCalibration.minimumRestored, 12);
   assert.equal(hc3.P[1], 12);
 });
+await check('an FGD212 still calibrating is waited for, then refused, with the light put back', async () => {
+  const hc3 = rig({ model: 'fgd212', calStuck: true });
+  await assert.rejects(H.calibrate_dimmer(hc3, { deviceId: 3750, deviceCalibration: true }), /still calibrating itself/);
+  assert.equal(hc3.s.on, false);
+});
 await check('keepMinimum:false accepts the calibration minimum', async () => {
   const hc3 = rig({ model: 'fgd212' });
   await H.calibrate_dimmer(hc3, { deviceId: 3750, deviceCalibration: true, keepMinimum: false });
@@ -191,6 +198,11 @@ await check('a plateau at 85% or above is left alone', async () => {
   assert.match(r.summary, /no headroom/);
 });
 
+await check('all devices hidden: the endpoint-1 device is measured, not endpoint 0', async () => {
+  const hc3 = rig({ allHidden: true });
+  const r = await H.calibrate_dimmer(hc3, { deviceId: 3749 });
+  assert.equal(r.light.id, 3750);
+});
 await check('the visible light is measured, not a hidden endpoint-0 twin that also has power', async () => {
   const hc3 = rig({ hiddenEp0: true });
   const r = await H.calibrate_dimmer(hc3, { deviceId: 3749 });
