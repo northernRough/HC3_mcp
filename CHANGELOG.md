@@ -2,6 +2,16 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.1] - 2026-11-14
+
+### Added
+
+- Dimmer Tuner QuickApp 1.2.0: an "Auto top" button measures the selected
+  dimmer's top end on the HC3 itself (same method as calibrate_dimmer, without
+  the dimmer's built-in calibration). Step 1, save margin 0.
+- `sync_dimmer_tuner` records each dimmer's power-report threshold and whether
+  it meters power, so Auto top can restore the threshold exactly.
+
 ## [4.40.0] - 2026-11-14
 
 Dimmer calibration, from a hands-on session in the kitchen: two Qubino Mini
