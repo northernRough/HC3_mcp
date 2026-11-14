@@ -102,6 +102,14 @@ async function blob(commit: string, path: string): Promise<Buffer | null> {
   }
 }
 
+/** A JSON file from a snapshot commit, for tools outside this module. */
+export async function readSnapshotJson(ref: string | undefined, path: string): Promise<{ commit: string; date: string; json: any }> {
+  const c = await resolveCommit(ref);
+  const b = await blob(c.commit, path);
+  if (!b) throw new Error(`Snapshot ${c.commit.slice(0, 8)} (${c.date}) has no ${path}.`);
+  return { commit: c.commit, date: c.date, json: JSON.parse(b.toString('utf8')) };
+}
+
 interface Vault { vars: Record<string, Record<string, any>>; inline: Record<string, string>; available: boolean }
 
 async function loadVault(commit: string): Promise<Vault> {

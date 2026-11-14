@@ -242,5 +242,82 @@ await check('a size that contradicts the template is refused, nothing sent', asy
   assert.ok(!hc3.calls.some(c => c.method === 'POST'));
 });
 
+console.log('restore_dimmer_settings');
+const writes = hc3 => hc3.calls.filter(c => c.ep.endsWith('/action/setConfiguration'));
+const regOf = hc3 => JSON.parse(hc3.vars.find(v => v.name === 'dimmers').value);
+await check('dry run: plans the tuned minimum, writes nothing', async () => {
+  const hc3 = rig();
+  const r = await H.restore_dimmer_settings(hc3, {});
+  assert.equal(r.dryRun, true);
+  assert.deepEqual(r.plan[0].changes.map(c => [c.what, c.from, c.to]), [['min', 20, 14]]);
+  assert.equal(writes(hc3).length, 0);
+  assert.equal(hc3.P[60], 20);
+});
+await check('apply: writes it, reports radio, updates the register', async () => {
+  const hc3 = rig();
+  const r = await H.restore_dimmer_settings(hc3, { apply: true });
+  assert.equal(hc3.P[60], 14);
+  assert.equal(r.plan[0].changes[0].transmitted, true);
+  assert.equal(r.failed, 0);
+  assert.equal(r.quickAppId, 5079);
+  assert.equal(regOf(hc3)[0].min, 14);
+  assert.equal(regOf(hc3)[0].tunedMin, 14);
+  const again = await H.restore_dimmer_settings(hc3, {});
+  assert.equal(again.alreadyMatch, 1);
+  assert.equal(again.toChange, 0);
+});
+await check('remap: a replaced dimmer gets the old node\'s values and tuning', async () => {
+  const hc3 = rig({ register: [{ node: 50, lightId: 3000, rootId: 2999, name: 'island spots', room: 'Kitchen', model: 'qubino', min: 20, max: 70, report: 10, tunedMin: 12, tunedAt: '2026-11-14 22:23' }] });
+  const r = await H.restore_dimmer_settings(hc3, { remap: { 50: 3750 }, apply: true });
+  assert.equal(r.plan[0].fromNode, 50);
+  assert.deepEqual([hc3.P[60], hc3.P[61], hc3.P[40]], [12, 70, 10]);
+  assert.deepEqual(writes(hc3).map(c => c.body.args[0]), [61, 60, 40]);   // max first
+  const reg = regOf(hc3);
+  assert.deepEqual(reg.map(e => e.node), [72]);
+  assert.equal(reg[0].tunedMin, 12);
+});
+await check('includeReport false leaves the threshold alone', async () => {
+  const hc3 = rig({ register: [{ node: 72, model: 'qubino', name: 'x', room: 'K', min: 20, max: 99, report: 10 }] });
+  const r = await H.restore_dimmer_settings(hc3, { includeReport: false });
+  assert.equal(r.toChange, 0);
+});
+await check('a saved model that differs from the live one is skipped', async () => {
+  const hc3 = rig({ register: [{ node: 72, model: 'fgd212', name: 'x', room: 'K', min: 5, max: 70 }] });
+  const r = await H.restore_dimmer_settings(hc3, { apply: true });
+  assert.match(r.plan[0].skipped, /saved as a fgd212/);
+  assert.equal(writes(hc3).length, 0);
+});
+await check('impossible saved values are refused', async () => {
+  const r = await H.restore_dimmer_settings(rig({ register: [{ node: 72, model: 'qubino', name: 'x', room: 'K', min: 80, max: 70 }] }), {});
+  assert.match(r.plan[0].skipped, /not below max/);
+});
+await check('a write that sends no frames is reported as failed', async () => {
+  const hc3 = rig({ deafParams: [60] });
+  const r = await H.restore_dimmer_settings(hc3, { apply: true });
+  assert.equal(r.failed, 1);
+  assert.match(r.plan[0].failed, /no radio frames/);
+});
+await check('devices naming a non-dimmer is refused', async () => {
+  const hc3 = rig();
+  const orig = hc3.request.bind(hc3);
+  hc3.request = (ep, m, b) => ep === '/api/devices/999' ? { id: 999, properties: { nodeId: 9 } } : orig(ep, m, b);
+  await assert.rejects(H.restore_dimmer_settings(hc3, { devices: [999] }), /not supported dimmers/);
+});
+await check('snapshot source reads zwave-parameters.json from a commit', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const repo = mkdtempSync(`${tmpdir()}/snaptest-`);
+  const g = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: 'pipe' });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  writeFileSync(`${repo}/zwave-parameters.json`, JSON.stringify({ 3749: { deviceId: 3749, nodeId: 72, endPointId: 0, parameters: { items: [{ parameterNumber: 60, configurationValue: 9 }, { parameterNumber: 61, configurationValue: 75 }, { parameterNumber: 40, configurationValue: 10 }] } } }));
+  g('add', '.'); g('commit', '-qm', 'snapshot: test');
+  process.env.HC3_SNAPSHOT_REPO = repo;
+  const hc3 = rig();
+  const r = await H.restore_dimmer_settings(hc3, { source: 'snapshot', apply: true });
+  assert.equal(r.baseline.source, 'snapshot');
+  assert.deepEqual([hc3.P[60], hc3.P[61], hc3.P[40]], [9, 75, 10]);
+});
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);
