@@ -73,18 +73,38 @@ went into a void for a day this way. Create the variable first
 \`set_global_variable\`, which checks.
 
 ### Z-Wave configuration parameters
-A \`modify_device\` PUT of \`properties.parameters\` **caches the value without
-transmitting it to the node**. Verified against a Zooz ZEN52. This is the
-nastiest entry in the list, because the read-back returns your value: the device
-record agrees with you and the physical device never heard about it. Use
-\`set_device_parameter\`, which POSTs \`/devices/{id}/action/setConfiguration\` and
-does transmit. (The device ACTIONS \`setParameter\`, \`reconfigure\` and
-\`pollConfigurationParameter\` return \`-3 not implemented\`. That is not the
-whole story for read-back: the web UI reads a parameter through REST,
-\`POST /api/zwave/polling/configuration_parameters/{addr}/{number}\`, which
-answers 202 Accepted (14 Nov 2026). Whether it refreshes HC3's cached value has
-not been shown yet: every parameter polled so far already matched its cache.
-Do not record live read-back as impossible.)
+A \`modify_device\` PUT of \`properties.parameters\` **never transmits to the
+node**. On older firmware it cached the value (Zooz ZEN52), so the read-back
+agreed with you while the device never heard about it. On 5.220.15 it is
+ignored outright: 200, nothing stored (14 Nov 2026). \`modify_device\` refuses
+it. Use \`set_device_parameter\`, which POSTs
+\`/devices/{id}/action/setConfiguration\` and does transmit.
+
+**Proving a write reached the device** (14 Nov 2026, FGRGBW442, node 187).
+The node's cumulative radio counters at
+\`/api/zwave/nodes/diagnostics/transmissions\` stood still for 30-45 s idle.
+A \`setConfiguration\` moved them 2-3 frames out; a parameter poll moved them
+1 out / 1 in. \`set_device_parameter\` now returns that delta as \`radio\`, and
+\`transmitted\`.
+
+**HC3's parameter cache follows the device.** After a valid write the cache
+showed the new value. An out-of-range value (5, where 0 or 30-32400 is
+allowed) was transmitted, refused by the device (it did not start reporting
+every 5 s), and the cache kept the device's 3600. So a transmitted write whose
+cache did not change was most likely refused by the device.
+
+**Live read-back works.** The device ACTIONS \`setParameter\`, \`reconfigure\`
+and \`pollConfigurationParameter\` return \`-3 not implemented\`. The web UI's
+route, \`POST /api/zwave/polling/configuration_parameters/{addr}/{number}\`,
+answers 202 and sends a Configuration Get to the node, which answers.
+\`get_device_parameters\` exposes it as \`refreshFromDevice\`. Not yet seen: a
+stale cache being corrected by a poll, because no way to make the cache
+stale was found; the cache tracked the device in every test.
+
+**Address.** Parameters belong to the NODE and live at \`{nodeId}.0\`. An
+endpoint child's own address (\`187.1\`) answers 404. Before 4.39.0 both
+parameter tools used the child's address and came back empty for 307 of 709
+parameterised devices on this gateway.
 
 ### QuickApp view layouts
 A \`select\` missing \`selectionType\`, or with \`values\` as a JSON object rather

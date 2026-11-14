@@ -34,6 +34,60 @@ async function readDevice(hc3: any, tool: string, deviceId: number): Promise<any
   }
 }
 
+/**
+ * Read a node's configuration parameters from HC3's cache.
+ *
+ * Z-Wave configuration parameters belong to the NODE, and HC3 keeps them under
+ * the root address `{nodeId}.0`. Endpoint children (`endPointId` 1, 2, ...) have
+ * no entry of their own: `/api/zwave/configuration_parameters/187.1` answers
+ * 404. Until 4.39.0 both tools here used `{nodeId}.{endPointId}`, so for 307 of
+ * this gateway's 709 parameterised devices get_device_parameters came back
+ * empty and set_device_parameter could never see its own write. Root first;
+ * the endpoint address only as a fallback.
+ */
+export async function readNodeParameters(hc3: any, nodeId: any, endpoint: any):
+    Promise<{ addr: string; items: any[]; template: any; error?: string }> {
+  const addrs = [`${nodeId}.0`];
+  if (String(endpoint ?? 0) !== '0') addrs.push(`${nodeId}.${endpoint}`);
+  let lastError = '';
+  for (const addr of addrs) {
+    try {
+      const res: any = await hc3.request(`/api/zwave/configuration_parameters/${encodeURIComponent(addr)}`);
+      const template: any = await hc3.request(`/api/zwave/parameters_templates/${encodeURIComponent(addr)}`)
+        .catch((e: any) => ({ __error: String(e?.message ?? e) }));
+      return { addr, items: Array.isArray(res?.items) ? res.items : [], template };
+    } catch (e: any) {
+      lastError = String(e?.message ?? e);
+    }
+  }
+  return { addr: addrs[0], items: [], template: null, error: lastError };
+}
+
+/**
+ * A node's cumulative radio frame counters, from the diagnostics HC3's own UI
+ * reads. Before 14 Nov 2026 nothing on the REST surface could show whether a
+ * parameter write or poll left the controller; these counters can: on node 187
+ * they stood still for 30-45 s idle, moved 1 out / 1 in per parameter poll,
+ * and 2-3 out per setConfiguration. Other traffic to the node in the same
+ * window inflates them, so read a delta as "at least this much went out".
+ */
+export async function nodeFrames(hc3: any, nodeId: any): Promise<{ in: number; out: number; failed: number } | null> {
+  try {
+    const r: any = await hc3.request('/api/zwave/nodes/diagnostics/transmissions');
+    const n = (Array.isArray(r?.items) ? r.items : []).find((x: any) => String(x.nodeId) === String(nodeId));
+    return n ? { in: n.incomingTotal, out: n.outgoingTotal, failed: n.outgoingFailed } : null;
+  } catch {
+    return null;
+  }
+}
+
+function frameDelta(a: { in: number; out: number; failed: number } | null, b: { in: number; out: number; failed: number } | null) {
+  if (!a || !b) return null;
+  return { framesOut: b.out - a.out, framesIn: b.in - a.in, outgoingFailed: b.failed - a.failed };
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 export const zwaveSchemas: Record<string, MCPTool> = {
   get_zwave_mesh_health:
       {
@@ -47,13 +101,18 @@ export const zwaveSchemas: Record<string, MCPTool> = {
   get_device_parameters:
       {
         name: 'get_device_parameters',
-        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels, descriptions, defaults, and format. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. PROVENANCE: the `source` field is verbatim from HC3. `"template"` does NOT mean "catalogue default returned as placeholder" — empirically, parameters with non-default values still carry `source: "template"`. It means the value is from HC3\'s template-backed storage layer: what HC3 recorded the device as being configured to, usually via the HC3 UI\'s native Z-Wave configuration path (which transmits). In normal operation these values match the physical device. What HC3 5.x cannot do over REST is re-verify the stored value against the physical device on demand (the device ACTIONS `getParameter`, `reconfigure` and `pollConfigurationParameter` return not-implemented; the per-parameter read used by the HC3 web interface, `POST /api/zwave/polling/configuration_parameters/{addr}/{number}`, answers 202 Accepted, but on 14 Nov 2026 three polls of parameters whose cache already matched showed no change, event or log, so whether it refreshes the cache is not yet established). So treat returned values as "HC3\'s best knowledge, almost certainly accurate", not "guaranteed live readback". Drift from physical reality only occurs if the device was reset physically, a different controller reached it, or someone used the broken PUT `/api/devices/{id}` `{properties: {parameters: [...]}}` path (see S14 — `modify_device` rejects it for this reason). Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
+        description: 'Read a Z-Wave device\'s configuration parameters with human-readable labels, descriptions, defaults, and format. For each parameter HC3 knows about the device, returns: parameterNumber, current value, size in bytes, source provenance, label, description, default value, and format. PROVENANCE: the `source` field is verbatim from HC3. `"template"` does NOT mean "catalogue default returned as placeholder" — empirically, parameters with non-default values still carry `source: "template"`. It means the value is from HC3\'s template-backed storage layer: what HC3 recorded the device as being configured to, usually via the HC3 UI\'s native Z-Wave configuration path (which transmits). In normal operation these values match the physical device. LIVE READ-BACK: pass `refreshFromDevice: [numbers]` to ask the node itself first. That uses the per-parameter read the HC3 web interface uses, `POST /api/zwave/polling/configuration_parameters/{addr}/{number}` (the device ACTIONS `getParameter`, `reconfigure` and `pollConfigurationParameter` return not-implemented). Verified 14 Nov 2026 on an FGRGBW442: each poll sends a frame to the node and gets one back (node radio counters still for 30-45 s idle, +1 out / +1 in per poll), and the result reports those counters so you can see it happened. HC3 also refreshes this cache from the device after a setConfiguration write (an out-of-range value was transmitted, refused by the device, and the cache kept the device\'s value). Without `refreshFromDevice` the values are HC3\'s stored copy, which in normal operation matches the device. Parameters belong to the Z-Wave NODE: for an endpoint child (endPointId 1, 2, ...) they are read from the root address `{nodeId}.0`. Sources undocumented endpoints `/api/zwave/configuration_parameters/{addr}` and `/api/zwave/parameters_templates/{addr}` (read-only); may break across HC3 firmware updates.',
         inputSchema: {
           type: 'object',
           properties: {
             deviceId: {
               type: 'number',
-              description: 'HC3 device id of a Z-Wave device. Must have a nodeId in its properties.'
+              description: 'HC3 device id of a Z-Wave device (parent or endpoint child). Must have a nodeId in its properties.'
+            },
+            refreshFromDevice: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'Optional: parameter numbers (up to 20) to read from the node itself before answering. Each is polled over the radio; the result says which values changed and how many frames went out and came back. Mains-powered nodes only in practice: a sleeping battery node will not answer until it wakes.'
             }
           },
           required: ['deviceId']
@@ -71,13 +130,13 @@ export const zwaveSchemas: Record<string, MCPTool> = {
   set_device_parameter:
       {
         name: 'set_device_parameter',
-        description: 'Write a Z-Wave configuration parameter via the `setConfiguration` device action. Wraps `POST /api/devices/{id}/action/setConfiguration` with body `{args:[parameterNumber, size, value]}` — the working REST path for parameter writes on HC3 firmware 5.x. Reads the parameter before and after the write and reports the diff plus an `actionResponse` envelope from HC3.\n\nWHY THIS EXISTS as a dedicated tool: `control_device` actively rejects `setConfiguration` because most Z-Wave devices do not declare it in their `actions` table; that guard is the right default for unknown action names but blocks this specific, well-attested use case. This tool bypasses the actions-array pre-check for `setConfiguration` only.\n\nALTERNATIVE PATHS (not used here): the documented `setParameter` and `reconfigure` actions, and the `pollConfigurationParameter` ACTION, return `{"error":{"code":-3,"message":"not implemented"}}` on firmware 5.x. (The HC3 web interface reads a parameter back through REST instead, `POST /api/zwave/polling/configuration_parameters/{addr}/{number}`: it answers 202, effect on the cache not yet verified.) The PUT `/api/devices/{id}` `{properties:{parameters:[...]}}` path silently caches without transmitting (S14 — `modify_device` rejects this). `setConfiguration` is the only working channel.\n\nVERIFICATION: no read-back path has been PROVEN on HC3 5.x (see the polling route above, accepted but unverified), so a single REST call cannot yet prove the value reached the physical device. Empirical evidence is strong — multiple working production scenes (e.g. the Fibaro forum `er` rule pattern from jgab April 2024, and the local `Re-calibrate Qubino Dimmers on power restart` scene 285) treat `setConfiguration` as transmitting; on 2026-05-09 a behavioural test on a Fibaro FGD212 (auto-off param 10) confirmed transmission on firmware 5.203.68 (the device autonomously switched off after the configured delay). The strongest single-call signal this tool can return is `cacheUpdated: true` plus a clean `actionResponse.error: null`; for safety-critical writes, observe the device.\n\nGUARDS: refuses devices with no Z-Wave `nodeId`; refuses `deviceId < 10` (HC3 system devices); validates `parameterNumber` (1-255), `size` (1, 2, or 4), and integer `value`. Some parameters are read-only at the device-firmware level (e.g. FGD212 14, 31, 33; Qubino Mini Dimmer 72) — the cache may appear to update but the device discards the write; this is a device-firmware concern, not a guardrail this tool can enforce.',
+        description: 'Write a Z-Wave configuration parameter via the `setConfiguration` device action. Wraps `POST /api/devices/{id}/action/setConfiguration` with body `{args:[parameterNumber, size, value]}` — the working REST path for parameter writes on HC3 firmware 5.x. Reads the parameter before and after the write and reports the diff plus an `actionResponse` envelope from HC3.\n\nWHY THIS EXISTS as a dedicated tool: `control_device` actively rejects `setConfiguration` because most Z-Wave devices do not declare it in their `actions` table; that guard is the right default for unknown action names but blocks this specific, well-attested use case. This tool bypasses the actions-array pre-check for `setConfiguration` only.\n\nALTERNATIVE PATHS (not used here): the documented `setParameter` and `reconfigure` actions, and the `pollConfigurationParameter` ACTION, return `{"error":{"code":-3,"message":"not implemented"}}` on firmware 5.x. The PUT `/api/devices/{id}` `{properties:{parameters:[...]}}` path never transmitted (S14, Zooz ZEN52); on 5.220.15 it is ignored outright, 200 with nothing stored. `modify_device` rejects it. `setConfiguration` is the only working write channel.\n\nVERIFICATION (14 Nov 2026, FGRGBW442 on 5.220.15): the tool reads the node\'s radio frame counters either side of the write and returns them as `radio`. A write moved them 2-3 frames out against none while idle, so `radio.framesOut > 0` is direct evidence the write left the controller for the node. HC3 then refreshes its parameter cache FROM THE DEVICE: a valid value appeared in the cache; an out-of-range value was transmitted, refused by the device, and the cache kept the device\'s old value. So `transmitted: true` with `cacheUpdated: false` most likely means the DEVICE refused the value (out of range, read-only), and the cache shows what the device actually holds. Parameters are read at the node\'s root address `{nodeId}.0`, also for endpoint children. To read a value from the device later, use get_device_parameters with `refreshFromDevice`. Earlier evidence: a behavioural test on an FGD212 (auto-off param 10, 9 May 2026) and working production scenes.\n\nGUARDS: refuses devices with no Z-Wave `nodeId`; refuses `deviceId < 10` (HC3 system devices); validates `parameterNumber` (1-255), `size` (1, 2, or 4), and integer `value`. Some parameters are read-only at the device-firmware level (e.g. FGD212 14, 31, 33; Qubino Mini Dimmer 72) — the cache may appear to update but the device discards the write; this is a device-firmware concern, not a guardrail this tool can enforce.',
         inputSchema: {
           type: 'object',
           properties: {
             deviceId: {
               type: 'number',
-              description: 'HC3 device id of the Z-Wave node (parent or endpoint child). The tool resolves the node\'s `nodeId.endPointId` address from the device record.'
+              description: 'HC3 device id of the Z-Wave node (parent or endpoint child). The action is sent to this device; the parameter cache is read at the node\'s root address `{nodeId}.0`.'
             },
             parameterNumber: {
               type: 'number',
@@ -246,7 +305,7 @@ export const zwave: ToolModule = {
       };
     },
 
-    async get_device_parameters(hc3, args: { deviceId: number }): Promise<any> {
+    async get_device_parameters(hc3, args: { deviceId: number; refreshFromDevice?: number[] }): Promise<any> {
       const deviceId = args?.deviceId;
       if (typeof deviceId !== 'number') {
         throw new Error('get_device_parameters requires a numeric deviceId.');
@@ -259,17 +318,48 @@ export const zwave: ToolModule = {
         );
       }
       const endpoint = device?.properties?.endPointId ?? 0;
-      const addr = `${nodeId}.${endpoint}`;
-      const encodedAddr = encodeURIComponent(addr);
+      const refresh: any = args?.refreshFromDevice;
+      if (refresh !== undefined && (!Array.isArray(refresh) || refresh.length > 20 ||
+          refresh.some((n: any) => !Number.isInteger(n) || n < 1 || n > 255))) {
+        throw new Error('get_device_parameters: refreshFromDevice must be an array of up to 20 parameter numbers (1-255).');
+      }
 
-      const [valuesRes, templateRes] = await Promise.all([
-        hc3.request(`/api/zwave/configuration_parameters/${encodedAddr}`)
-          .catch((e: any) => ({ __error: String(e?.message ?? e) })),
-        hc3.request(`/api/zwave/parameters_templates/${encodedAddr}`)
-          .catch((e: any) => ({ __error: String(e?.message ?? e) }))
-      ]);
+      let read = await readNodeParameters(hc3, nodeId, endpoint);
+      let refreshed: any = undefined;
+      if (refresh?.length) {
+        const cached = new Map<number, any>(read.items.map((v: any) => [v.parameterNumber, v.configurationValue]));
+        const f0 = await nodeFrames(hc3, nodeId);
+        const polls: Record<number, number | string> = {};
+        for (const n of refresh) {
+          try {
+            await hc3.request(`/api/zwave/polling/configuration_parameters/${encodeURIComponent(read.addr)}/${n}`, 'POST', {});
+            polls[n] = 'accepted';
+          } catch (e: any) {
+            polls[n] = String(e?.message ?? e);
+          }
+        }
+        await sleep(3000);
+        const f1 = await nodeFrames(hc3, nodeId);
+        read = await readNodeParameters(hc3, nodeId, endpoint);
+        const radio = frameDelta(f0, f1);
+        refreshed = {
+          polled: polls,
+          changed: read.items
+            .filter((v: any) => refresh.includes(v.parameterNumber) && cached.get(v.parameterNumber) !== v.configurationValue)
+            .map((v: any) => ({ parameterNumber: v.parameterNumber, was: cached.get(v.parameterNumber), now: v.configurationValue })),
+          radio,
+          note: radio === null
+            ? 'Node radio counters unavailable, so it cannot be shown that the polls reached the node.'
+            : radio.framesOut === 0
+              ? 'No frames went to the node: the polls did not reach it (asleep, dead, or HC3 dropped them). Values below are the cached copy.'
+              : `${radio.framesOut} frame(s) went to the node and ${radio.framesIn} came back during the polls (other traffic in the same 3 s can add to these). ` +
+                'Values below are as HC3 holds them after that exchange.'
+        };
+      }
+      const { addr } = read;
+      const templateRes: any = read.template ?? {};
 
-      const values: any[] = Array.isArray((valuesRes as any)?.items) ? (valuesRes as any).items : [];
+      const values: any[] = read.items;
       const templateParams: any[] = Array.isArray((templateRes as any)?.parameters) ? (templateRes as any).parameters : [];
       const templateByNumber = new Map<number, any>(
         templateParams.map(p => [p.parameterNumber, p])
@@ -304,16 +394,14 @@ export const zwave: ToolModule = {
         endpoint,
         addr,
         productType: (templateRes as any)?.description ?? null,
+        ...(read.error ? { readError: `HC3 has no parameter record for node ${nodeId}: ${read.error}` } : {}),
+        ...(refreshed ? { refreshFromDevice: refreshed } : {}),
         parameters: merged,
         provenance_note:
-          'Values are from HC3\'s stored-values layer, normally populated when the device was configured ' +
-          'via HC3\'s native Z-Wave path (the HC3 UI, which transmits). In normal operation they match ' +
-          'the physical device. HC3 5.x cannot re-verify them over REST on demand — the mesh read-back ' +
-          'path is not-implemented on this firmware — so treat the values as "almost certainly correct, ' +
-          'not programmatically re-provable". Drift from physical reality only occurs if the device was ' +
-          'physically reset, a different controller reached it, or someone used the PUT ' +
-          '/api/devices/{id} {properties: {parameters:[...]}} path (cache-only — modify_device rejects ' +
-          'this for the same reason). `source: "template"` on a parameter means "stored in HC3\'s ' +
+          'Values are from HC3\'s stored-values layer, which HC3 updates from the device after a ' +
+          'setConfiguration write and after a poll. To have the node asked now, pass refreshFromDevice. ' +
+          'Parameters belong to the Z-Wave node, so an endpoint child shows its root node\'s set. ' +
+          '`source: "template"` on a parameter means "stored in HC3\'s ' +
           'template-backed storage", NOT "this is the catalogue default". Empirically, parameters with ' +
           'non-default values still carry source "template".',
         all_values_are_hc3_stored: storedOnly
@@ -357,26 +445,22 @@ export const zwave: ToolModule = {
         );
       }
       const endpoint = device?.properties?.endPointId ?? 0;
-      const addr = `${nodeId}.${endpoint}`;
-      const encodedAddr = encodeURIComponent(addr);
+      let addr = `${nodeId}.0`;
 
       const readOne = async (): Promise<{ value: number; size: number; source: string | null } | null> => {
-        try {
-          const res: any = await hc3.request(`/api/zwave/configuration_parameters/${encodedAddr}`);
-          const items: any[] = Array.isArray(res?.items) ? res.items : [];
-          const entry = items.find((p: any) => p.parameterNumber === parameterNumber);
-          if (!entry) return null;
-          return {
-            value: entry.configurationValue,
-            size: entry.size,
-            source: entry.source?.type ?? null
-          };
-        } catch {
-          return null;
-        }
+        const r = await readNodeParameters(hc3, nodeId, endpoint);
+        addr = r.addr;
+        const entry = r.items.find((p: any) => p.parameterNumber === parameterNumber);
+        if (!entry) return null;
+        return {
+          value: entry.configurationValue,
+          size: entry.size,
+          source: entry.source?.type ?? null
+        };
       };
 
       const before = await readOne();
+      const framesBefore = await nodeFrames(hc3, nodeId);
 
       const actionResponse: any = await hc3.request(
         `/api/devices/${deviceId}/action/setConfiguration`,
@@ -396,6 +480,8 @@ export const zwave: ToolModule = {
       }
 
       const cacheUpdated = after !== null && after.value === value;
+      const radio = frameDelta(framesBefore, await nodeFrames(hc3, nodeId));
+      const transmitted = radio === null ? null : radio.framesOut > 0;
 
       // cacheUpdated:false used to read as "the write failed". It does not
       // mean that: on 17 Oct 2026 (5.220.15) two FGR223 parents showed
@@ -403,13 +489,24 @@ export const zwave: ToolModule = {
       // blinds' slats then rotated as the new value dictated: it transmitted.
       const props = device?.properties ?? {};
       const battery = props.batteryLevel !== undefined || (typeof props.wakeUpTime === 'number' && props.wakeUpTime > 0);
-      const outcome = cacheUpdated
-        ? 'HC3 stored the new value. Transmission to the device cannot be read back on 5.x; empirically setConfiguration does transmit.'
+      const batteryNote = battery ? ' This is a BATTERY device: a parameter write can only reach it when it wakes up, and HC3 shows nothing ' +
+        'to say it is queued (pendingActions stays false). Wake it, or wait for its wake-up interval.' : '';
+      const outcome = transmitted === true && cacheUpdated
+        ? `Transmitted (${radio!.framesOut} frame(s) out, ${radio!.framesIn} back) and HC3's cache now holds ${value}, which it refreshes from the device after a write.`
+        : transmitted === true && after !== null
+          ? `Transmitted (${radio!.framesOut} frame(s) out, ${radio!.framesIn} back), but the cache still holds ${after.value}. HC3 refreshes ` +
+            'this cache from the device after a write, so the device most likely REFUSED the value (outside its range, or read-only). ' +
+            'Check the parameter\'s format in get_device_parameters.'
+        : transmitted === true
+          ? `Transmitted (${radio!.framesOut} frame(s) out, ${radio!.framesIn} back). HC3 holds no cached entry for this parameter to compare.`
+        : transmitted === false
+          ? 'NO frames went to the node during the write, so it did not reach the device yet.' +
+            (batteryNote || ' The node may be dead or unreachable; check get_zwave_mesh_health.')
+        : cacheUpdated
+          ? 'HC3 stored the new value (radio counters unavailable to show transmission).'
         : 'NOT a failure signal by itself: HC3 did not update its cached copy, but on this firmware writes have transmitted with ' +
           'cacheUpdated:false and an event-log isSupportedByDevice:false (FGR223, 17 Oct 2026). Judge by the device\'s behaviour ' +
-          'or a property that depends on the parameter, not by these fields.' +
-          (battery ? ' This is a BATTERY device: a parameter write can only reach it when it wakes up, and HC3 shows nothing ' +
-            'to say it is queued (pendingActions stays false). Wake it, or wait for its wake-up interval.' : '');
+          'or a property that depends on the parameter, not by these fields.' + batteryNote;
 
       return {
         deviceId,
@@ -423,11 +520,11 @@ export const zwave: ToolModule = {
         before,
         after,
         cacheUpdated,
+        transmitted,
+        radio,
         outcome,
         ...(battery ? { batteryDevice: true } : {}),
-        actionResponse,
-        transmissionNote:
-          'cacheUpdated=true means HC3 accepted and stored the new value. Whether the value transmitted to the physical Z-Wave device is NOT programmatically verifiable on HC3 5.x firmware (no mesh read-back path). Empirically, setConfiguration does transmit on this firmware (proven on Fibaro FGD212, 2026-05-09). For safety-critical writes, observe device behaviour or read the relevant device property afterwards.'
+        actionResponse
       };
     },
 
