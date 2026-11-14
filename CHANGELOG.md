@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.41.0] - 2026-11-14
+
+### Added
+
+- `restore_dimmer_settings`: puts dimmers' saved minimum, maximum and
+  power-report threshold back from a baseline, either the Dimmer Tuner register
+  (a person-tuned minimum wins) or `zwave-parameters.json` in a snapshot commit.
+  Dry run by default (a plan of saved vs current values). With `apply:true` it
+  writes only the differences, max before min, and reports radio frames.
+  `remap` carries an old node's values and tuning to a replaced or re-included
+  dimmer. Refuses model mismatches and impossible values, and updates the
+  register afterwards. A power cut does not need it: dimmers keep their
+  parameters in their own memory.
+
 ## [4.40.6] - 2026-11-14
 
 ### Fixed

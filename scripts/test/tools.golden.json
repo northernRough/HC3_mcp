@@ -2698,6 +2698,49 @@
     }
   },
   {
+    "name": "restore_dimmer_settings",
+    "description": "Put dimmers' saved MINIMUM and MAXIMUM level parameters (and their power-report threshold) back from a baseline. For a dimmer that was factory-reset, replaced, re-included, or calibrated to something worse. A power cut does NOT need this: Z-Wave dimmers keep parameters in their own memory.\n\nBaselines: `register` (default) is the Dimmer Tuner QuickApp's register, where a person-tuned minimum (tunedMin) wins over the plain min. `snapshot` is zwave-parameters.json in the nightly snapshot repo (`commit`: 'latest', 'before:<ISO date>' or a commit id).\n\nDRY RUN BY DEFAULT: without apply:true it only reads, and returns the plan: for each dimmer, the saved and current values and what would change. With apply:true it writes only the differing values, one dimmer at a time, through set_device_parameter, and reports whether radio frames went out. No lights change level.\n\nA replaced or re-included dimmer gets a NEW node number. Map it with remap {\"<old node>\": <new device id>}; the old node's values and its tuned minimum go to the new one. `devices` limits the run to some dimmers (light or root device ids). A dimmer whose saved model differs from the live one is skipped. After an apply that changed anything, the Dimmer Tuner's register is updated (one QuickApp restart).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "register",
+            "snapshot"
+          ],
+          "description": "Baseline. Default 'register'."
+        },
+        "commit": {
+          "type": "string",
+          "description": "With source 'snapshot': 'latest' (default), 'before:<ISO date>', or a commit id."
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "Only these dimmers (light or root device ids). Default: every supported dimmer with a saved value."
+        },
+        "remap": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Old node number -> new device id, for a replaced or re-included dimmer."
+        },
+        "includeReport": {
+          "type": "boolean",
+          "description": "Also restore the power-report threshold. Default true."
+        },
+        "apply": {
+          "type": "boolean",
+          "description": "Write the changes. Default false (dry run)."
+        }
+      }
+    }
+  },
+  {
     "name": "restore_quickapp_from_snapshot",
     "description": "Restore a QuickApp's files (and optionally variables) from a snapshot, entirely server side: no file content passes through the conversation, and secrets are re-inserted from the encrypted store without ever being returned. Order of writes: (1) ONE variable write — dryRun=\"true\" if dryRunFirst, plus any variables being restored; (2) files missing on the live QA are created; (3) ONE update_multiple_quickapp_files push of the rest; then every restored file is re-read and its md5 checked against the snapshot. Expect one restart per step that runs. Files present live but not in the snapshot are reported, never deleted. Run with preview:true first: it returns exactly what would be written (names, hashes, variable names) and writes nothing. dryRunFirst leaves the QuickApp's dryRun variable at \"true\" for you to switch off (set_quickapp_variable) once you have checked its behaviour; it is refused if the QA has no dryRun variable. includeView:true also restores the tile (viewLayout, uiView, useUiView, uiCallbacks, whichever differ) in one final write: the snapshot's viewLayout is validated first, and if the tile then renders zero items the previous view is written back automatically.",
     "inputSchema": {

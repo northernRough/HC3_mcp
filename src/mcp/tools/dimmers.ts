@@ -17,6 +17,7 @@
 import { ToolModule } from './registry';
 import { readNodeParameters, zwave } from './zwave';
 import { quickapps } from './quickapps';
+import { readSnapshotJson } from './snapshots';
 
 export interface DimmerProfile {
   key: string; match: string; label: string;
@@ -168,6 +169,21 @@ export const dimmers: ToolModule = {
           levels: { type: 'array', items: { type: 'number' }, description: 'Sweep levels. Default [20,30,40,50,60,70,80,90,99].' },
         },
         required: ['deviceId'],
+      },
+    },
+    {
+      name: 'restore_dimmer_settings',
+      description: "Put dimmers' saved MINIMUM and MAXIMUM level parameters (and their power-report threshold) back from a baseline. For a dimmer that was factory-reset, replaced, re-included, or calibrated to something worse. A power cut does NOT need this: Z-Wave dimmers keep parameters in their own memory.\n\nBaselines: `register` (default) is the Dimmer Tuner QuickApp's register, where a person-tuned minimum (tunedMin) wins over the plain min. `snapshot` is zwave-parameters.json in the nightly snapshot repo (`commit`: 'latest', 'before:<ISO date>' or a commit id).\n\nDRY RUN BY DEFAULT: without apply:true it only reads, and returns the plan: for each dimmer, the saved and current values and what would change. With apply:true it writes only the differing values, one dimmer at a time, through set_device_parameter, and reports whether radio frames went out. No lights change level.\n\nA replaced or re-included dimmer gets a NEW node number. Map it with remap {\"<old node>\": <new device id>}; the old node's values and its tuned minimum go to the new one. `devices` limits the run to some dimmers (light or root device ids). A dimmer whose saved model differs from the live one is skipped. After an apply that changed anything, the Dimmer Tuner's register is updated (one QuickApp restart).",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source: { type: 'string', enum: ['register', 'snapshot'], description: "Baseline. Default 'register'." },
+          commit: { type: 'string', description: "With source 'snapshot': 'latest' (default), 'before:<ISO date>', or a commit id." },
+          devices: { type: 'array', items: { type: 'number' }, description: 'Only these dimmers (light or root device ids). Default: every supported dimmer with a saved value.' },
+          remap: { type: 'object', additionalProperties: { type: 'number' }, description: 'Old node number -> new device id, for a replaced or re-included dimmer.' },
+          includeReport: { type: 'boolean', description: 'Also restore the power-report threshold. Default true.' },
+          apply: { type: 'boolean', description: 'Write the changes. Default false (dry run).' },
+        },
       },
     },
   ],
@@ -407,6 +423,154 @@ export const dimmers: ToolModule = {
                               ...(!completed && maxTouched ? { max: before.max } : {}) };
         } finally { busy = false; }
       }
+    },
+
+    async restore_dimmer_settings(hc3, args: { source?: string; commit?: string; devices?: any; remap?: any; includeReport?: boolean; apply?: boolean }): Promise<any> {
+      const source = args?.source ?? 'register';
+      if (source !== 'register' && source !== 'snapshot') throw new Error("restore_dimmer_settings: source must be 'register' or 'snapshot'.");
+      const parse = (v: any) => { if (typeof v === 'string') { try { return JSON.parse(v); } catch { return v; } } return v; };
+      const devicesArg = parse(args?.devices);
+      if (devicesArg !== undefined && (!Array.isArray(devicesArg) || devicesArg.some((x: any) => !Number.isInteger(Number(x))))) {
+        throw new Error('restore_dimmer_settings: devices must be a list of device ids.');
+      }
+      const remapArg = parse(args?.remap) ?? {};
+      if (typeof remapArg !== 'object' || Array.isArray(remapArg)) throw new Error('restore_dimmer_settings: remap must be {"<old node>": <new device id>}.');
+      const includeReport = args?.includeReport !== false;
+      const apply = args?.apply === true;
+      if (apply && busy) throw new Error('restore_dimmer_settings: a calibration or restore is running. One at a time.');
+
+      const nodeOf = async (id: number) => {
+        const n = Number((await hc3.request(`/api/devices/${id}`))?.properties?.nodeId);
+        if (!Number.isInteger(n)) throw new Error(`restore_dimmer_settings: device ${id} is not a Z-Wave device.`);
+        return n;
+      };
+      // new node -> old node
+      const remap = new Map<number, number>();
+      for (const [oldNode, devId] of Object.entries(remapArg)) {
+        const o = Number(oldNode);
+        if (!Number.isInteger(o) || !Number.isInteger(Number(devId))) throw new Error(`restore_dimmer_settings: bad remap entry ${oldNode} -> ${devId}.`);
+        remap.set(await nodeOf(Number(devId)), o);
+      }
+
+      // The baseline, keyed by (old) node.
+      const qa = await findTuner(hc3).catch(() => null);
+      const reg = qa ? readRegister(qa) : [];
+      const regByNode = new Map<number, any>(reg.map((e: any) => [Number(e.node), e]));
+      let baseline: any = { source };
+      const saved = new Map<number, { name?: string; model?: string; vals: (p: DimmerProfile) => { min?: number; max?: number; report?: number } }>();
+      if (source === 'register') {
+        if (!qa) throw new Error('restore_dimmer_settings: no Dimmer Tuner QuickApp, so no register. Use source "snapshot".');
+        baseline.quickAppId = qa.id;
+        for (const e of reg) {
+          saved.set(Number(e.node), { name: e.name, model: e.model, vals: () => ({ min: num(e.tunedMin ?? e.min), max: num(e.max), report: num(e.report) }) });
+        }
+      } else {
+        const s = await readSnapshotJson(args?.commit, 'zwave-parameters.json');
+        baseline = { source, commit: s.commit.slice(0, 12), date: s.date };
+        for (const e of Object.values<any>(s.json ?? {})) {
+          const n = Number(e?.nodeId);
+          if (!Number.isInteger(n) || (saved.has(n) && Number(e.endPointId) !== 0)) continue;
+          const items: any[] = e?.parameters?.items ?? [];
+          const at = (k: number) => num(items.find((i: any) => i.parameterNumber === k)?.configurationValue);
+          // The snapshot does not record the model; the register does, where it has the node.
+          saved.set(n, { name: e.name, model: regByNode.get(n)?.model, vals: p => ({ min: at(p.min), max: at(p.max), report: p.report ? at(p.report.param) : undefined }) });
+        }
+      }
+
+      let targets = await discoverDimmers(hc3);
+      if (devicesArg !== undefined) {
+        const want = new Set<number>();
+        for (const id of devicesArg) want.add(await nodeOf(Number(id)));
+        targets = targets.filter(t => want.has(t.node));
+        const missing = [...want].filter(n => !targets.some(t => t.node === n));
+        if (missing.length) throw new Error(`restore_dimmer_settings: node(s) ${missing.join(', ')} are not supported dimmers.`);
+      }
+      for (const n of remap.keys()) {
+        if (!targets.some(t => t.node === n)) throw new Error(`restore_dimmer_settings: remap target node ${n} is not a supported dimmer${devicesArg ? ' in devices' : ''}.`);
+      }
+
+      const ok = (v: any) => Number.isFinite(v);
+      const plan: any[] = [];
+      for (const t of targets) {
+        const p = DIMMER_PROFILES.find(x => x.key === t.model)!;
+        const from = remap.get(t.node) ?? t.node;
+        const s = saved.get(from);
+        const row: any = { node: t.node, ...(from !== t.node ? { fromNode: from } : {}), name: t.name, room: t.room, model: t.model,
+                           current: { min: t.min, max: t.max, ...(p.report ? { report: t.report } : {}) } };
+        plan.push(row);
+        if (!s) { row.skipped = `no saved values for node ${from} in the ${source}`; continue; }
+        if (s.model && s.model !== t.model) { row.skipped = `saved as a ${s.model}, now a ${t.model}: parameters differ`; continue; }
+        const v = s.vals(p);
+        row.saved = { min: ok(v.min) ? v.min : null, max: ok(v.max) ? v.max : null, ...(p.report ? { report: ok(v.report) ? v.report : null } : {}) };
+        const bad: string[] = [];
+        if (ok(v.min) && (v.min! < p.minLo || v.min! > p.minHi)) bad.push(`min ${v.min} outside ${p.minLo}-${p.minHi}`);
+        if (ok(v.max) && (v.max! < p.maxLo || v.max! > p.maxHi)) bad.push(`max ${v.max} outside ${p.maxLo}-${p.maxHi}`);
+        if (ok(v.min) && ok(v.max) && v.min! >= v.max!) bad.push(`min ${v.min} not below max ${v.max}`);
+        if (ok(v.report) && (v.report! < 0 || v.report! > 100)) bad.push(`report ${v.report} outside 0-100`);
+        if (bad.length) { row.skipped = `saved values refused: ${bad.join('; ')}`; continue; }
+        const ch: any[] = [];
+        if (ok(v.max) && v.max !== t.max) ch.push({ what: 'max', param: p.max, size: p.size, from: t.max ?? null, to: v.max });
+        if (ok(v.min) && v.min !== t.min) ch.push({ what: 'min', param: p.min, size: p.size, from: t.min ?? null, to: v.min });
+        // Max first, unless the new max sits below the current min.
+        if (ch.length === 2 && ok(t.min) && v.max! <= t.min!) ch.reverse();
+        if (includeReport && p.report && ok(v.report) && v.report !== t.report) ch.push({ what: 'report', param: p.report.param, size: p.report.size, from: t.report ?? null, to: v.report });
+        row.changes = ch;
+        (row as any)._t = t;
+      }
+
+      const summary = {
+        dimmers: plan.length,
+        toChange: plan.filter(r => r.changes?.length).length,
+        alreadyMatch: plan.filter(r => r.changes && !r.changes.length).length,
+        skipped: plan.filter(r => r.skipped).length,
+      };
+      const clean = () => plan.map(r => { const { _t, ...rest } = r; return rest; });
+      if (!apply) {
+        return { baseline, dryRun: true, ...summary, plan: clean(),
+                 note: summary.toChange ? 'Nothing written. Run again with apply:true to write the changes.' : 'Every dimmer already matches the baseline.' };
+      }
+
+      busy = true;
+      const result: any = { baseline, applied: true, ...summary };
+      try {
+        for (const r of plan) {
+          if (!r.changes?.length) continue;
+          const t: DimmerEntry = r._t;
+          for (const c of r.changes) {
+            try {
+              const w = await zwave.handlers.set_device_parameter(hc3, { deviceId: t.rootId, parameterNumber: c.param, size: c.size, value: c.to });
+              c.transmitted = w.transmitted; c.cacheNow = w.after?.value ?? null;
+              c.ok = w.transmitted !== false && (c.cacheNow === null || c.cacheNow === c.to);
+            } catch (e: any) { c.ok = false; c.error = String(e?.message ?? e); }
+            if (!c.ok) { r.failed = `${c.what} did not take${c.transmitted === false ? ' (no radio frames: weak link or asleep)' : ''}; stopped on this dimmer`; break; }
+          }
+        }
+        result.failed = plan.filter(r => r.failed).length;
+
+        // Keep the Dimmer Tuner's register in step with what is now on the dimmers.
+        const changed = plan.filter(r => r.changes?.some((c: any) => c.ok));
+        if (qa && (changed.length || remap.size)) {
+          try {
+            const fresh = new Map<number, any>(readRegister(await findTuner(hc3, qa.id)).map((e: any) => [Number(e.node), e]));
+            for (const r of plan) {
+              if (!r._t || (!r.changes?.some((c: any) => c.ok) && r.fromNode === undefined)) continue;
+              const t: DimmerEntry = r._t;
+              const e = fresh.get(t.node) ?? { ...t };
+              for (const c of r.changes ?? []) if (c.ok) e[c.what] = c.to;
+              if (r.fromNode !== undefined) {
+                const old = fresh.get(r.fromNode) ?? regByNode.get(r.fromNode);
+                if (old?.tunedMin !== undefined) { e.tunedMin = old.tunedMin; e.tunedAt = old.tunedAt; }
+                if (!targets.some(x => x.node === r.fromNode)) fresh.delete(r.fromNode);
+              }
+              fresh.set(t.node, e);
+            }
+            await writeRegister(hc3, qa.id, [...fresh.values()].sort((a: any, b: any) => (a.room + a.name).localeCompare(b.room + b.name)));
+            result.quickAppId = qa.id;   // for the write log
+          } catch (e: any) { result.tunerRegisterError = String(e?.message ?? e); }
+        }
+        result.plan = clean();
+        return result;
+      } finally { busy = false; }
     },
   },
 };
