@@ -2,6 +2,15 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.4] - 2026-11-14
+
+### Fixed
+
+- `calibrate_dimmer` carried on after a write that sent no radio frames (den
+  wall wash: the 2% threshold and the opened maximum never left the
+  controller), so it measured the old maximum and reported a new one. It now
+  stops, puts things back, and says the dimmer may have a weak link.
+
 ## [4.40.3] - 2026-11-14
 
 ### Fixed

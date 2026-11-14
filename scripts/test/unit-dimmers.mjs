@@ -28,7 +28,7 @@ const TEMPLATES = {
  * One dimmer on node 72 (root 3749, light 3750), plus a Dimmer Tuner QA 5079.
  * Light output = min + (level-1)/98 * (max-min); lamp power saturates at `sat`.
  */
-function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false, glitch = {}, calFails = false, hiddenEp0 = false } = {}) {
+function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, lightOn = false, register, topLoss = false, glitch = {}, calFails = false, hiddenEp0 = false, deafParams = [] } = {}) {
   const P = params ?? (model === 'qubino' ? { 40: 50, 60: 20, 61: 99, 71: 0, 72: 1 }
                     : model === 'fgd212' ? { 1: 12, 2: 79, 13: 0, 14: 1, 50: 10, 53: 10 } : { 4: 1, 5: 99 });
   const minP = model === 'qubino' ? 60 : model === 'fgd212' ? 1 : 4, maxP = model === 'qubino' ? 61 : model === 'fgd212' ? 2 : 5;
@@ -66,7 +66,9 @@ function rig({ model = 'qubino', params, full = 22.6, sat = 55, meters = true, l
       throw new HC3HttpError(404, 'Not Found', method, ep, '');
     }
     if (ep === '/api/devices/3749/action/setConfiguration') {
-      const [n, , v] = body.args; s.frames.out += 2; s.frames.in += 1;
+      const [n, , v] = body.args;
+      if (deafParams.includes(n)) return { result: null };   // never left the controller
+      s.frames.out += 2; s.frames.in += 1;
       if (model === 'fgd212' && n === 13 && v === 1) { P[1] = calFails ? 8 : 30; P[2] = calFails ? 99 : 85; P[14] = calFails ? 0 : 1; return { result: null }; }   // calibration overwrites min/max
       if (model === 'qubino' && n === 71 && v === 2) { P[72] = 1; return { result: null }; }                          // trigger resets itself
       P[n] = v; return { result: null };
@@ -194,6 +196,14 @@ await check('the visible light is measured, not a hidden endpoint-0 twin that al
   const r = await H.calibrate_dimmer(hc3, { deviceId: 3749 });
   assert.equal(r.light.id, 3750);
   assert.equal(r.chosenMax, 60);
+});
+
+await check('a write that sends no frames stops the run, and the rest is put back', async () => {
+  const hc3 = rig({ params: { 40: 10, 60: 20, 61: 69, 71: 0, 72: 1 }, deafParams: [61] });
+  await assert.rejects(H.calibrate_dimmer(hc3, { deviceId: 3750 }), /parameter 61 = 99 .* sent no radio frames/);
+  assert.equal(hc3.P[61], 69);
+  assert.equal(hc3.P[40], 10);
+  assert.equal(hc3.s.on, false);
 });
 
 console.log('sync_dimmer_tuner');

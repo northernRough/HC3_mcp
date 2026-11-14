@@ -220,10 +220,19 @@ export const dimmers: ToolModule = {
 
       busy = true;
       const writes: any[] = [];
+      // A write that sends no radio frames did not reach the dimmer (den wall
+      // wash, 14 Nov 2026: the 2% threshold and the opened maximum both stayed
+      // home, the sweep measured the OLD maximum, and the result claimed 99).
+      // Stop rather than measure something else. Restores are best-effort.
+      let restoring = false;
       const setParam = async (param: number, size: number, value: number, why: string) => {
         if (param === p.max) maxTouched = true;
         const r = await zwave.handlers.set_device_parameter(hc3, { deviceId: rootId, parameterNumber: param, size, value });
         writes.push({ param, value, why, transmitted: r.transmitted, cacheNow: r.after?.value ?? null });
+        if (r.transmitted === false && !restoring) {
+          throw new Error(`calibrate_dimmer: writing parameter ${param} = ${value} (${why}) sent no radio frames to node ${node}, so it did not reach the dimmer. ` +
+            'Stopped and put things back; the dimmer may have a weak link (see get_zwave_node_diagnostics). Try again later.');
+        }
         return r;
       };
       const setLevel = (v: number) => hc3.request(`/api/devices/${light.id}/action/setValue`, 'POST', { args: [v] });
@@ -362,6 +371,7 @@ export const dimmers: ToolModule = {
       } finally {
         try {
           // Never read before (a blank HC3 never polled): fall back to the maker's default, 10%.
+          restoring = true;
           if (reportChanged) await setParam(p.report!.param, p.report!.size, before.report ?? 10, 'restore power-report threshold');
           // Stopped by an error after the sweep opened the maximum: put it back.
           if (!completed && maxTouched && before.max !== undefined) await setParam(p.max, p.size, before.max, 'run stopped: restore maximum');
