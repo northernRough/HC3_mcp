@@ -14,7 +14,7 @@ saving, 1% is always the lowest clean level.
 The TOP end is measured, not judged: "Auto top" steps the light, reads the
 power it draws, finds where power stops rising (LED lamps often reach full
 output at 50-60% of the slider), sets the maximum level just above it, and
-sweeps again until 99% still reaches 97% of full power. It is the same method
+sweeps again until 99% still reaches 95% of full power. It is the same method
 as the HC3 MCP tool calibrate_dimmer, minus the dimmer's own built-in
 calibration (afterwards a QuickApp could not read back the min/max it chose).
 
@@ -32,7 +32,7 @@ Writes go out as setConfiguration on the Z-Wave root device, the path proven
 to transmit (radio frame counters, 14 Nov 2026).
 --]]
 
-local VERSION = "1.3.0"
+local VERSION = "1.4.0"
 
 -- Dimmer models, matched against the HC3 parameter template description.
 local PROFILES = {
@@ -44,6 +44,7 @@ local PROFILES = {
 local IDLE_CANCEL_MS = 10 * 60 * 1000   -- an abandoned session puts the old value back
 local SWEEP = { 20, 30, 40, 50, 60, 70, 80, 90, 99 }
 local SETTLE_MS = 6000                   -- after a level change, before reading power
+local REACH = 0.95                       -- "full power": within 5% of the peak (warm lamps drift)
 
 local function profileByKey(key)
   for _, p in ipairs(PROFILES) do if p.key == key then return p end end
@@ -304,7 +305,11 @@ function QuickApp:autoTop()
   setParam(p.report, 2)                       -- fine-grained power readings during the sweep
   setParam(p.max, p.maxHi); s.max = p.maxHi   -- open the maximum
   self:showSelected()
-  fibaro.setTimeout(1500, function()
+  -- Warm the lamps for a minute first: warm LED drivers draw a few % less
+  -- than cold ones, which otherwise reads as "99% falls short of full".
+  fibaro.call(s.lightId, "setValue", 99)
+  self:say("Warming the lamps for a minute at full…")
+  fibaro.setTimeout(60000, function()
     self:sweep(SWEEP, "Measuring", function(open, reliable)
       if not reliable then
         return self:autoFinish("Readings did not make sense (power fell as the level rose). Maximum put back; try again later.", true)
@@ -313,7 +318,7 @@ function QuickApp:autoTop()
       for _, r in ipairs(open) do if r[2] > full then full = r[2] end end
       if full < 1 then return self:autoFinish("The light drew no measurable power. Maximum put back.", true) end
       local plateau = 99
-      for _, r in ipairs(open) do if r[2] >= 0.97 * full then plateau = r[1]; break end end
+      for _, r in ipairs(open) do if r[2] >= REACH * full then plateau = r[1]; break end end
       self.auto.open, self.auto.full, self.auto.plateau = open, full, plateau
       self:debug("open sweep: " .. table2text(open))
       if plateau >= 85 then
@@ -328,7 +333,7 @@ function QuickApp:autoTop()
           self:sweep(SWEEP, "Checking max " .. chosen, function(verify)
             local top = verify[#verify][2]
             self:debug(string.format("max %d sweep: %s", chosen, table2text(verify)))
-            if top >= 0.97 * full or chosen >= p.maxHi or tries >= 6 then
+            if top >= REACH * full or chosen >= p.maxHi or tries >= 6 then
               self.auto.verify = verify
               return self:autoFinish(string.format(
                 "Done: power stopped rising at %d%% (%sW). Max %d → %d; 99%% now draws %sW. Half way: %sW.",

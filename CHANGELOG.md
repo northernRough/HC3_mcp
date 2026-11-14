@@ -13,6 +13,9 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
   it is now put back.
 - A failed FGD212 calibration (status 0) still rewrites min and max; both are
   now put back instead of kept.
+- Warm LED drivers draw ~6% less than cold ones (guest ensuite): the lamps are
+  now warmed for a minute at full before the first sweep, and "full power"
+  means within 5% of the peak (was 3%). Same in the Dimmer Tuner's Auto top.
 
 ## [4.40.2] - 2026-11-14
 

@@ -50,6 +50,8 @@ const num = (v: any) => (v === undefined || v === null || v === '' ? NaN : Numbe
 const isMultilevel = (d: any) => d?.type === 'com.fibaro.multilevelSwitch' || d?.baseType === 'com.fibaro.multilevelSwitch';
 const settleMs = () => Number(process.env.HC3_DIMMER_SETTLE_MS ?? 6000);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** "Full power" means within 5% of the peak: warm LED drivers drift a few %. */
+const REACH = 0.95;
 
 export interface DimmerEntry {
   node: number; lightId: number; rootId: number; name: string; room: string;
@@ -150,7 +152,7 @@ export const dimmers: ToolModule = {
     },
     {
       name: 'calibrate_dimmer',
-      description: "Tune a dimmer's TOP end by measurement. Steps the light through its levels, reads the power it draws at each, finds where power stops rising (LED lamps often reach full output at 50-60% of the slider, leaving the top half dead), then sets the dimmer's MAXIMUM level parameter so the whole slider is useful while 99% keeps full output — and sweeps again to verify, raising the maximum in steps of 5 until 99% reaches 97% of full power. Verified by hand on 14 Nov 2026: two kitchen Qubinos plateaued at 55% and 60%; a maximum of 70 fixed both. Optional `deviceCalibration: true` first runs the dimmer's own calibration (Qubino 71=2, FGD212 13=1) and checks its status parameter; an FGD212's calibration OVERWRITES its min and max, so the previous minimum (likely tuned by a person) is written back unless keepMinimum is false.\n\nTHE LIGHTS VISIBLY CHANGE for about 2-3 minutes: ask the user before running it, and say which lights. Restores the light's on/off state and level, and the power-report threshold (lowered to 5% during the sweep so readings are fresh). Needs a dimmer that meters power (not the ZEN54). Does NOT tune the low end: use the Dimmer Tuner QuickApp for that, then re-run this, since the minimum shifts the slider. If a Dimmer Tuner QuickApp exists, its register is updated with the new maximum.",
+      description: "Tune a dimmer's TOP end by measurement. Steps the light through its levels, reads the power it draws at each, finds where power stops rising (LED lamps often reach full output at 50-60% of the slider, leaving the top half dead), then sets the dimmer's MAXIMUM level parameter so the whole slider is useful while 99% keeps full output — and sweeps again to verify, raising the maximum in steps of 5 until 99% reaches 95% of full power (lamps are warmed for a minute first). Verified by hand on 14 Nov 2026: two kitchen Qubinos plateaued at 55% and 60%; a maximum of 70 fixed both. Optional `deviceCalibration: true` first runs the dimmer's own calibration (Qubino 71=2, FGD212 13=1) and checks its status parameter; an FGD212's calibration OVERWRITES its min and max, so the previous minimum (likely tuned by a person) is written back unless keepMinimum is false.\n\nTHE LIGHTS VISIBLY CHANGE for about 2-3 minutes: ask the user before running it, and say which lights. Restores the light's on/off state and level, and the power-report threshold (lowered to 5% during the sweep so readings are fresh). Needs a dimmer that meters power (not the ZEN54). Does NOT tune the low end: use the Dimmer Tuner QuickApp for that, then re-run this, since the minimum shifts the slider. If a Dimmer Tuner QuickApp exists, its register is updated with the new maximum.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -297,6 +299,12 @@ export const dimmers: ToolModule = {
 
         // 3. Sweep with the maximum wide open.
         if (before.max !== p.maxHi) await setParam(p.max, p.size, p.maxHi, 'open the maximum for the sweep');
+        // Warm the lamps first. Guest ensuite, 14 Nov 2026: cold lamps peaked at
+        // 24.5 W, the same lamps eight minutes later at 22.9 W (-6%), so the
+        // verify sweeps never "reached full power" and the maximum was raised
+        // back to 99 for nothing.
+        await setLevel(99);
+        await sleep(10 * settleMs());
         const openRun = await sweep(levels);
         const open = openRun.out;
         const full = Math.max(...open.map(([, w]) => w));
@@ -311,7 +319,7 @@ export const dimmers: ToolModule = {
           return result;
         }
         if (!(full >= 1)) throw new Error(`calibrate_dimmer: the light drew no measurable power (max ${full} W). Is the load connected, or its power reporting off?`);
-        const plateau = open.find(([, w]) => w >= 0.97 * full)![0];
+        const plateau = open.find(([, w]) => w >= REACH * full)![0];
         result.fullPowerW = full;
         result.plateauAtLevel = plateau;
 
@@ -324,7 +332,7 @@ export const dimmers: ToolModule = {
             await setParam(p.max, p.size, chosen, i === 0 ? 'maximum just above the plateau' : 'raise: 99% fell short of full power');
             verify = (await sweep(levels)).out;
             const top = verify[verify.length - 1][1];
-            if (top >= 0.97 * full || chosen >= p.maxHi) break;
+            if (top >= REACH * full || chosen >= p.maxHi) break;
             chosen = Math.min(p.maxHi, chosen + 5);
           }
         }
