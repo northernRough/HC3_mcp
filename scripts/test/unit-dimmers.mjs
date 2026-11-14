@@ -206,6 +206,13 @@ await check('a write that sends no frames stops the run, and the rest is put bac
   assert.equal(hc3.s.on, false);
 });
 
+await check('readings stuck at one value are unreliable, maximum left as it was', async () => {
+  const hc3 = rig({ params: { 40: 10, 60: 20, 61: 80, 71: 0, 72: 1 }, glitch: Object.fromEntries([20,30,40,50,60,70,80,90,99].map(l => [l, Array(20).fill(4.7)])) });
+  const r = await H.calibrate_dimmer(hc3, { deviceId: 3750 });
+  assert.equal(r.reliable, false);
+  assert.equal(hc3.P[61], 80);
+});
+
 console.log('sync_dimmer_tuner');
 await check('writes the register and keeps tuned minimums', async () => {
   const hc3 = rig({ params: { 40: 10, 60: 22, 61: 70, 71: 0, 72: 1 } });

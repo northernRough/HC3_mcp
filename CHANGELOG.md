@@ -2,6 +2,14 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.5] - 2026-11-14
+
+### Fixed
+
+- A sweep with fewer than 3 distinct power readings is unreliable (guest left
+  bed light read 4.7 W at every level and was given maximum 40). The maximum is
+  left as it was. Same in the Dimmer Tuner's Auto top.
+
 ## [4.40.4] - 2026-11-14
 
 ### Fixed

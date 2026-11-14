@@ -263,7 +263,12 @@ export const dimmers: ToolModule = {
         for (const l of ls) out.push([l, await measure(l)]);
         const bad = () => out.findIndex(([, w], i) => i > 0 && w < out[i - 1][1] * 0.93);
         for (let tries = 0, i = bad(); i > 0 && tries < 3; tries++, i = bad()) out[i] = [out[i][0], await measure(out[i][0])];
-        return { out, reliable: bad() < 0 };
+        // Stuck readings: guest left bed light, 14 Nov 2026, read 4.7 W at every
+        // level from 20% to 99% (no report after the warm-up), so the plateau
+        // was "20%" and the maximum went to 40. Fewer than 3 distinct readings
+        // across a sweep means power is not being reported, not that it is flat.
+        const distinct = new Set(out.map(([, w]) => w)).size;
+        return { out, reliable: bad() < 0 && distinct >= 3 };
       };
 
       const lp = light.properties ?? {};
@@ -318,16 +323,16 @@ export const dimmers: ToolModule = {
         const open = openRun.out;
         const full = Math.max(...open.map(([, w]) => w));
         result.sweepOpen = open;
+        if (!(full >= 1)) throw new Error(`calibrate_dimmer: the light drew no measurable power (max ${full} W). Is the load connected, or its power reporting off?`);
         if (!openRun.reliable) {
           if (before.max !== undefined && before.max !== p.maxHi) await setParam(p.max, p.size, before.max, 'unreliable readings: put the maximum back');
           result.chosenMax = before.max ?? p.maxHi;
           result.reliable = false;
-          result.summary = `Readings did not make sense (power fell as the level rose, even when re-measured): maximum left at ${result.chosenMax}. Try again when the mesh is quieter.`;
+          result.summary = `Readings did not make sense (power fell as the level rose, or barely changed at all, even when re-measured): maximum left at ${result.chosenMax}. Small lamps (a few watts) may report too coarsely to measure; tune those by eye.`;
           completed = true;
           result.writes = writes;
           return result;
         }
-        if (!(full >= 1)) throw new Error(`calibrate_dimmer: the light drew no measurable power (max ${full} W). Is the load connected, or its power reporting off?`);
         const plateau = open.find(([, w]) => w >= REACH * full)![0];
         result.fullPowerW = full;
         result.plateauAtLevel = plateau;
