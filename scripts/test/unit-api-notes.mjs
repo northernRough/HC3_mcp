@@ -49,7 +49,10 @@ await check('silent_writes carries the rule AND the limit of the defence', async
   // server's read-back verification CANNOT catch a faithful store that is
   // never acted on. Losing that sentence would make the tool reassuring.
   assert.match(t, /cannot catch/i);
-  assert.match(t, /caches the value without\s+transmitting/);
+  assert.match(t, /never transmits to the\s+node/);
+  // 4.39.0: the proof of transmission (radio counters) and the live read-back.
+  assert.match(t, /nodes\/diagnostics\/transmissions/);
+  assert.match(t, /refreshFromDevice/);
 });
 
 await check('silent_writes names the instances that cost real time here', async () => {
