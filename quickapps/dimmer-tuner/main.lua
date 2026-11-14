@@ -176,7 +176,7 @@ end
 function QuickApp:save()
   local s, sess = self.sel, self.session
   if not sess then self:say("Nothing to save — press Start first.") return end
-  local margin = tonumber(self:getVariable("margin")) or 2
+  local margin = tonumber(self:getVariable("margin")) or 0
   local hi = s.profile.minHi
   if s.max then hi = math.min(hi, s.max - 1) end
   local final = clamp(s.min + margin, s.profile.minLo, hi)
@@ -230,7 +230,7 @@ end
 function QuickApp:onInit()
   self:debug("Dimmer Tuner " .. VERSION)
   if (self:getVariable("step") or "") == "" then self:setVariable("step", "1") end
-  if (self:getVariable("margin") or "") == "" then self:setVariable("margin", "2") end
+  if (self:getVariable("margin") or "") == "" then self:setVariable("margin", "0") end
   if (self:getVariable("dimmers") or "") == "" then self:setVariable("dimmers", "[]") end
   self:updateView("rescanButton", "text", "Reload dimmer list")
   self:info("No dimmer selected")
