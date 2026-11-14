@@ -91,7 +91,10 @@ A \`setConfiguration\` moved them 2-3 frames out; a parameter poll moved them
 showed the new value. An out-of-range value (5, where 0 or 30-32400 is
 allowed) was transmitted, refused by the device (it did not start reporting
 every 5 s), and the cache kept the device's 3600. So a transmitted write whose
-cache did not change was most likely refused by the device.
+cache did not change was either refused by the device, or hit a one-shot
+TRIGGER parameter: Qubino Mini Dimmer (ZMNHHD1) parameter 71 = 2 forces a
+calibration (watched 14 Nov 2026 on node 72: the lights came on for about 2 s
+and went off, dimming normal afterwards) and the parameter reads 0 again.
 
 **Live read-back works.** The device ACTIONS \`setParameter\`, \`reconfigure\`
 and \`pollConfigurationParameter\` return \`-3 not implemented\`. The web UI's
