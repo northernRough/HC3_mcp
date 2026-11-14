@@ -32,7 +32,7 @@ Writes go out as setConfiguration on the Z-Wave root device, the path proven
 to transmit (radio frame counters, 14 Nov 2026).
 --]]
 
-local VERSION = "1.2.0"
+local VERSION = "1.3.0"
 
 -- Dimmer models, matched against the HC3 parameter template description.
 local PROFILES = {
@@ -221,29 +221,55 @@ function QuickApp:power(lightId)
   return tonumber((d.properties or {}).power)
 end
 
--- Set a level, wait, and read power until two readings agree (or 3 tries).
+-- Set a level, wait until the dimmer CONFIRMS it (a busy node confirms late),
+-- settle, then read power until two readings 2 s apart agree (or 4 tries).
 function QuickApp:measure(level, cb)
   local s = self.sel
   fibaro.call(s.lightId, "setValue", level)
-  fibaro.setTimeout(SETTLE_MS, function()
+  local waited = 0
+  local function confirmed()
+    local d = api.get("/devices/" .. s.lightId) or {}
+    return tonumber((d.properties or {}).value) == level
+  end
+  local function read()
     local tries, last = 0, self:power(s.lightId)
     local function again()
       tries = tries + 1
       fibaro.setTimeout(2000, function()
         local now = self:power(s.lightId)
-        if now == last or tries >= 2 then cb(now) else last = now; again() end
+        if now == last or tries >= 3 then cb(now) else last = now; again() end
       end)
     end
     again()
-  end)
+  end
+  local function waitLevel()
+    if confirmed() or waited >= 15000 then return fibaro.setTimeout(SETTLE_MS, read) end
+    waited = waited + 500
+    fibaro.setTimeout(500, waitLevel)
+  end
+  fibaro.setTimeout(500, waitLevel)
+end
+
+-- Power must not FALL as the level rises: such a step is re-measured (up to
+-- 3 times in all); if it still falls, the sweep is reported unreliable.
+local function firstFall(out)
+  for i = 2, #out do if out[i][2] < out[i - 1][2] * 0.93 then return i end end
 end
 
 function QuickApp:sweep(levels, label, cb)
-  local out, i = {}, 0
+  local out, i, rechecks = {}, 0, 0
+  local function finish()
+    local bad = firstFall(out)
+    if not bad then return cb(out, true) end
+    if rechecks >= 3 then return cb(out, false) end
+    rechecks = rechecks + 1
+    self:say(string.format("%s: re-measuring %d%%…", label, out[bad][1]))
+    self:measure(out[bad][1], function(w) out[bad] = { out[bad][1], w or 0 }; finish() end)
+  end
   local function nxt()
     if self.auto.abort then return self:autoFinish("Stopped. Maximum put back, light put back.", true) end
     i = i + 1
-    if i > #levels then return cb(out) end
+    if i > #levels then return finish() end
     self:say(string.format("%s: level %d%% (%d of %d)…", label, levels[i], i, #levels))
     self:measure(levels[i], function(w) out[#out + 1] = { levels[i], w or 0 }; nxt() end)
   end
@@ -275,11 +301,14 @@ function QuickApp:autoTop()
   local function setParam(n, v) fibaro.call(s.rootId, "setConfiguration", n, p.size, v) end
   self:debug(string.format("auto top: node %d (%s)", s.node, s.name))
 
-  setParam(p.report, 5)                       -- fresh power readings during the sweep
+  setParam(p.report, 2)                       -- fine-grained power readings during the sweep
   setParam(p.max, p.maxHi); s.max = p.maxHi   -- open the maximum
   self:showSelected()
   fibaro.setTimeout(1500, function()
-    self:sweep(SWEEP, "Measuring", function(open)
+    self:sweep(SWEEP, "Measuring", function(open, reliable)
+      if not reliable then
+        return self:autoFinish("Readings did not make sense (power fell as the level rose). Maximum put back; try again later.", true)
+      end
       local full = 0
       for _, r in ipairs(open) do if r[2] > full then full = r[2] end end
       if full < 1 then return self:autoFinish("The light drew no measurable power. Maximum put back.", true) end
@@ -287,7 +316,7 @@ function QuickApp:autoTop()
       for _, r in ipairs(open) do if r[2] >= 0.97 * full then plateau = r[1]; break end end
       self.auto.open, self.auto.full, self.auto.plateau = open, full, plateau
       self:debug("open sweep: " .. table2text(open))
-      if plateau >= 90 then
+      if plateau >= 85 then
         return self:autoFinish(string.format("Power rises right up to %d%% (%sW): nothing to reclaim. Maximum %d.", plateau, full, p.maxHi), false)
       end
       local chosen = clamp(plateau + 10, p.maxLo, p.maxHi)

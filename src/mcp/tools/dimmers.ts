@@ -220,11 +220,18 @@ export const dimmers: ToolModule = {
       };
       const setLevel = (v: number) => hc3.request(`/api/devices/${light.id}/action/setValue`, 'POST', { args: [v] });
       const powerNow = async () => num((await hc3.request(`/api/devices/${light.id}`))?.properties?.power);
+      // Live run, 14 Nov 2026: a busy node confirmed levels several at once,
+      // seconds late, and power arrives in two reports (ramp, then settled) up
+      // to ~5 s after the level. So: wait for the dimmer to CONFIRM the level,
+      // then settle, then read until two readings 2 s apart agree.
+      const levelNow = async () => num((await hc3.request(`/api/devices/${light.id}`))?.properties?.value);
       const measure = async (level: number): Promise<number> => {
         await setLevel(level);
+        const waitUntil = Date.now() + 15 * Math.min(1000, settleMs());
+        while (Date.now() < waitUntil && (await levelNow()) !== level) await sleep(Math.min(500, settleMs()));
         await sleep(settleMs());
         let last = await powerNow();
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < 3; i++) {
           await sleep(Math.min(2000, settleMs()));
           const again = await powerNow();
           if (again === last) break;
@@ -232,7 +239,15 @@ export const dimmers: ToolModule = {
         }
         return last;
       };
-      const sweep = async (ls: number[]) => { const out: [number, number][] = []; for (const l of ls) out.push([l, await measure(l)]); return out; };
+      // Power must not FALL as the level rises. A step that does is re-measured
+      // once; one that still does marks the sweep unreliable.
+      const sweep = async (ls: number[]) => {
+        const out: [number, number][] = [];
+        for (const l of ls) out.push([l, await measure(l)]);
+        const bad = () => out.findIndex(([, w], i) => i > 0 && w < out[i - 1][1] * 0.93);
+        for (let tries = 0, i = bad(); i > 0 && tries < 3; tries++, i = bad()) out[i] = [out[i][0], await measure(out[i][0])];
+        return { out, reliable: bad() < 0 };
+      };
 
       const lp = light.properties ?? {};
       const orig = { value: num(lp.value) || 0, on: lp.state === true || lp.state === 'true' || (num(lp.value) || 0) > 0 };
@@ -263,13 +278,23 @@ export const dimmers: ToolModule = {
         }
 
         // 2. Fresh power readings for the sweep.
-        if (p.report && before.report !== 5) { await setParam(p.report.param, p.report.size, 5, 'power reports every 5% change, for the sweep'); reportChanged = true; }
+        // 2% not 5%: with 5% a lamp that brightens gradually reads as flat stretches and jumps.
+        if (p.report && before.report !== 2) { await setParam(p.report.param, p.report.size, 2, 'power reports every 2% change, for the sweep'); reportChanged = true; }
 
         // 3. Sweep with the maximum wide open.
         if (before.max !== p.maxHi) await setParam(p.max, p.size, p.maxHi, 'open the maximum for the sweep');
-        const open = await sweep(levels);
+        const openRun = await sweep(levels);
+        const open = openRun.out;
         const full = Math.max(...open.map(([, w]) => w));
         result.sweepOpen = open;
+        if (!openRun.reliable) {
+          if (before.max !== undefined && before.max !== p.maxHi) await setParam(p.max, p.size, before.max, 'unreliable readings: put the maximum back');
+          result.chosenMax = before.max ?? p.maxHi;
+          result.reliable = false;
+          result.summary = `Readings did not make sense (power fell as the level rose, even when re-measured): maximum left at ${result.chosenMax}. Try again when the mesh is quieter.`;
+          result.writes = writes;
+          return result;
+        }
         if (!(full >= 1)) throw new Error(`calibrate_dimmer: the light drew no measurable power (max ${full} W). Is the load connected, or its power reporting off?`);
         const plateau = open.find(([, w]) => w >= 0.97 * full)![0];
         result.fullPowerW = full;
@@ -278,11 +303,11 @@ export const dimmers: ToolModule = {
         // 4. Choose the maximum, verifying that 99% still reaches full power.
         let chosen = p.maxHi;
         let verify: [number, number][] = open;
-        if (plateau < 90) {
+        if (plateau < 85) {
           chosen = Math.max(p.maxLo, Math.min(p.maxHi, plateau + 10));
           for (let i = 0; i < 6; i++) {
             await setParam(p.max, p.size, chosen, i === 0 ? 'maximum just above the plateau' : 'raise: 99% fell short of full power');
-            verify = await sweep(levels);
+            verify = (await sweep(levels)).out;
             const top = verify[verify.length - 1][1];
             if (top >= 0.97 * full || chosen >= p.maxHi) break;
             chosen = Math.min(p.maxHi, chosen + 5);
@@ -290,7 +315,8 @@ export const dimmers: ToolModule = {
         }
         result.chosenMax = chosen;
         result.sweepFinal = verify;
-        result.summary = plateau >= 90
+        result.reliable = true;
+        result.summary = plateau >= 85
           ? `Power rises right up to ${plateau}%: no headroom to reclaim. Maximum left at ${p.maxHi}.`
           : `Power stopped rising at ${plateau}% of the slider (${full} W). Maximum set to ${chosen} (was ${before.max ?? 'unknown'}); 99% now draws ${verify[verify.length - 1][1]} W.`;
 
