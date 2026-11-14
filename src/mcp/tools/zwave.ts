@@ -318,7 +318,14 @@ export const zwave: ToolModule = {
         );
       }
       const endpoint = device?.properties?.endPointId ?? 0;
-      const refresh: any = args?.refreshFromDevice;
+      // Clients holding a schema from before 4.39.0 send the array as a string
+      // ("[66, 62]"); accept that, and a bare comma list, rather than refuse.
+      let refresh: any = args?.refreshFromDevice;
+      if (typeof refresh === 'string') {
+        const t = refresh.trim();
+        try { refresh = t.startsWith('[') ? JSON.parse(t) : t.split(',').filter(Boolean).map(x => Number(x.trim())); }
+        catch { /* left as a string: refused below */ }
+      }
       if (refresh !== undefined && (!Array.isArray(refresh) || refresh.length > 20 ||
           refresh.some((n: any) => !Number.isInteger(n) || n < 1 || n > 255))) {
         throw new Error('get_device_parameters: refreshFromDevice must be an array of up to 20 parameter numbers (1-255).');

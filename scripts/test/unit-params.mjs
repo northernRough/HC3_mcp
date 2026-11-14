@@ -105,6 +105,12 @@ await check('bad refreshFromDevice is refused before anything is sent', async ()
   await assert.rejects(Z.get_device_parameters(hc3, { deviceId: 4817, refreshFromDevice: [0] }), /up to 20 parameter numbers/);
   assert.ok(!hc3.calls.some(c => c.method === 'POST'));
 });
+await check('refreshFromDevice sent as a JSON string or comma list is accepted', async () => {
+  for (const v of ['[66]', '66', ' 66 ,']) {
+    const r = await Z.get_device_parameters(node187(), { deviceId: 4817, refreshFromDevice: v });
+    assert.deepEqual(Object.keys(r.refreshFromDevice.polled), ['66'], v);
+  }
+});
 await check('without refreshFromDevice nothing is polled', async () => {
   const hc3 = node187();
   const r = await Z.get_device_parameters(hc3, { deviceId: 4817 });
