@@ -466,6 +466,18 @@ export const zwave: ToolModule = {
         };
       };
 
+      // A size that does not match the device's own template is encoded wrongly
+      // (14 Nov 2026: an FGD212 tolerated 2 bytes for its 1-byte parameter 50;
+      // nothing promises the next device will). Refuse before sending.
+      const tpl = (await readNodeParameters(hc3, nodeId, endpoint)).template;
+      const tplSize = Number(tpl?.parameters?.find((p: any) => p.parameterNumber === parameterNumber)?.size);
+      if (Number.isFinite(tplSize) && tplSize > 0 && tplSize !== size) {
+        throw new Error(
+          `set_device_parameter: parameter ${parameterNumber} on ${device?.name ?? deviceId} is ${tplSize} byte(s) in the device's template; ` +
+          `you sent size ${size}. Nothing was written. Use size ${tplSize}.`
+        );
+      }
+
       const before = await readOne();
       const framesBefore = await nodeFrames(hc3, nodeId);
 

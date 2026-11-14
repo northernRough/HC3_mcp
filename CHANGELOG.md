@@ -2,6 +2,34 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.0] - 2026-11-14
+
+Dimmer calibration, from a hands-on session in the kitchen: two Qubino Mini
+Dimmers calibrated "successfully" yet wasted the top half of the slider, because
+their LED lamps reached full power at 55-60%. Setting the maximum level (61) to
+70 fixed both; this release automates that and adds the low-end tool.
+
+### Added
+
+- `calibrate_dimmer`: steps the light, reads power, finds the plateau, sets the
+  maximum level parameter and verifies 99% still reaches full power (raising in
+  5s). Optional device calibration (Qubino 71=2, FGD212 13=1) that puts back a
+  minimum an FGD212 calibration overwrites. Restores light state and the
+  power-report threshold. Profiles: Qubino Mini/Flush Dimmer, FGD212, ZEN54.
+- `sync_dimmer_tuner`: writes the dimmer register into the Dimmer Tuner
+  QuickApp, keeping tuned minimums.
+- `quickapps/dimmer-tuner/`: the Dimmer Tuner QuickApp (source and .fqa build)
+  for tuning a dimmer's low end by eye from a phone.
+
+### Fixed
+
+- `set_device_parameter` refuses a size that contradicts the device template.
+
+### Documented
+
+- QuickApps get 501 from every /zwave/ route; a poll fills a value HC3 never
+  read.
+
 ## [4.38.0] - 2026-11-14
 
 The untested findings from the 13 Nov triage, settled where it could be done

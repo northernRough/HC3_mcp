@@ -201,6 +201,18 @@ thermostats and silently reverted 20 minutes later. After an external write to
 a child, restart the parent (set_quickapp_variable / set_quickapp_variables take
 \`restartParent:true\`), or have the child read the variable at use time.
 
+## \`api.get\` from a QuickApp cannot reach the /zwave/ routes
+
+Inside a QuickApp, \`api.get("/zwave/configuration_parameters/72.0")\`,
+\`/zwave/parameters_templates/...\` and the parameter poll all answer **501**
+(5.220.15, 14 Nov 2026), though the same routes work over REST from outside.
+So a QuickApp cannot READ a Z-Wave parameter. It can still WRITE one:
+\`fibaro.call(rootDeviceId, "setConfiguration", number, size, value)\`
+transmits (radio counters prove it). The way round, used by the Dimmer Tuner
+QuickApp: an outside tool reads the parameters and writes them into a
+QuickApp variable. Calling the local API over net.HTTPClient with a password
+also works, but puts an admin password in the QuickApp.
+
 ## A QuickApp thermostat in a climate zone does not get every setpoint
 
 A QuickApp thermostat (e.g. \`com.fibaro.hvacSystemAuto\`) in a climate zone

@@ -104,6 +104,14 @@ answers 202 and sends a Configuration Get to the node, which answers.
 stale cache being corrected by a poll, because no way to make the cache
 stale was found; the cache tracked the device in every test.
 
+**A poll fills a value HC3 never had** (14 Nov 2026). Eight Qubinos showed
+their parameters with no \`configurationValue\` at all: HC3 had never read
+them. One poll of parameter 40 on node 228 sent one frame, got one back, and
+the value (50) appeared. \`set_device_parameter\` also refuses a size that
+contradicts the device's template (an FGD212 tolerated 2 bytes for its 1-byte
+parameter 50; another device need not). From inside a QuickApp every /zwave/
+route answers 501.
+
 **Address.** Parameters belong to the NODE and live at \`{nodeId}.0\`. An
 endpoint child's own address (\`187.1\`) answers 404. Before 4.39.0 both
 parameter tools used the child's address and came back empty for 307 of 709

@@ -122,6 +122,37 @@
     }
   },
   {
+    "name": "calibrate_dimmer",
+    "description": "Tune a dimmer's TOP end by measurement. Steps the light through its levels, reads the power it draws at each, finds where power stops rising (LED lamps often reach full output at 50-60% of the slider, leaving the top half dead), then sets the dimmer's MAXIMUM level parameter so the whole slider is useful while 99% keeps full output — and sweeps again to verify, raising the maximum in steps of 5 until 99% reaches 97% of full power. Verified by hand on 14 Nov 2026: two kitchen Qubinos plateaued at 55% and 60%; a maximum of 70 fixed both. Optional `deviceCalibration: true` first runs the dimmer's own calibration (Qubino 71=2, FGD212 13=1) and checks its status parameter; an FGD212's calibration OVERWRITES its min and max, so the previous minimum (likely tuned by a person) is written back unless keepMinimum is false.\n\nTHE LIGHTS VISIBLY CHANGE for about 2-3 minutes: ask the user before running it, and say which lights. Restores the light's on/off state and level, and the power-report threshold (lowered to 5% during the sweep so readings are fresh). Needs a dimmer that meters power (not the ZEN54). Does NOT tune the low end: use the Dimmer Tuner QuickApp for that, then re-run this, since the minimum shifts the slider. If a Dimmer Tuner QuickApp exists, its register is updated with the new maximum.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "The dimmer: its light device or its Z-Wave root device."
+        },
+        "deviceCalibration": {
+          "type": "boolean",
+          "description": "Run the dimmer's own calibration first. Default false."
+        },
+        "keepMinimum": {
+          "type": "boolean",
+          "description": "After a calibration that overwrites min/max (FGD212), write the previous minimum back. Default true."
+        },
+        "levels": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "Sweep levels. Default [20,30,40,50,60,70,80,90,99]."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
     "name": "call_ui_event",
     "description": "Trigger a UI event on a QuickApp interface element (button, slider, switch, select, …), as though a user had touched it — but NOT by the same path a real touch takes; see the table below, and get_hc3_quickapp_programming_guide({topic:\"ui\"}) for the whole UI lifecycle.\n\n**HC3's endpoint returns nothing** — no acknowledgement, no echo, no indication that a callback was even bound to that element. That is the silent-success shape this server exists to close, and it matters more here than elsewhere because this is the tool people reach for *as* a verification step. So before dispatching, this tool reads the device's `uiCallbacks` and reports what the element is bound to as `boundCallback`. A null there means HC3 has no binding for that (elementName, eventType) pair, and the event will very likely go nowhere — it is reported, not refused, because HC3 may still route it to a generic handler.\n\n**Confirming it actually ran, without instrumenting the QuickApp.** HC3 emits an undocumented trace-level line tagged with the QA, `UIEvent: {\"values\":[…],\"deviceId\":N,\"eventType\":\"…\",\"elementName\":\"…\"}`, immediately before dispatch. Verified on 5.210.12. Call get_debug_messages(type=\"trace\") after this and look for it — that confirms the UI event path end to end with no log line planted in the QuickApp.\n\n**THIS TOOL DOES NOT DISPATCH THE WAY A FINGER DOES, and the difference will mislead you.** Measured on 5.210.12 by `scripts/probe-uicallbacks.mjs` (twelve cells, then the same elements tapped in the iOS app):\n\n| | this tool | a real tap |\n|---|---|---|\n| handler called | the callback registered in `uiCallbacks` | **always `UIAction`**, whatever is registered |\n| arguments | ONE table `{eventType, elementName, values, deviceId}` | **positional**: `(eventType, elementName)` for a button, `(eventType, elementName, values)` for a select |\n| trace emitted | `UIEvent:` | `onAction:` |\n\nBoth axes differ, in the same direction: this tool is the more generous one. So it will show a named callback working when **no user tap will ever reach it**, and it will hand your handler a table when a tap hands it strings. A QuickApp written and verified through this tool alone can be completely dead in the app. Verify UI wiring by tapping, or write a handler that accepts both shapes (`if type(arg1) == \"table\"` … else positional), which is what a QuickApp on this gateway does in production.\n\nUse this tool to prove the event path is live, to fire an element while nobody is home, and to read the `UIEvent:` trace. Do not use it as evidence about which handler a user's tap will hit.",
     "inputSchema": {
@@ -3059,6 +3090,19 @@
       "required": [
         "sceneId"
       ]
+    }
+  },
+  {
+    "name": "sync_dimmer_tuner",
+    "description": "Write the dimmer register into the Dimmer Tuner QuickApp (variable `dimmers`): every supported dimmer on the gateway (Qubino Mini/Flush Dimmer, Fibaro FGD212, Zooz ZEN54) with its node, light device, room, model, and the minimum/maximum level parameters read from HC3 (polling the device for any HC3 has never read). The QuickApp cannot read Z-Wave parameters itself — every /zwave/ route answers 501 from inside a QuickApp — so it relies on this register, and records each low-end value a person saves back into it (tunedMin, tunedAt), which this tool keeps. Writing the variable restarts the QuickApp once; do not run it while someone is mid-way through tuning. Finds the QuickApp by the name \"Dimmer Tuner\" unless quickAppId is given.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "quickAppId": {
+          "type": "number",
+          "description": "Dimmer Tuner QuickApp id. Default: the QuickApp named \"Dimmer Tuner\"."
+        }
+      }
     }
   },
   {

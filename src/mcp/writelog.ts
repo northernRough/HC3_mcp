@@ -47,6 +47,8 @@ const WRITE_TOOLS: Record<string, { kind: Kind; arg?: string; fromResult?: boole
   update_scene_content:           { kind: 'scene', arg: 'sceneId' },
   patch_scene_content:            { kind: 'scene', arg: 'sceneId' },
   create_scene:                   { kind: 'scene', fromResult: true },
+  sync_dimmer_tuner:              { kind: 'QuickApp', fromResult: true },
+  calibrate_dimmer:               { kind: 'QuickApp', fromResult: true },   // only when it updated the Dimmer Tuner register
 };
 
 const MAX_BYTES = 1_000_000;   // trim to the newest half beyond this
