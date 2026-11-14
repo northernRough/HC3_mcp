@@ -219,6 +219,17 @@ Port it to a QuickApp.
   (lastModified, as widely quoted) is nil here. Read \`modified\` from
   \`api.get("/devices/"..id)\`.
 
+## A missing global reads as "", not nil
+
+\`fibaro.getGlobalVariable("NoSuchGlobal")\` returns an EMPTY STRING (verified
+14 Nov 2026: \`type\` is string, \`== nil\` false, \`== ""\` true), and
+\`fibaro.setGlobalVariable\` on it then writes nowhere, silently. So
+\`if fibaro.getGlobalVariable(name) == nil then create it end\` never creates
+anything: a scene baseline was never stored that way. Test for \`""\` (which an
+existing empty global also returns), or check
+\`api.get("/globalVariables/"..name)\`, or create the global up front with
+create_global_variable.
+
 ## An uncaught api error kills a scene without a trace
 
 A scene whose \`api.get\` throws (a wrong path, say) dies on the spot: no output

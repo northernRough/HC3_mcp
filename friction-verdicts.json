@@ -430,8 +430,8 @@
     {
       "at": 1786897923,
       "tool": "modify_device",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout + uiCallbacks in one write left every eventBinding null on 5.210.12. NOT reproduced as such on 5.220.15: Shading's layout there carries no eventBinding blocks at all, and the 13 Nov tile-restore test (viewLayout + uiView + uiCallbacks in one write) rendered and stored identically. Different format, so neither confirms nor refutes."
+      "verdict": "refuted",
+      "note": "Probed 14 Nov 2026. On 5.220.15 the stored viewLayout carries no eventBinding blocks at all (throwaway QA 5078). viewLayout + uiCallbacks written in one PUT: the named callback was kept and call_ui_event reached the handler ('F6 PRESSED btn1'). The 16 Aug failure belonged to the 5.210 layout format. A real finger tap (UIAction path) was not tested."
     },
     {
       "at": 1786897938,
@@ -468,8 +468,10 @@
     {
       "at": 1790180016,
       "tool": "create_backup",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). POST /api/service/backups answers 400 'unsupported action'. Not probed: a working call reboots the gateway. Needs the web UI's real request body captured before changing the tool."
+      "verdict": "confirmed",
+      "note": "Probed 14 Nov 2026. Root cause found without rebooting, from the HC3 web UI's own bundle (chunk 1662): it POSTs {action:'create', params:{type, description, skipHistoryData}}. The tool sent {name, type}; HC3 dispatches on `action`, found none, answered 'unsupported action'. Body fixed in 4.38.0; a live run (which reboots the gateway for a local backup) still to do.",
+      "resolvedIn": "4.38.0",
+      "resolvedAt": 1794618070
     },
     {
       "at": 1791894921,
@@ -482,8 +484,10 @@
     {
       "at": 1791903737,
       "tool": "general",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Scene fibaro.getGlobalVariable on a missing global not returning nil. Plausible, not reproduced here; the exact return value was not logged."
+      "verdict": "confirmed",
+      "note": "Probed 14 Nov 2026. Throwaway scene 818: fibaro.getGlobalVariable on a missing global returns \"\" (type string, ==nil false, ==\"\" true), so an ==nil existence check never fires. Documented in the scenes and QuickApp guides (4.38.0).",
+      "resolvedIn": "4.38.0",
+      "resolvedAt": 1794618070
     },
     {
       "at": 1792001693,
@@ -624,8 +628,8 @@
     {
       "at": 1793473750,
       "tool": "get_device_parameters / set_device_parameter",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The web UI exports, imports and reads parameter profiles live. Feature request; the UI's endpoints need capturing first."
+      "verdict": "confirmed",
+      "note": "Probed 14 Nov 2026. The web UI's three buttons resolved from its bundle: download = GET /api/zwave/parameters_templates/{addr} (200 on 187.0; get_device_parameters already reads it); upload = POST /api/zwave/user_parameters_templates then PUT /api/zwave/parameters_templates/{addr}/override {userTemplateId}; per-parameter read = POST /api/zwave/polling/configuration_parameters/{addr}/{n}, which answers 202. The polling route is NOT the pollConfigurationParameter device action that returns -3, so 'no live read-back' was recorded on the wrong route. Whether a poll refreshes the cache is unproven: all three polled parameters already matched. Upload/override not run (writes)."
     },
     {
       "at": 1793476768,
@@ -646,8 +650,10 @@
     {
       "at": 1793488407,
       "tool": "general",
-      "verdict": "untested",
-      "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). GET /api/temperature/{from}/{to}/summary-graph/devices/temperature/{id} serves history. Not probed here; candidate get_temperature_history tool."
+      "verdict": "confirmed",
+      "note": "Probed 14 Nov 2026. GET /api/temperature/{from}/{to}/summary-graph/devices/temperature/{id} returns [[epochMs, value]...]: 3704 581 points/30 days, 4645 1622. New tool get_temperature_history (4.38.0); live 7 days for 3704: 106 points.",
+      "resolvedIn": "4.38.0",
+      "resolvedAt": 1794618070
     },
     {
       "at": 1793489977,

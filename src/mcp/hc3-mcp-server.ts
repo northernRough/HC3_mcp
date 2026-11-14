@@ -41,12 +41,13 @@ import { system, systemSchemas } from './tools/system';
 import { zwave, zwaveSchemas } from './tools/zwave';
 import { snapshot } from './tools/snapshot';
 import { snapshots } from './tools/snapshots';
+import { history } from './tools/history';
 import { docs } from './tools/docs';
 import { plugins } from './tools/plugins';
 import { audit } from './tools/audit';
 import { SERVER_NAME, SERVER_VERSION } from './version';
 
-const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, snapshots, docs, plugins, audit];
+const toolModules = [alarm, sprinklers, backups, debug, ios, climate, customEvents, notifications, globals, users, rooms, scenes, profiles, devices, quickapps, icons, intelligence, system, zwave, snapshot, snapshots, history, docs, plugins, audit];
 const toolHandlers = mergeHandlers(toolModules);
 
 
@@ -224,6 +225,7 @@ class HC3MCPServer {
 
       ...snapshot.schemas,
       ...snapshots.schemas,
+      ...history.schemas,
 
       ...icons.schemas,
       systemSchemas.get_diagnostics,

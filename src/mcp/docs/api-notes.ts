@@ -78,8 +78,13 @@ transmitting it to the node**. Verified against a Zooz ZEN52. This is the
 nastiest entry in the list, because the read-back returns your value: the device
 record agrees with you and the physical device never heard about it. Use
 \`set_device_parameter\`, which POSTs \`/devices/{id}/action/setConfiguration\` and
-does transmit. (\`setParameter\`, \`reconfigure\` and
-\`pollConfigurationParameter\` all return \`-3 not implemented\`.)
+does transmit. (The device ACTIONS \`setParameter\`, \`reconfigure\` and
+\`pollConfigurationParameter\` return \`-3 not implemented\`. That is not the
+whole story for read-back: the web UI reads a parameter through REST,
+\`POST /api/zwave/polling/configuration_parameters/{addr}/{number}\`, which
+answers 202 Accepted (14 Nov 2026). Whether it refreshes HC3's cached value has
+not been shown yet: every parameter polled so far already matched its cache.
+Do not record live read-back as impossible.)
 
 ### QuickApp view layouts
 A \`select\` missing \`selectionType\`, or with \`values\` as a JSON object rather

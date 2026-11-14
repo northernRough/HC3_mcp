@@ -159,6 +159,12 @@ EXTERNAL write and restarts it, and in \`onInit\` that is a restart loop: on
 copied them again, several times a second, until it was disabled. A QuickApp
 cannot rebuild itself that way; do it from a second, throwaway QuickApp.
 
+## A missing global reads as "", not nil
+
+\`fibaro.getGlobalVariable\` on a global that does not exist returns \`""\`, not
+nil (verified 14 Nov 2026), and \`fibaro.setGlobalVariable\` on it writes nowhere
+without an error. An \`== nil\` existence check never fires.
+
 ## fibaro.getValue returns only the value here
 
 Widely quoted as returning \`value, lastModified\`. On this gateway (5.2x) the

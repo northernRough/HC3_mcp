@@ -2,6 +2,44 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.38.0] - 2026-11-14
+
+The untested findings from the 13 Nov triage, settled where it could be done
+safely: read-only probes, the HC3 web UI's own JavaScript, and a throwaway
+scene and QuickApp (both deleted).
+
+### Fixed
+
+- **`create_backup` now works** (or at least now sends what HC3 accepts). It
+  posted `{name, type}`; HC3 answered 400 "unsupported action". The web UI's
+  bundle shows the real body, `{action:"create", params:{type, description,
+  skipHistoryData}}`. Arguments are now `type`, `description` and optional
+  `skipHistoryData`. Not yet run live: a local backup reboots the gateway.
+- **"No live read-back of Z-Wave parameters" was stated on the wrong route.**
+  The `pollConfigurationParameter` device ACTION does return -3. The web UI
+  reads a parameter through REST, `POST /api/zwave/polling/configuration_parameters/{addr}/{n}`,
+  which answers 202 Accepted. Whether that refreshes the cache is not yet
+  shown, so the descriptions and API notes now say "unproven" rather than
+  "impossible".
+
+### Added
+
+- **`get_temperature_history`**: a device's temperature readings over a
+  window, from the series behind the web UI's graphs (`/api/temperature/...
+  /summary-graph/devices/temperature/{id}`), thinned to `maxPoints`. Live: a
+  week for 3704, 106 readings.
+- **Guides:** `fibaro.getGlobalVariable` on a missing global returns `""`, not
+  nil (verified with a throwaway scene), in both the scenes and QuickApp guides.
+
+### Changed
+
+- Verdicts: the 16 Aug eventBinding finding is **refuted** on 5.220.15 (the
+  layout format no longer carries eventBinding; a combined viewLayout +
+  uiCallbacks write keeps the callback and dispatches). Parameter-profile
+  endpoints recorded. Three findings remain untested because they need a real
+  device and someone watching it: wake-up interval transmission, parameter
+  writes to a sleeping device, and Qubino parameter 71 calibration.
+
 ## [4.37.0] - 2026-11-13
 
 Tier 3 of the 13 Nov friction triage: seventeen confirmed findings written
