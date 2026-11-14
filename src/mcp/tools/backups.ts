@@ -48,17 +48,21 @@ export const backups: ToolModule = {
       inputSchema: {
         type: 'object',
         properties: {
-          name: {
+          description: {
             type: 'string',
-            description: 'Backup name',
+            description: 'Backup description, shown in the backup list (what the web UI calls the backup name).',
           },
           type: {
             type: 'string',
             description: 'Backup type (local, remote)',
             enum: ['local', 'remote'],
           },
+          skipHistoryData: {
+            type: 'boolean',
+            description: 'Leave event/energy history out of the backup (smaller, faster). Default false, as in the web UI.',
+          },
         },
-        required: ['name', 'type'],
+        required: ['description', 'type'],
       },
     },
   ],
@@ -84,12 +88,20 @@ export const backups: ToolModule = {
       return await hc3.request(url);
     },
 
-    async create_backup(hc3, args: { name: string; type: string }): Promise<any> {
+    async create_backup(hc3, args: { description: string; type: 'local' | 'remote'; skipHistoryData?: boolean }): Promise<any> {
+      // The body the HC3 web UI sends (read from its own bundle, 14 Nov 2026).
+      // Until 4.38.0 this tool posted {name, type}, and HC3 answered 400
+      // "unsupported action": it dispatches on `action`, and there was none.
+      // Remove control characters and collapse whitespace, as the UI does.
+      const description = String(args.description).replace(/[\u0000-\u001f"]/g, ' ').replace(/\s+/g, ' ').trim();
       await hc3.request('/api/service/backups', 'POST', {
-        name: args.name,
-        type: args.type
+        action: 'create',
+        params: { type: args.type, description, skipHistoryData: args.skipHistoryData === true },
       });
-      return `Backup '${args.name}' of type '${args.type}' creation initiated successfully.`;
+      return `Backup '${description}' (${args.type}) requested. ` +
+        (args.type === 'local'
+          ? 'The gateway now reboots to take it; expect it to be unreachable for several minutes. Confirm afterwards with get_backups.'
+          : 'Confirm with get_backups once it completes; a remote backup over quota fails silently (get_remote_backup_status).');
     },
   },
 };
