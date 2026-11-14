@@ -2,6 +2,18 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.40.3] - 2026-11-14
+
+### Fixed
+
+- `calibrate_dimmer` measured an FGD212's hidden endpoint-0 device, whose
+  power never moves (corridor wall wash: 0 W at every level). It now prefers
+  the visible device that meters power.
+- A run stopped by an error left the maximum where the sweep had opened it;
+  it is now put back.
+- A failed FGD212 calibration (status 0) still rewrites min and max; both are
+  now put back instead of kept.
+
 ## [4.40.2] - 2026-11-14
 
 ### Fixed
