@@ -155,7 +155,7 @@ function QuickApp:nudge(direction)
   local s = self.sel
   if not self.session then self:say("Press Start first.") return end
   if self.busy then return end
-  local step = tonumber(self:getVariable("step")) or 2
+  local step = tonumber(self:getVariable("step")) or 1
   local hi = s.profile.minHi
   if s.max then hi = math.min(hi, s.max - 1) end
   local new = clamp(s.min + direction * step, s.profile.minLo, hi)
@@ -229,7 +229,7 @@ end
 
 function QuickApp:onInit()
   self:debug("Dimmer Tuner " .. VERSION)
-  if (self:getVariable("step") or "") == "" then self:setVariable("step", "2") end
+  if (self:getVariable("step") or "") == "" then self:setVariable("step", "1") end
   if (self:getVariable("margin") or "") == "" then self:setVariable("margin", "2") end
   if (self:getVariable("dimmers") or "") == "" then self:setVariable("dimmers", "[]") end
   self:updateView("rescanButton", "text", "Reload dimmer list")
