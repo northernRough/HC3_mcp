@@ -99,6 +99,10 @@ check('findings match on epoch AND tool', () => {
   assert.ok(F.matchFindingVerdict(vs, { at: 1788215794, tool: 'get_icon' }));
   // A mistyped tool must not silently attach a verdict to the wrong finding.
   assert.equal(F.matchFindingVerdict(vs, { at: 1788215794, tool: 'upload_icon' }), undefined);
+  // a connector prefix on either side does not stop the match
+  assert.ok(F.matchFindingVerdict(vs, { at: 1788215794, tool: 'mcp__some_Server-X__get_icon' }));
+  assert.ok(F.matchFindingVerdict(vs, { at: 1788215794, tool: 'some server:get_icon' }));
+  assert.equal(F.bareToolName('mcp__a_b-C__find_devices_by_name'), 'find_devices_by_name');
 });
 
 // ---------------------------------------------------------------------------

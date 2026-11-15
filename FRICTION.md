@@ -67,7 +67,7 @@ cheapest wins available.
 | confirmed | 1 | `report_finding` | 12d ago | report_finding requires expected. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
 | by-design | 1 | `update_climate_zone` | 12d ago | HTTP 400: Bad Request (PUT /api/panels/climate/16) - {"type":"ERROR","reason":"validation error","message":"mo <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3's own validation (minimum gap between heating and cooling setpoints per slot), and the message names the slot. Worth stating the rule in the tool description._ |
 | untested | 1 | `filter_devices` | 12d ago | HTTP 400: Bad Request (POST /api/devices/filter) - {"type":"ERROR","reason":"Invalid JSON","message":"get_valu <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 rejecting a filter with a null value. Probably the caller; the tool could refuse null filter values before sending._ |
-| by-design | 1 | `control_device` | 12d ago | Device 4739 (Ben’s suite A/C) does not declare action 'UIAction'. Valid actions for this device: setAutoOff, t <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
+| by-design | 1 | `control_device` | 12d ago | Device 4739 (a bedroom suite A/C) does not declare action 'UIAction'. Valid actions for this device: setAutoOff, t <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
 | confirmed | 1 | `modify_device` | 12d ago | HTTP 404: Not Found (PUT /api/devices/4739) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 answers 404 for an EXISTING device when it refuses a field: a `type` change (finding 1786897950) and viewLayout on a QuickAppChild, which uses uiView (1793551362). Reads as 'wrong id'. Fix: on 404, re-read the device; if it exists, say a field was refused and name the known cases._ |
 | confirmed | 1 | `report_finding` | 12d ago | report_finding requires actual. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
 | by-design | 1 | `delete_device` | 12d ago | delete_device refuses device 3437 (guest thermostat): not a QuickApp and not an explicitly-installed plugin (i <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin._ |
@@ -179,7 +179,7 @@ Related prior incident on the same device pair (Aug 2026): renaming/disabling 49
 The wrong assumption is the expensive part: "disabled = parked = safe" is how this copier was left armed on the gateway for three months. Suggested guidance: never leave a QuickApp with destructive onInit on the gateway, disabled or not. Delete one-shot installers and copiers as soon as their job is done, or make their onInit inert (guard on a variable that is cleared after the first successful run).
 
 
-_Reported by Claude, working on Mallorn Shading 4984 with Nick_
+_Reported by Claude, working on Shading 4984 with the owner_
 
 
 ### `general` — 0d ago
@@ -313,7 +313,7 @@ Single line in a fresh Lua scene: `local f = load("return 1")` errors with attem
 _Reported by Claude chat session, 8 Nov 2026_
 
 
-### `mcp__mallorn_MCP-HC3__get_quickapp_variable` — 6d ago
+### `mcp__hc3__get_quickapp_variable` — 6d ago
 
 
 **Verdict:** confirmed
@@ -366,10 +366,10 @@ Suggested fix: return the variable's value, and when reporting exists:false, ech
 Workaround for callers today: read properties.quickAppVariables from get_device_info. Do not trust exists:false from this tool.
 
 
-_Reported by Claude, working on Mallorn Outdoor Mean 4916 with Nick_
+_Reported by Claude, working on Outdoor Mean 4916 with the owner_
 
 
-### `mcp__mallorn_MCP-HC3__delete_device` — 6d ago
+### `mcp__hc3__delete_device` — 6d ago
 
 
 **Verdict:** confirmed
@@ -412,10 +412,10 @@ Suggested fix: either give the verify read a short delay and a retry before decl
 Workaround for callers today: after a delete_device error of this exact shape, confirm with filter_devices on a deviceID filter before doing anything else. Do not retry the delete.
 
 
-_Reported by Claude, working on Mallorn Irrigation 4933 with Nick_
+_Reported by Claude, working on Irrigation 4933 with the owner_
 
 
-### `mcp__mallorn_MCP-HC3__find_devices_by_name` — 6d ago
+### `mcp__hc3__find_devices_by_name` — 6d ago
 
 
 **Verdict:** confirmed
@@ -434,7 +434,7 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bot
 find_devices_by_name("motion") -> [] but device 4559 is named exactly "motion"
 find_devices_by_name("courtyard tree") -> [] but device 3790 is named exactly "courtyard tree"
 find_devices_by_name("recess") -> only 3678 "steam:wall &recess", NOT 4898 named exactly "recess"
-find_devices_by_name("ensuite spots") -> only 3634/3640/3653 ("mae|ben|guest ensuite spots"), NOT 3637 named exactly "ensuite spots"
+find_devices_by_name("ensuite spots") -> only 3634/3640/3653 ("three other rooms' ensuite spots"), NOT 3637 named exactly "ensuite spots"
 find_devices_by_name("towels") -> 4998, 4999, 5000, 5001, all four found
 
 parentId of each, from filter_devices:
@@ -465,7 +465,7 @@ The wrong conclusion is the dangerous part. This tool returns [] rather than err
 Suggested fix: the underlying query appears scoped to parentId 0 or 1 and should cover all devices. Until then, filter_devices with a deviceID filter is reliable. Also either implement exact or drop it, because a parameter that silently does nothing is worse than no parameter.
 
 
-_Reported by Claude, working on Mallorn deviceBinder 4826 with Nick_
+_Reported by Claude, working on deviceBinder 4826 with the owner_
 
 
 ### `general` — 6d ago
@@ -506,7 +506,7 @@ NOT ISOLATED. I did not execute fibaro.getDevicesID() on this gateway to confirm
 Suggested fix for the HC3 guidance this server serves: state plainly that plugin.mainDeviceId (file scope) or self.id (method scope) is how a QuickApp learns its own device id, and that fibaro.getDevicesID() is a list query. Also worth a general warning: `fn and fn()` in an `or` chain guards existence, not return type, and a wrong-typed truthy return silently masks every fallback behind it.
 
 
-_Reported by Claude, working on Mallorn deviceBinder 4826 with Nick_
+_Reported by Claude, working on deviceBinder 4826 with the owner_
 
 
 ### `get_quickapps` — 6d ago
@@ -532,7 +532,7 @@ Firmware 5.210.12, 33 QuickApps on the gateway. get_quickapps() with no argument
 **Cost:** A whole context window spent on an enumeration, and the result truncated so it was not even complete. In a long session that is the difference between finishing a task and losing the thread. The fix is documentation, not code: the server instructions already warn about get_scenes in exactly these terms, and get_quickapps deserves the same sentence, naming filter_devices on the quickApp interface as the cheap way to enumerate and get_quickapp for one device in full.
 
 
-_Reported by Claude, via Nick's Shading QuickApp session, 2026-11-07_
+_Reported by Claude, via the owner's Shading QuickApp session, 2026-11-07_
 
 
 ### `delete_device` — 12d ago
@@ -653,7 +653,7 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). No 
 **Expected:** A way to patch several files of one QuickApp in a single write, with the QuickApp restarting only once.
 
 
-**Actual:** patch_quickapp_file edits one file per call, and each call restarts the QuickApp. update_multiple_quickapp_files restarts once, but it needs each file's full content and has no expectedHash check. On 31 Oct 2026, two separate file writes to QA 5022 caused two restarts one second apart (23:19:43 and 23:19:44). The second instance's first Modbus TCP connect to the ComfoConnect PRO (10.0.1.60:502) failed, and its startup writes were refused: "Zehnder: could not set preset Low: gateway not answering, retry later".
+**Actual:** patch_quickapp_file edits one file per call, and each call restarts the QuickApp. update_multiple_quickapp_files restarts once, but it needs each file's full content and has no expectedHash check. On 31 Oct 2026, two separate file writes to QA 5022 caused two restarts one second apart (23:19:43 and 23:19:44). The second instance's first Modbus TCP connect to the ComfoConnect PRO (192.0.2.60:502) failed, and its startup writes were refused: "Zehnder: could not set preset Low: gateway not answering, retry later".
 
 
 **Reproduction:**
@@ -1062,7 +1062,7 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Con
 **Expected:** Follow-up to the scene net.TCPSocket finding: confirm the contrast in a QuickApp.
 
 
-**Actual:** Same TCPSocket code in temporary QA 5016 (genericDevice) logged net.TCPSocket = "class TCPSocket (TCPSocket)", connected to 10.0.1.12:60128 and read eISCP replies (PWR01, SLI12, MVL24).
+**Actual:** Same TCPSocket code in temporary QA 5016 (genericDevice) logged net.TCPSocket = "class TCPSocket (TCPSocket)", connected to 192.0.2.12:60128 and read eISCP replies (PWR01, SLI12, MVL24).
 
 
 **Reproduction:**
@@ -1309,7 +1309,7 @@ Device 4984, com.fibaro.multilevelSensor QuickApp, firmware 5.210.12, value curr
 **Cost:** A silent no-op that a pcall cannot catch and that the tool result cannot distinguish from success. I reported the change as working on the strength of the unit property having updated, and only caught it because I read value back separately and noticed a stale `modified`. Practical consequence: a multilevelSensor tile cannot show a blank or dashed figure, so "no data" has to be encoded some other way (the unit word, or the log line). Worth stating in update_device_property's description that a t
 
 
-_Reported by Claude, via Nick's Shading QuickApp session, 2026-08-16_
+_Reported by Claude, via the owner's Shading QuickApp session, 2026-08-16_
 
 
 ### `general` — 89d ago
@@ -1335,7 +1335,7 @@ Firmware 5.210.12. Failing: QuickApp 4984's own main.lua calls self:setVariable(
 **Cost:** A live QuickApp in a restart loop until it was disabled. More usefully: this makes self-rebuild structurally impossible, which is worth documenting positively, because copying a QuickApp gateway-side is otherwise an excellent technique. Reproducing an eight-file QuickApp by pasting content through a conversation costs tens of thousands of tokens and every byte is a chance to mistype; driving api.get/api.put from a second QuickApp moves it verbatim in about a second. The rule to record is: the co
 
 
-_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+_Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
 ### `modify_device` — 89d ago
@@ -1361,7 +1361,7 @@ Firmware 5.210.12, device 4953, a live com.fibaro.genericDevice QuickApp. Failin
 **Cost:** Two costs. First, a bare 404 reads as "wrong device id" and sent me checking the id before I thought to test the endpoint with a harmless field. Second, and larger: because the type cannot be changed in place, giving an existing QuickApp a tile value column requires rebuilding it as a new device with a new id, which is a substantially bigger piece of work than the user was expecting when he asked for it. Worth stating in the tool description as "HC3 refuses type changes on an existing device; re
 
 
-_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+_Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
 ### `general` — 89d ago
@@ -1387,7 +1387,7 @@ QuickApp 4953, firmware 5.210.12, com.fibaro.genericDevice, view containing a se
 **Cost:** A wrong negative I gave the user directly: I told him picker labels could not safely carry live state and offered a worse alternative (a long text label listing every device). He pushed back and asked to try it anyway. It worked first time. Had he accepted my answer, the capability would have been recorded as impossible on my say-so, which is the exact failure mode the report_finding description warns about. Note also: self:updateView(element, "options", array) is NOT the working path, since upd
 
 
-_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+_Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
 ### `modify_device` — 89d ago
@@ -1413,7 +1413,7 @@ On QuickApp 4984 (com.fibaro.multilevelSensor, firmware 5.210.12). Working case:
 **Cost:** A live QuickApp panel was silently deaf for about ten minutes: all four buttons and the device picker rendered and did nothing, with no error in the log or in the tool response. Found only because the user's screenshot prompted a get_plugin_view read. The tool description tells you to read the view back after a layout write to confirm the components are present, which they were; it does not tell you to check eventBinding, and components-present is not sufficient.
 
 
-_Reported by Claude, via Nick's Shading QuickApp migration session, 2026-08-16_
+_Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
 ### `get_icon` — 90d ago
@@ -1524,7 +1524,7 @@ Only the path differs. Adding a fibaro.debug before the call, and pcall around i
 **Cost:** One wasted scene run and several minutes lost to the wrong hypothesis — silence pointed at a compile failure or a scene-execution problem rather than at a bad path. The fix is a pattern worth stating in the guide: in a probe scene, log BEFORE the first API call and wrap every api.* in pcall, otherwise a bad path is invisible.
 
 
-_Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
+_Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
 ### `patch_quickapp_file` — 90d ago
@@ -1541,26 +1541,26 @@ _Client-side, no server fix available: a tool going unreachable mid-session is t
 
 **Actual:** patch_quickapp_file was present and callable at the start of this session — I used it successfully three times against QA 4933 (icons.lua and main.lua), each returning a diff and a verified write. Later in the same session it became unreachable. Calling it directly returned:
 
-  Tool 'mallorn MCP-HC3:patch_quickapp_file' not found.
+  Tool 'hc3:patch_quickapp_file' not found.
 
-and five subsequent tool_search calls failed to load it back, including searches using phrases lifted verbatim from its own description ("patch_quickapp_file edit", "apply edits old new dryRun expectedHash quickapp", "each old must match exactly count times or nothing is written", "edit part of a file supplying only the text to replace", and a bare "patch", which returned "No matching tools found"). Other mallorn tools continued to load normally from tool_search throughout, so the server and tunnel were up.
+and five subsequent tool_search calls failed to load it back, including searches using phrases lifted verbatim from its own description ("patch_quickapp_file edit", "apply edits old new dryRun expectedHash quickapp", "each old must match exactly count times or nothing is written", "edit part of a file supplying only the text to replace", and a bare "patch", which returned "No matching tools found"). Other HC3 MCP tools continued to load normally from tool_search throughout, so the server and tunnel were up.
 
 
 **Reproduction:**
 
 NOT ISOLATED — I cannot state the trigger, and the honest summary is that I do not know what changed between the working calls and the failing ones.
 
-What I can state: patch_quickapp_file succeeded at three points early in a long session, then after an interval of other mallorn calls (get_icon, upload_icon, update_quickapp_file, get_debug_messages) it was not found, and repeated tool_search calls with its exact description text did not return it. No error, no reconnection, no server restart that I am aware of, and other tools kept loading.
+What I can state: patch_quickapp_file succeeded at three points early in a long session, then after an interval of other HC3 MCP calls (get_icon, upload_icon, update_quickapp_file, get_debug_messages) it was not found, and repeated tool_search calls with its exact description text did not return it. No error, no reconnection, no server restart that I am aware of, and other tools kept loading.
 
-Candidate variables I did not separate: elapsed session length; the number of distinct mallorn tools loaded in between; whether an intervening update_quickapp_file call displaced it; and whether the search index ranks it below other results for every phrasing I tried.
+Candidate variables I did not separate: elapsed session length; the number of distinct HC3 MCP tools loaded in between; whether an intervening update_quickapp_file call displaced it; and whether the search index ranks it below other results for every phrasing I tried.
 
-To test: call patch_quickapp_file, then load a dozen unrelated mallorn tools via tool_search, then attempt patch_quickapp_file again — varying only the count of tools loaded in between.
+To test: call patch_quickapp_file, then load a dozen unrelated HC3 MCP tools via tool_search, then attempt patch_quickapp_file again — varying only the count of tools loaded in between.
 
 
 **Cost:** Two edits to a 55KB engine file (watering.lua) and a 20KB main.lua had to go through a hand-written gateway-side patch scene instead: create a temp Lua scene, fetch the file over the REST API, assert the anchor matches exactly once, replace, PUT, re-read and byte-compare, then delete the scene. That worked and was verified byte-identical each time, but it is three round trips and a live scene created on a production gateway to do what one tool call does. It also cost a silent failed run when the
 
 
-_Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
+_Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
 ### `upload_icon` — 90d ago
@@ -1597,7 +1597,7 @@ Same file, same device, same firmware (5.210.12). Note B must run inside the own
 **Cost:** A working feature was written off as impossible and recorded as settled in a QA source comment, where it would have kept future sessions away from it. Recovering it took a one-off test that should have been unnecessary. The eventual result was ten composed icons driving eight tile states.
 
 
-_Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
+_Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
 ### `get_hc3_quickapp_programming_guide` — 90d ago
@@ -1636,7 +1636,7 @@ To settle it on a spare QA: (a) register a multi-select under onToggled only, re
 **Cost:** About two weeks of a multi-select picker that rendered correctly, accepted input, and saved nothing. No log line indicated a fault: the trace showed the event arriving, and the QA's own debug line showed it being handled, one line before the guard discarded it. Diagnosis required reading the QA source against the raw onAction args. Firmware 5.210.12, QA 4933, element type "select" with selectionType "multi".
 
 
-_Reported by Claude, working with Nick C. on QA 4933 (Irrigation), 15 Aug 2026_
+_Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
 ### `get_ios_devices` — 92d ago
@@ -1662,7 +1662,7 @@ Vary only the path: api.get("/iosDevices") and api.get("/iosDevices/937") from t
 **Cost:** Two things for the server. A per-id read of an iOS registration silently returns the whole list, so any code filtering client-side will look correct and any code taking the first element will be wrong. And stale registration cleanup is scriptable after all via DELETE /iosDevices/{id}?udid={udid}, which is worth a tool, given the record carries no last-seen or token-status field to identify staleness from and push is true on all fifteen.
 
 
-_Reported by Claude, working with Nick (northernRough), 5.210.12_
+_Reported by Claude, working with the owner, 5.210.12_
 
 
 ### `general` — 92d ago
@@ -1688,7 +1688,7 @@ Single variable in each pair. For /mobile/push, hold body and category constant 
 **Cost:** Corrects an assumption we had been carrying that both fail silently on the wrong id kind. Only fibaro.alert does. A tool wrapping /mobile/push can assert status 200 and that the echoed devices array matches the request; a tool wrapping fibaro.alert has no verification channel at all and should say so rather than report success. Separate caveat worth documenting: 200 from /mobile/push means accepted, not delivered. A push to registration 937, which receives nothing in practice, returned a clean 2
 
 
-_Reported by Claude, working with Nick (northernRough), 5.210.12_
+_Reported by Claude, working with the owner, 5.210.12_
 
 
 ### `general` — 92d ago
@@ -1714,7 +1714,7 @@ Single variable is the path. From a Lua scene, api.get("/scenes/788/variables") 
 **Cost:** Prevents a wrong assumption in tool design. Scene variables are Lua-only on this firmware, so an agent cannot read or write scene state at all. Worth documenting as unreachable, with the recommendation that scene state an agent needs to see must live in a global variable or a QuickApp variable instead.
 
 
-_Reported by Claude, working with Nick (northernRough), 5.210.12_
+_Reported by Claude, working with the owner, 5.210.12_
 
 
 ### `create_scene` — 92d ago
@@ -1740,7 +1740,7 @@ Isolated to one variable. Call create_scene twice with identical name/roomId/typ
 **Cost:** One failed create before the shape was guessed. Low cost here, but the error surfaces from the Lua engine rather than the validation layer, so it reads like a server fault rather than a missing parameter. Suggest making content required, or defaulting conditions to a valid empty table when content is omitted.
 
 
-_Reported by Claude, working with Nick (northernRough), 5.210.12_
+_Reported by Claude, working with the owner, 5.210.12_
 
 
 ### `general` — 94d ago
