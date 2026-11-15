@@ -88,6 +88,81 @@ function frameDelta(a: { in: number; out: number; failed: number } | null, b: { 
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+/**
+ * A battery node's wake-up interval lives in HC3's Z-Wave engine, not on the
+ * device record. Found 15 Nov 2026 in the web UI's own code (wakeUpService)
+ * after a live test on an FGMS001 motion sensor:
+ *
+ *   GET  /api/zwave/wake_ups/{node}                 interval, destination,
+ *        lastTime, expectedNextTime, intervalDefinition {min, max, default}
+ *   PUT  /api/zwave/wake_ups/{node}/configuration   {destination, interval}
+ *        -> 202 {actionId}; queued until the node next wakes
+ *   GET  /api/zwave/mailbox/{node}/wake_ups         what is queued
+ *   POST /api/zwave/mailbox/{node}/wake_ups/clear   empty the queue (from the
+ *        UI code; not exercised live)
+ *
+ * `properties.wakeUpTime` on /api/devices is a stale copy. The UI set 300 s,
+ * the sensor then woke every 300 s, and every device record for the node still
+ * said 43200. A write to that property (update_device_property) changed the
+ * record and never reached the node. A mains-powered node answers 404 here,
+ * an unknown node 422.
+ */
+async function readWakeUp(hc3: any, tool: string, deviceId: number) {
+  if (typeof deviceId !== 'number') throw new Error(`${tool} requires a numeric deviceId.`);
+  const device: any = await readDevice(hc3, tool, deviceId);
+  const nodeId = device?.properties?.nodeId;
+  if (nodeId === undefined || nodeId === null || nodeId === '') {
+    throw new Error(`${tool}: device ${deviceId} (${device?.name ?? '?'}) has no Z-Wave nodeId; wake-up applies to Z-Wave battery nodes only.`);
+  }
+  if (Array.isArray(device?.interfaces) && device.interfaces.includes('remoteDevice')) {
+    throw new Error(`${tool}: device ${deviceId} sits on a remote (slave) gateway; its wake-up is set through that gateway, which this tool does not reach.`);
+  }
+  let state: any;
+  try {
+    state = await hc3.request(`/api/zwave/wake_ups/${encodeURIComponent(String(nodeId))}`);
+  } catch (e: any) {
+    if (isNotFound(e)) {
+      throw new Error(`${tool}: node ${nodeId} (${device?.name ?? deviceId}) has no wake-up: it is not a sleeping battery node (HC3 answers 404).`);
+    }
+    if (e?.status === 422) throw new Error(`${tool}: HC3 does not know Z-Wave node ${nodeId} (422).`);
+    throw e;
+  }
+  let pending: any[] = [];
+  let pendingError: string | undefined;
+  try {
+    const m: any = await hc3.request(`/api/zwave/mailbox/${encodeURIComponent(String(nodeId))}/wake_ups`);
+    pending = Array.isArray(m?.items) ? m.items : [];
+  } catch (e: any) {
+    pendingError = String(e?.message ?? e);
+  }
+  return { device, nodeId, state, pending, pendingError };
+}
+
+function describeWakeUp(deviceId: number, w: Awaited<ReturnType<typeof readWakeUp>>, now = Date.now()) {
+  const cfg = w.state?.configuration ?? {};
+  const next = w.state?.expectedNextTime ? Date.parse(w.state.expectedNextTime) : NaN;
+  const recordValue = w.device?.properties?.wakeUpTime;
+  const queued = w.pending.filter((p: any) => p?.type === 'setConfiguration');
+  return {
+    deviceId,
+    deviceName: w.device?.name ?? null,
+    nodeId: w.nodeId,
+    interval: cfg.interval ?? null,
+    destination: cfg.destination ?? null,
+    lastWake: w.state?.lastTime ?? null,
+    expectedNextWake: w.state?.expectedNextTime ?? null,
+    secondsUntilNextWake: Number.isFinite(next) ? Math.round((next - now) / 1000) : null,
+    allowed: w.state?.intervalDefinition ?? null,
+    pending: w.pending,
+    ...(w.pendingError ? { pendingError: w.pendingError } : {}),
+    ...(queued.length ? { queuedInterval: queued[queued.length - 1].interval } : {}),
+    deviceRecordWakeUpTime: recordValue ?? null,
+    deviceRecordAgrees: recordValue === undefined ? null : recordValue === cfg.interval,
+  };
+}
+
+const MIN_SENSIBLE_WAKE = 3600;
+
 export const zwaveSchemas: Record<string, MCPTool> = {
   get_zwave_mesh_health:
       {
@@ -153,6 +228,34 @@ export const zwaveSchemas: Record<string, MCPTool> = {
             }
           },
           required: ['deviceId', 'parameterNumber', 'size', 'value']
+        },
+      },
+  get_wake_up:
+      {
+        name: 'get_wake_up',
+        description: 'Read a Z-Wave battery node\'s REAL wake-up interval, when it last woke, when HC3 expects it next, and anything queued for it. Sources HC3\'s Z-Wave engine (`GET /api/zwave/wake_ups/{node}` and `/api/zwave/mailbox/{node}/wake_ups`, the endpoints the HC3 web UI uses; undocumented, may change with firmware).\n\nDo NOT trust `properties.wakeUpTime` on the device record: it is a stale copy. Verified 15 Nov 2026 on an FGMS001: the UI set 300 s, the sensor then woke every 300 s, and every device record for the node still read 43200. This tool returns that record as `deviceRecordWakeUpTime` with `deviceRecordAgrees` so the mismatch is visible.\n\n`expectedNextWake` / `secondsUntilNextWake` make waiting for a wake deterministic: no need to poll radio counters to catch one. `pending` lists queued actions (a `setConfiguration` with the new interval, after set_wake_up_interval); it empties when the node wakes and takes it. Any device of the node works (root or child). A mains-powered node has no wake-up and is refused.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: { type: 'number', description: 'HC3 device id of any device on the Z-Wave node (root or child).' }
+          },
+          required: ['deviceId']
+        },
+      },
+  set_wake_up_interval:
+      {
+        name: 'set_wake_up_interval',
+        description: 'Change a Z-Wave battery node\'s wake-up interval (seconds) the way the HC3 web UI does: `PUT /api/zwave/wake_ups/{node}/configuration` with `{destination, interval}`. HC3 QUEUES it (202, an actionId) and delivers it the next time the node wakes, at its current interval or when someone wakes it by hand (opening the cover or pressing its button). Nothing changes on the device until then; `pending` shows it queued.\n\nThis is the ONLY verified path. `update_device_property` / `modify_device` on `wakeUpTime` change a stale copy on the device record and never reach the node (15 Nov 2026, FGMS001: record set to 600, no 10-minute wakes followed; UI set 300 through this endpoint, the sensor woke 300 s later).\n\nBATTERY: every wake costs battery. An interval under an hour is refused unless `allowShortInterval: true`. Restore a long interval when a test is done.\n\nGuards: the interval must be an integer within the node\'s own `allowed` range (from HC3, e.g. 1-65535 on an FGMS001; the web UI caps its input lower than the device allows). If a different interval is already queued the call refuses unless `replacePending: true`, which clears the node\'s wake-up queue first (`POST /api/zwave/mailbox/{node}/wake_ups/clear`, taken from the UI code and not yet exercised live). The same value already set with nothing queued is a no-op. `waitSeconds` (up to 600) polls for delivery, for when someone is about to wake the node by hand; otherwise call get_wake_up after `expectedNextWake`.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deviceId: { type: 'number', description: 'HC3 device id of any device on the Z-Wave node (root or child).' },
+            interval: { type: 'number', description: 'New wake-up interval in seconds, within the node\'s allowed range (see get_wake_up `allowed`).' },
+            allowShortInterval: { type: 'boolean', description: 'Permit an interval under 3600 s (drains the battery; for tests). Default false.' },
+            replacePending: { type: 'boolean', description: 'If a different interval is already queued, clear the queue and queue this one instead. Default false (refuse).' },
+            waitSeconds: { type: 'number', description: 'Optional: wait up to this many seconds (max 600) for the node to wake and take the change, then report the result.' }
+          },
+          required: ['deviceId', 'interval']
         },
       },
   get_zwave_node_diagnostics:
@@ -546,6 +649,100 @@ export const zwave: ToolModule = {
         outcome,
         ...(battery ? { batteryDevice: true } : {}),
         actionResponse
+      };
+    },
+
+    async get_wake_up(hc3, args: { deviceId: number }): Promise<any> {
+      const w = await readWakeUp(hc3, 'get_wake_up', args?.deviceId);
+      const d = describeWakeUp(args.deviceId, w);
+      return {
+        ...d,
+        source: '/api/zwave/wake_ups/{node} (undocumented; what the HC3 web UI reads)',
+        note: d.deviceRecordAgrees === false
+          ? `The device record's wakeUpTime (${d.deviceRecordWakeUpTime}) disagrees with the node's real interval (${d.interval}). The record is a stale copy; trust interval.`
+          : 'interval is the node\'s configured wake-up as HC3\'s Z-Wave engine holds it, confirmed by the node when a change is delivered.'
+      };
+    },
+
+    async set_wake_up_interval(hc3, args: {
+      deviceId: number; interval: number; allowShortInterval?: boolean; replacePending?: boolean; waitSeconds?: number;
+    }): Promise<any> {
+      const tool = 'set_wake_up_interval';
+      const { deviceId, interval } = args ?? {} as any;
+      if (!Number.isInteger(interval)) throw new Error(`${tool}: interval must be an integer number of seconds (got ${interval}).`);
+      const waitSeconds = args?.waitSeconds === undefined ? 0 : Number(args.waitSeconds);
+      if (!Number.isFinite(waitSeconds) || waitSeconds < 0 || waitSeconds > 600) {
+        throw new Error(`${tool}: waitSeconds must be 0-600 (got ${args?.waitSeconds}).`);
+      }
+
+      const w = await readWakeUp(hc3, tool, deviceId);
+      const before = describeWakeUp(deviceId, w);
+      const def = w.state?.intervalDefinition ?? {};
+      const min = Number.isFinite(def.min) ? def.min : 1;
+      const max = Number.isFinite(def.max) ? def.max : 16777215;
+      if (interval < min || interval > max) {
+        throw new Error(`${tool}: ${interval} s is outside node ${w.nodeId}'s allowed range ${min}-${max} s (default ${def.default ?? '?'}). Nothing was queued.`);
+      }
+      if (interval < MIN_SENSIBLE_WAKE && args?.allowShortInterval !== true) {
+        throw new Error(
+          `${tool}: ${interval} s would wake the node every ${Math.round(interval / 60)} minute(s) and drain its battery. ` +
+          `Pass allowShortInterval: true for a test, and restore a long interval afterwards. Nothing was queued.`
+        );
+      }
+
+      const queued = w.pending.filter((p: any) => p?.type === 'setConfiguration');
+      const lastQueued = queued.length ? queued[queued.length - 1].interval : undefined;
+      if (lastQueued === interval) {
+        return { ...before, changed: false, outcome: `${interval} s is already queued; it is delivered when the node next wakes (expected ${before.expectedNextWake ?? 'unknown'}).` };
+      }
+      if (lastQueued === undefined && before.interval === interval) {
+        return { ...before, changed: false, outcome: `Node ${w.nodeId} is already set to ${interval} s and nothing is queued. Nothing was sent.` };
+      }
+      let cleared = false;
+      if (lastQueued !== undefined) {
+        if (args?.replacePending !== true) {
+          throw new Error(
+            `${tool}: ${lastQueued} s is already queued for node ${w.nodeId} and has not been delivered. ` +
+            `Pass replacePending: true to clear it and queue ${interval} s instead. Nothing was changed.`
+          );
+        }
+        await hc3.request(`/api/zwave/mailbox/${encodeURIComponent(String(w.nodeId))}/wake_ups/clear`, 'POST');
+        cleared = true;
+      }
+
+      const destination = w.state?.configuration?.destination ?? 1;
+      const put: any = await hc3.request(
+        `/api/zwave/wake_ups/${encodeURIComponent(String(w.nodeId))}/configuration`, 'PUT', { destination, interval }
+      );
+
+      let after = describeWakeUp(deviceId, await readWakeUp(hc3, tool, deviceId));
+      const deadline = Date.now() + waitSeconds * 1000;
+      const delivered = () => after.interval === interval && !after.pending.some((p: any) => p?.type === 'setConfiguration');
+      while (!delivered() && Date.now() < deadline) {
+        await sleep(5000);
+        after = describeWakeUp(deviceId, await readWakeUp(hc3, tool, deviceId));
+      }
+      const isQueued = after.pending.some((p: any) => p?.type === 'setConfiguration' && p.interval === interval);
+
+      const outcome = delivered()
+        ? `Delivered: node ${w.nodeId} woke and now reports ${interval} s. Next wake expected ${after.expectedNextWake ?? 'unknown'}.`
+        : isQueued
+          ? `Queued (actionId ${put?.actionId ?? '?'}): ${interval} s goes to the node when it next wakes, expected ${after.expectedNextWake ?? 'unknown'} ` +
+            `(at its current ${after.interval} s interval), or sooner if someone wakes it by hand. Until then the node keeps ${after.interval} s. ` +
+            'Check with get_wake_up afterwards.'
+          : `HC3 answered ${JSON.stringify(put)} but nothing shows in the node's queue and the interval is still ${after.interval} s. Check get_wake_up; do not assume it took.`;
+
+      return {
+        requested: interval,
+        before: { interval: before.interval, pending: before.pending },
+        ...(cleared ? { clearedPending: queued } : {}),
+        actionId: put?.actionId ?? null,
+        delivered: delivered(),
+        queued: isQueued,
+        ...after,
+        changed: true,
+        outcome,
+        ...(interval < MIN_SENSIBLE_WAKE ? { batteryWarning: `Short interval (${interval} s). Restore a long one when finished.` } : {}),
       };
     },
 

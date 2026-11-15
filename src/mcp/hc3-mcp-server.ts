@@ -237,6 +237,8 @@ class HC3MCPServer {
       zwaveSchemas.set_device_parameter,
       zwaveSchemas.get_zwave_reconfiguration_tasks,
       zwaveSchemas.get_zwave_node_diagnostics,
+      zwaveSchemas.get_wake_up,
+      zwaveSchemas.set_wake_up_interval,
       ...dimmers.schemas,
 
       // Weather Information
