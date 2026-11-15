@@ -2,6 +2,32 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.42.0] - 2026-11-15
+
+### Added
+
+- `get_wake_up`: a battery node's real wake-up interval, last wake, expected
+  next wake, allowed range and anything queued, read from HC3's Z-Wave engine
+  (`/api/zwave/wake_ups/{node}`, the endpoint the web UI uses). Shows the
+  device record's `wakeUpTime` beside it, with `deviceRecordAgrees`.
+- `set_wake_up_interval`: queues a new interval the way the web UI does
+  (`PUT /api/zwave/wake_ups/{node}/configuration`). It's delivered when the
+  node next wakes; `waitSeconds` waits for that. Refuses values outside the
+  node's own range, intervals under an hour without `allowShortInterval`, and
+  overwriting a different queued value without `replacePending`.
+
+### Fixed
+
+- `update_device_property` and `modify_device` refuse `wakeUpTime`. On a
+  battery node it is a stale copy on the device record: a write changed the
+  record and never reached the sensor, and when the UI set 300 s the record
+  still read 43200 while the sensor woke every 300 s (FGMS001, 15 Nov 2026).
+
+### Docs
+
+- API notes, silent writes: the wake-up record, the engine endpoints, and why
+  frame counts and cover-open wakes mislead a wake-up test.
+
 ## [4.41.2] - 2026-11-15
 
 ### Changed

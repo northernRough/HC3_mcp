@@ -2074,6 +2074,22 @@
     }
   },
   {
+    "name": "get_wake_up",
+    "description": "Read a Z-Wave battery node's REAL wake-up interval, when it last woke, when HC3 expects it next, and anything queued for it. Sources HC3's Z-Wave engine (`GET /api/zwave/wake_ups/{node}` and `/api/zwave/mailbox/{node}/wake_ups`, the endpoints the HC3 web UI uses; undocumented, may change with firmware).\n\nDo NOT trust `properties.wakeUpTime` on the device record: it is a stale copy. Verified 15 Nov 2026 on an FGMS001: the UI set 300 s, the sensor then woke every 300 s, and every device record for the node still read 43200. This tool returns that record as `deviceRecordWakeUpTime` with `deviceRecordAgrees` so the mismatch is visible.\n\n`expectedNextWake` / `secondsUntilNextWake` make waiting for a wake deterministic: no need to poll radio counters to catch one. `pending` lists queued actions (a `setConfiguration` with the new interval, after set_wake_up_interval); it empties when the node wakes and takes it. Any device of the node works (root or child). A mains-powered node has no wake-up and is refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id of any device on the Z-Wave node (root or child)."
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    }
+  },
+  {
     "name": "get_weather",
     "description": "Get current weather information and forecast",
     "inputSchema": {
@@ -3083,6 +3099,39 @@
     }
   },
   {
+    "name": "set_wake_up_interval",
+    "description": "Change a Z-Wave battery node's wake-up interval (seconds) the way the HC3 web UI does: `PUT /api/zwave/wake_ups/{node}/configuration` with `{destination, interval}`. HC3 QUEUES it (202, an actionId) and delivers it the next time the node wakes, at its current interval or when someone wakes it by hand (opening the cover or pressing its button). Nothing changes on the device until then; `pending` shows it queued.\n\nThis is the ONLY verified path. `update_device_property` / `modify_device` on `wakeUpTime` change a stale copy on the device record and never reach the node (15 Nov 2026, FGMS001: record set to 600, no 10-minute wakes followed; UI set 300 through this endpoint, the sensor woke 300 s later).\n\nBATTERY: every wake costs battery. An interval under an hour is refused unless `allowShortInterval: true`. Restore a long interval when a test is done.\n\nGuards: the interval must be an integer within the node's own `allowed` range (from HC3, e.g. 1-65535 on an FGMS001; the web UI caps its input lower than the device allows). If a different interval is already queued the call refuses unless `replacePending: true`, which clears the node's wake-up queue first (`POST /api/zwave/mailbox/{node}/wake_ups/clear`, taken from the UI code and not yet exercised live). The same value already set with nothing queued is a no-op. `waitSeconds` (up to 600) polls for delivery, for when someone is about to wake the node by hand; otherwise call get_wake_up after `expectedNextWake`.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "number",
+          "description": "HC3 device id of any device on the Z-Wave node (root or child)."
+        },
+        "interval": {
+          "type": "number",
+          "description": "New wake-up interval in seconds, within the node's allowed range (see get_wake_up `allowed`)."
+        },
+        "allowShortInterval": {
+          "type": "boolean",
+          "description": "Permit an interval under 3600 s (drains the battery; for tests). Default false."
+        },
+        "replacePending": {
+          "type": "boolean",
+          "description": "If a different interval is already queued, clear the queue and queue this one instead. Default false (refuse)."
+        },
+        "waitSeconds": {
+          "type": "number",
+          "description": "Optional: wait up to this many seconds (max 600) for the node to wake and take the change, then report the result."
+        }
+      },
+      "required": [
+        "deviceId",
+        "interval"
+      ]
+    }
+  },
+  {
     "name": "snapshot",
     "description": "Single-call dump of every mutable HC3 configuration surface for backups, drift detection, and baseline regimes. Read-only. Parallel fetches all selected surfaces with per-surface atomicity (Promise.allSettled — one failing surface doesn't abort the others; failures land in surfaceErrors). Default include set: devices, rooms, scenes (with content), quickapps (with files), globals, custom-events, alarm, climate, system, users, hc3-docs. Opt-in only: zwave-parameters (per-device iteration over ~900 devices — adds 90+ seconds to the run). Returns { capturedAt, elapsedMs, surfaces: {...}, surfaceErrors: {...} }. Use for nightly backup scripts and post-incident recovery baselines.",
     "inputSchema": {
@@ -3214,7 +3263,7 @@
   },
   {
     "name": "update_device_property",
-    "description": "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record).",
+    "description": "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record). A null result is normal and proves nothing: read the property back. A read-back proves only HC3's RECORD, not the device: `wakeUpTime` is refused here because the record is a stale copy (use set_wake_up_interval).",
     "inputSchema": {
       "type": "object",
       "properties": {

@@ -203,7 +203,7 @@ export const plugins: ToolModule = {
       },
       {
         name: "update_device_property",
-        description: "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record).",
+        description: "Update a device property value via POST /api/plugins/updateProperty. This endpoint is undocumented in the HC3 Swagger and its behaviour is not guaranteed stable across firmware versions — prefer `modify_device` (PUT /api/devices/{id}) for property writes, which uses a documented endpoint, splits top-level vs nested properties cleanly, rejects quickAppVariables, and verifies writes by refetching. Use this tool only when you specifically need the plugin-side write path (e.g. the property you are writing is not exposed on the device record). A null result is normal and proves nothing: read the property back. A read-back proves only HC3's RECORD, not the device: `wakeUpTime` is refused here because the record is a stale copy (use set_wake_up_interval).",
         inputSchema: {
           type: "object",
           properties: {
@@ -516,6 +516,12 @@ export const plugins: ToolModule = {
       value: any
     }): Promise<any> {
       const { deviceId, propertyName, value } = args;
+      if (propertyName === 'wakeUpTime') {
+        throw new Error(
+          "update_device_property does not write wakeUpTime: it changes only a stale copy on the device record and never reaches the node " +
+          "(15 Nov 2026, FGMS001: record set to 600, the sensor never woke on 10 minutes). Use set_wake_up_interval, and get_wake_up to read the real interval."
+        );
+      }
       const requestData = {
         deviceId,
         propertyName,

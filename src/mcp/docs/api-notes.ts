@@ -137,6 +137,24 @@ Basic-auth requests with a bad password made every account, the superuser
 included, answer 401 from that host for under 2 minutes. Never test a
 credential in a loop; make one request and stop.
 
+### Battery wake-up interval
+\`properties.wakeUpTime\` on the device record is a **stale copy** (15 Nov 2026,
+FGMS001 motion sensor). \`update_device_property\` set it to 600: null result,
+record read back 600, 0 frames, and the sensor never woke on 10 minutes. The web
+UI set 300 instead, and the sensor woke 300 s later, every time, while every
+device record for the node still read 43200. The UI does not use the record. It
+uses HC3's Z-Wave engine: \`GET /api/zwave/wake_ups/{node}\` (interval,
+\`lastTime\`, \`expectedNextTime\`, allowed range) and
+\`PUT /api/zwave/wake_ups/{node}/configuration\` \`{destination, interval}\`, which
+answers 202 and queues the change in \`/api/zwave/mailbox/{node}/wake_ups\` until
+the node wakes. \`pendingActions\` stays false throughout. Use \`get_wake_up\` and
+\`set_wake_up_interval\`; both write paths to the record are refused.
+
+Side lessons: frame counts alone cannot tell a wake from a report (a wake with
+nothing queued still moved 8-10 frames out; motion and temperature reports move
+frames in only), and opening a sensor's cover wakes it, so check the event log
+for a tamper event before calling any wake unprompted.
+
 ### QuickApp view layouts
 A \`select\` missing \`selectionType\`, or with \`values\` as a JSON object rather
 than an array, is stored, reported verified, and then serves an **EMPTY view** —

@@ -543,6 +543,12 @@ export const devices: ToolModule = {
         );
       }
 
+      if (properties && 'wakeUpTime' in properties) {
+        throw new Error(
+          "modify_device does not accept properties.wakeUpTime — on a Z-Wave battery node it is a stale copy, not the node's setting (15 Nov 2026, FGMS001: the record read 43200 while the sensor woke every 300 s). Use set_wake_up_interval, which queues the change through HC3's Z-Wave engine the way the web UI does, and get_wake_up to read the real interval."
+        );
+      }
+
       if (properties && ('associations' in properties || 'multichannelAssociations' in properties)) {
         throw new Error(
           "modify_device does not accept properties.associations or properties.multichannelAssociations — precautionary reject based on the S14 finding (the structurally identical properties.parameters PUT caches without transmitting on this firmware). For parameters specifically, the `setConfiguration` action was later confirmed to transmit and is exposed as set_device_parameter; no equivalent working REST path has been verified for associations. Set associations via the HC3 Web UI until a transmitting path is found."
