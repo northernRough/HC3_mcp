@@ -7,8 +7,8 @@ All notable changes to the "hc3-mcp-server" package will be documented in this f
 ### Docs
 
 - API notes: only the superuser can read /api/zwave/ (a limited user is
-  refused). The Pi feed (globals `ZwTxStats`, `ZwParams`) serves scene 82
-  and deviceBinder without credentials. The users API needs `email` to create
+  refused), and the credential-free alternative: an outside host publishes
+  the readings into globals for scenes and QuickApps. The users API needs `email` to create
   a user, and an admin can't set another user's password. A burst of failed
   logins locks every account out from that address for a short time.
 - QuickApp guide: the net.HTTPClient workaround needs the admin password.
@@ -1478,7 +1478,7 @@ QuickApp UI behaviours from the report — that a view must be installed from wi
   - **`hc3://binder`** — the published `BinderBindings` map summarised, plus the resolver cache decoded: roles counted by resolution method, every role *not* at `L0_cached` listed with its id, recent heal history, and `BinderParamDrift` status. The cache is ~160 KB of JSON on a real system and was not readable without parsing it by hand.
   - **`hc3://globals`** — scalar globals with last-changed times, structured globals summarised by size and shape rather than dumped, and a real decode of `DeadDeviceWatch_State` (devices watched, currently flagged dead, failure counts). Heartbeats are excluded here since they have their own resource.
 
-  **Security note:** QuickApp variable arrays can carry credentials — `deviceBinder` 4826 holds `HC3_USER` and `HC3_PASS` in the same array as its binding cache. The binder resource reads that one variable **by name** and never emits a `quickAppVariables` array. A unit test asserts no credential value or name reaches the rendered output; it is the check most worth keeping if this file is ever refactored.
+  **Security note:** QuickApp variable arrays can carry credentials alongside ordinary data, such as a binding cache. The binder resource reads that one variable **by name** and never emits a `quickAppVariables` array. A unit test asserts no credential value or name reaches the rendered output; it is the check most worth keeping if this file is ever refactored.
 
   Every resource degrades honestly: a missing global, an unreadable cache or an empty gateway produces a document that says so, rather than a partial view that reads as "nothing wrong".
 

@@ -212,9 +212,9 @@ transmits (radio counters prove it). The way round, used by the Dimmer Tuner
 QuickApp: an outside tool reads the parameters and writes them into a
 QuickApp variable or a global. Calling the local API over net.HTTPClient with a
 password also works, but only with the ADMIN password (a limited user is refused
-/api/zwave/, 15 Nov 2026), which then sits in the code and its backups. See
-get_hc3_api_notes for the Pi feed this gateway uses instead (globals ZwTxStats,
-ZwParams).
+/api/zwave/, 15 Nov 2026), which then sits in the code and its backups.
+get_hc3_api_notes describes the credential-free alternative: an outside host
+publishes the readings into globals.
 
 ## A QuickApp thermostat in a climate zone does not get every setpoint
 

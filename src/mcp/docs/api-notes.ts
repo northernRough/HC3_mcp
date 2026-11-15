@@ -119,15 +119,15 @@ parameterised devices on this gateway.
 
 **Who may read /api/zwave/** (15 Nov 2026, 5.220.15). Only the superuser. A
 scene or QuickApp gets 501 / "" from \`api.get\` on any /zwave/ route, and a
-limited user is refused it over HTTP too (the owner tested scene 82 with one;
-whether granting \`advanced.zWave\` changes that was not isolated). So code inside HC3 that
-needs Z-Wave diagnostics or parameters either embeds the admin password or
-reads them from outside. This gateway does the latter: the Pi's
-\`hc3-zwave-feed\` (hc3-snapshot repo, every 5 min) publishes the global
-\`ZwTxStats\` (\`{at, items:[per-node radio counters]}\`) and \`ZwParams\`
-(\`{at, nodes:{"<node>":[{id,value,size}]}}\`, nodes bound in BinderBindings,
-about every 14 min). Scene 82 and deviceBinder 4826 read those and hold no
-credentials. HC3 stores a 100 KB global value whole.
+limited user is refused it over HTTP too (tested with a scene; whether
+granting \`advanced.zWave\` changes that was not isolated). So code inside HC3
+that needs Z-Wave diagnostics or parameters either embeds the admin password,
+or reads them from outside. **Prefer the outside route:** a host that already
+holds the admin login (the machine running this server, say) reads the
+/zwave/ routes on a timer and writes the results into global variables, with
+a timestamp so readers can tell when the feed has stopped; scenes and
+QuickApps read the globals and hold no credentials. HC3 stores a 100 KB global
+value whole.
 
 **Users** (15 Nov 2026). \`POST /api/users\` needs \`email\` (400
 MISSING_PARAMETER without it). The superuser cannot set another user's password:
