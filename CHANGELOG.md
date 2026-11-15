@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.41.1] - 2026-11-15
+
+### Docs
+
+- API notes: only the superuser can read /api/zwave/ (a limited user is
+  refused). The Pi feed (globals `ZwTxStats`, `ZwParams`) serves scene 82
+  and deviceBinder without credentials. The users API needs `email` to create
+  a user, and an admin can't set another user's password. A burst of failed
+  logins locks every account out from that address for a short time.
+- QuickApp guide: the net.HTTPClient workaround needs the admin password.
+
 ## [4.41.0] - 2026-11-14
 
 ### Added

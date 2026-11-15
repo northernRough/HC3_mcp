@@ -117,6 +117,26 @@ endpoint child's own address (\`187.1\`) answers 404. Before 4.39.0 both
 parameter tools used the child's address and came back empty for 307 of 709
 parameterised devices on this gateway.
 
+**Who may read /api/zwave/** (15 Nov 2026, 5.220.15). Only the superuser. A
+scene or QuickApp gets 501 / "" from \`api.get\` on any /zwave/ route, and a
+limited user is refused it over HTTP too (the owner tested scene 82 with one;
+whether granting \`advanced.zWave\` changes that was not isolated). So code inside HC3 that
+needs Z-Wave diagnostics or parameters either embeds the admin password or
+reads them from outside. This gateway does the latter: the Pi's
+\`hc3-zwave-feed\` (hc3-snapshot repo, every 5 min) publishes the global
+\`ZwTxStats\` (\`{at, items:[per-node radio counters]}\`) and \`ZwParams\`
+(\`{at, nodes:{"<node>":[{id,value,size}]}}\`, nodes bound in BinderBindings,
+about every 14 min). Scene 82 and deviceBinder 4826 read those and hold no
+credentials. HC3 stores a 100 KB global value whole.
+
+**Users** (15 Nov 2026). \`POST /api/users\` needs \`email\` (400
+MISSING_PARAMETER without it). The superuser cannot set another user's password:
+\`PUT /api/users/{id}\` with \`password\` answers 403 "Only the user can change
+the password". **Failed logins lock out the whole client address**: about 12
+Basic-auth requests with a bad password made every account, the superuser
+included, answer 401 from that host for under 2 minutes. Never test a
+credential in a loop; make one request and stop.
+
 ### QuickApp view layouts
 A \`select\` missing \`selectionType\`, or with \`values\` as a JSON object rather
 than an array, is stored, reported verified, and then serves an **EMPTY view** —
