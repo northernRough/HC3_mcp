@@ -14,6 +14,7 @@
 //   node scripts/friction-triage.mjs [outfile]     # default: FRICTION.md
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { scrub, loadScrubRules } from './friction-scrub.mjs';
 import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -230,7 +231,8 @@ lines.push(`
 | Refuted | stays in this file, marked refuted, with the evidence |
 `);
 
-writeFileSync(outFile, lines.join('\n'));
+// Public file: strip names, the home's name and LAN addresses (friction-scrub.mjs).
+writeFileSync(outFile, scrub(lines.join('\n'), loadScrubRules()));
 console.log(`Wrote ${outFile}`);
 console.log(`  ${failures.length} recurring failure group(s), ${findings.length} submitted finding(s)`);
 if (verdicts.present) {

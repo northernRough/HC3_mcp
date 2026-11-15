@@ -719,7 +719,7 @@
     },
     {
       "at": 1794097426,
-      "tool": "mcp__mallorn_MCP-HC3__find_devices_by_name",
+      "tool": "find_devices_by_name",
       "verdict": "confirmed",
       "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Both halves confirmed in code: only parentId 0/1 kept, so every Z-Wave endpoint child is invisible to a name search; and the parameter is exactMatch, so `exact` was silently ignored.",
       "resolvedIn": "4.35.0",
@@ -727,7 +727,7 @@
     },
     {
       "at": 1794098351,
-      "tool": "mcp__mallorn_MCP-HC3__delete_device",
+      "tool": "delete_device",
       "verdict": "confirmed",
       "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row.",
       "resolvedIn": "4.35.0",
@@ -735,7 +735,7 @@
     },
     {
       "at": 1794098612,
-      "tool": "mcp__mallorn_MCP-HC3__get_quickapp_variable",
+      "tool": "get_quickapp_variable",
       "verdict": "confirmed",
       "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The reported results carry no `name` key: the handler received no name and returned exists:false instead of refusing. A missing argument became a confident wrong answer about the user's system. Fix: require name.",
       "resolvedIn": "4.35.0",

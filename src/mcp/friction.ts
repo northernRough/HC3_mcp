@@ -427,8 +427,15 @@ export function matchFailureVerdict(verdicts: Verdict[], g: FrictionGroup): Verd
   ));
 }
 
+/** The bare tool name: a client may report a tool with its connector prefix
+ *  (`mcp__<server>__get_icon`, `<server>:get_icon`), and the connector name can
+ *  be personal, so verdicts are keyed by the bare name. */
+export function bareToolName(t: string): string {
+  return String(t ?? '').split('__').pop()!.split(':').pop()!.trim();
+}
+
 export function matchFindingVerdict(verdicts: Verdict[], e: FrictionEntry): Verdict | undefined {
-  return verdicts.find(v => v.at === e.at && v.tool === e.tool);
+  return verdicts.find(v => v.at === e.at && bareToolName(v.tool) === bareToolName(e.tool));
 }
 
 /** Numeric compare of dotted versions. <0, 0, >0. */

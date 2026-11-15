@@ -253,6 +253,15 @@ with a verdict of confirmed / refuted / untested. Nothing there is a fact until
 re-tested against a gateway, and refuted items stay in the file so they are not
 re-adopted from the original report later.
 
+**`FRICTION.md` is public, so it is scrubbed.** Private LAN addresses become
+the documentation range `192.0.2.x`. Names (owner, family, home, a personal
+connector name) are replaced using local rules that are never committed: a JSON
+array of `[regex, replacement]` pairs in `$FRICTION_SCRUB`, else
+`/etc/hc3-mcp/friction-scrub.json`, else `~/.hc3-mcp/friction-scrub.json`.
+Run `node scripts/friction-scrub.mjs` to scrub the current file in place.
+Verdicts are matched on the bare tool name, so they don't need the connector
+prefix.
+
 Storage is `MCP_FRICTION_LOG`, else the first writable candidate;
 `MCP_FRICTION_DISABLE=true` turns it off. Under a hardened systemd unit
 (`ProtectSystem=strict`) the service may have nowhere persistent to write — add

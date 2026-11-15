@@ -147,7 +147,7 @@ function writeReport(v) {
 }
 
 /**
- * Tell Nick, through the QuickApp.
+ * Tell the owner, through the QuickApp.
  *
  * Deliberately routed via firmwareWatch rather than POST /api/mobile/push:
  * fibaro.alert targets a USER and lets the hub fan out to that person's own

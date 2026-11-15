@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.41.2] - 2026-11-15
+
+### Changed
+
+- `FRICTION.md` is scrubbed of personal details before it is written. A
+  built-in rule turns private LAN addresses into 192.0.2.x, and names are
+  replaced by local rules that are never committed (see README, Feedback
+  loop). The current file has been scrubbed.
+- `friction-verdicts.json` keys finding verdicts by the bare tool name, and
+  matching ignores a connector prefix (`mcp__<server>__`, `<server>:`).
+
 ## [4.41.1] - 2026-11-15
 
 ### Docs
@@ -1025,7 +1036,7 @@ used.
 
 - **`hc3://globals` reported on a dead-device watcher that most gateways do not run.** The decode is keyed to a specific global name and schema, and its absence printed "absent or unparseable", which reads as a fault rather than as a pattern this gateway simply does not use. Absence is now silent; the global still appears in the structured table like any other, so nothing is hidden. Recognised by name AND shape together, so an unrelated global of that name cannot be rendered as something it is not.
 
-- **Private network addresses replaced with the documentation range.** `DEPLOYMENT.md` and six test fixtures carried a real LAN layout (`10.0.1.x`); they now use RFC 5737 TEST-NET-1 (`192.0.2.x`). Test fixtures also stopped describing themselves as pointing at "this HC3", which was true for exactly one reader. `scripts/probe-uicallbacks.mjs` discovers the default room instead of hardcoding a room id that exists on one gateway.
+- **Private network addresses replaced with the documentation range.** `DEPLOYMENT.md` and six test fixtures carried a real LAN layout; they now use RFC 5737 TEST-NET-1 (`192.0.2.x`). Test fixtures also stopped describing themselves as pointing at "this HC3", which was true for exactly one reader. `scripts/probe-uicallbacks.mjs` discovers the default room instead of hardcoding a room id that exists on one gateway.
 
 ### Changed
 - Resource-test fixtures deliberately use a binder id that is **not** the one previously hardcoded, so the suite fails if any fixed id creeps back in. Three new checks cover discovery, the consumer-copy trap, and the ambiguity report.
