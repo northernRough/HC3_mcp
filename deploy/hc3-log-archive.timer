@@ -1,0 +1,18 @@
+[Unit]
+# Every 5 minutes. The QuickApps flush their log to the gateway every 5
+# minutes, so collecting more often gains nothing; less often only widens the
+# window in which a day's oldest events could be dropped for size on the
+# gateway before the Pi has read them.
+Description=Archive HC3 QuickApp event logs every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+# After the Pi has been down, OnBootSec runs the first collection two minutes
+# after boot; the gateway's buffer (3 days) covers the gap. (Persistent= only
+# applies to OnCalendar timers, so it is not used here.)
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
