@@ -2,6 +2,20 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.43.1] - 2026-11-19
+
+### Fixed
+
+- Log archive stored some events twice. It keyed events on their raw JSON
+  text, but Lua re-encodes objects with keys in a different order when a
+  QuickApp restarts or a slot is written back, so the same snapshot arrived as
+  new text. Daikin's 18 Nov file held 223 events for 134 real ones. Events are
+  now keyed on canonical JSON (keys sorted at every level), and the first run
+  after upgrade repairs existing files once (`keyVersion` 2 in `index.json`).
+- The merge now counts repeats: an event a QuickApp genuinely logged twice in
+  one second is kept twice, and later reads of the same slot never add it
+  again. The old key had collapsed such pairs to one.
+
 ## [4.43.0] - 2026-11-19
 
 ### Added

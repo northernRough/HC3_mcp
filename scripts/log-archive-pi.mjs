@@ -38,7 +38,10 @@
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireCredentials } from './test/credentials.mjs';
-import { SLOT_NAME, LOG_SUFFIX, parseSlot, mergeDay, expiredFiles, localDate } from './log-archive-core.mjs';
+import { SLOT_NAME, LOG_SUFFIX, parseSlot, mergeDay, normaliseDay, expiredFiles, localDate } from './log-archive-core.mjs';
+
+/** Bumped when the event key changes; older archives get repaired once. */
+const KEY_VERSION = 2;
 
 const DIR = process.env.HC3_LOG_ARCHIVE_DIR ?? '/var/lib/hc3-mcp/logs';
 const RETAIN_DAYS = Number(process.env.HC3_LOG_ARCHIVE_DAYS ?? 730);
@@ -110,6 +113,23 @@ async function main() {
   const devices = await findLogDevices();
   const index = readJson(join(DIR, 'index.json')) ?? { qas: {} };
   let slotsRead = 0, daysTouched = 0, eventsAdded = 0, logDevices = 0, removed = 0;
+
+  // Archives written before KEY_VERSION 2 keyed events on raw JSON text and
+  // hold duplicates that differ only in key order (19 Nov 2026). Repair once.
+  let repaired = 0;
+  if (!dryRun && (index.keyVersion ?? 1) < KEY_VERSION) {
+    for (const q of readdirSync(DIR, { withFileTypes: true })) {
+      if (!q.isDirectory()) continue;
+      for (const f of readdirSync(join(DIR, q.name))) {
+        if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(f)) continue;
+        const path = join(DIR, q.name, f);
+        const { doc, removed: n } = normaliseDay(readJson(path));
+        if (n > 0) { writeJsonAtomic(path, doc); repaired += n; }
+      }
+    }
+    index.keyVersion = KEY_VERSION;
+    log(`repaired archive to key version ${KEY_VERSION}: ${repaired} duplicate event(s) removed`);
+  }
 
   for (const dev of devices) {
     let vars;

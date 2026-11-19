@@ -47,25 +47,56 @@ export function parseSlot(value) {
   };
 }
 
-/** Identity of one event, for de-duplication across reads. */
+/**
+ * JSON with object keys sorted at every level, so two encodings of the same
+ * value compare equal.
+ *
+ * Why (19 Nov 2026). Lua's json.encode writes object keys in table-hash order,
+ * which changes when a QuickApp restarts and re-encodes today's events, or
+ * when a slot is decoded and written back. The same snapshot then arrives as
+ * different text, and keying on the raw text archived it twice: Daikin's
+ * 18 Nov file held 223 events for 134 real ones.
+ */
+export function canonical(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+  }
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+/** Identity of one event, for de-duplication across reads. Key order does not matter. */
 export function eventKey(e) {
-  return JSON.stringify([Number(e[0]), e[1], e[2] === undefined ? null : e[2]]);
+  return canonical([Number(e[0]), e[1], e[2] === undefined ? null : e[2]]);
+}
+
+function countKeys(list) {
+  const m = new Map();
+  for (const e of list) { const k = eventKey(e); m.set(k, (m.get(k) || 0) + 1); }
+  return m;
 }
 
 /**
  * Union of an archived day and a freshly read slot for the same date.
  * Events are kept in time order; ties keep the order they were first seen.
  * Returns { doc, added } where added is the number of events new to the archive.
+ *
+ * Union counts repeats. A QuickApp can genuinely log the same thing twice in
+ * one second (roomManager's 18 Nov slot held 8 such pairs), so an event the
+ * slot holds twice is kept twice; one it holds once is kept once, however
+ * many reads have seen it.
  */
 export function mergeDay(existing, slot, meta = {}) {
   const base = existing && Array.isArray(existing.ev) ? existing.ev : [];
-  const seen = new Set(base.map(eventKey));
+  const have = countKeys(base);
   const out = base.slice();
   let added = 0;
+  const taken = new Map();
   for (const e of slot.ev) {
     const k = eventKey(e);
-    if (seen.has(k)) continue;
-    seen.add(k);
+    const n = (taken.get(k) || 0) + 1;
+    taken.set(k, n);
+    if (n <= (have.get(k) || 0)) continue;
     out.push(e);
     added++;
   }
@@ -86,6 +117,25 @@ export function mergeDay(existing, slot, meta = {}) {
     ev: out,
   };
   return { doc, added };
+}
+
+/**
+ * One-off repair for files written before canonical keys: collapse events
+ * that differ only in key order. Returns { doc, removed }. Raw-identical
+ * repeats were already collapsed by the old key, so nothing genuine is lost;
+ * repeats still on the gateway come back on the next merge.
+ */
+export function normaliseDay(doc) {
+  if (!doc || !Array.isArray(doc.ev)) return { doc, removed: 0 };
+  const seen = new Set();
+  const ev = [];
+  for (const e of doc.ev) {
+    const k = eventKey(e);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    ev.push(e);
+  }
+  return { doc: { ...doc, ev }, removed: doc.ev.length - ev.length };
 }
 
 /** Date string N days before `today` (both YYYY-MM-DD, calendar arithmetic in UTC). */

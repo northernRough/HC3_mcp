@@ -3,7 +3,7 @@
 // (scripts/log-archive-core.mjs). No gateway needed.
 
 import assert from 'node:assert/strict';
-import { parseSlot, mergeDay, expiredFiles, daysBefore, eventKey, SLOT_NAME } from '../log-archive-core.mjs';
+import { parseSlot, mergeDay, normaliseDay, expiredFiles, daysBefore, eventKey, canonical, SLOT_NAME } from '../log-archive-core.mjs';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; };
@@ -103,6 +103,42 @@ t('daysBefore does calendar arithmetic across months and years', () => {
 t('retention removes only day files older than the window', () => {
   const files = ['2024-11-18.json', '2024-11-19.json', '2026-11-18.json', 'index.json', '2024-01-01.json.tmp'];
   assert.deepEqual(expiredFiles(files, '2026-11-19', 730), ['2024-11-18.json']);
+});
+
+// 19 Nov 2026: Lua re-encodes objects with keys in a different order after a
+// QuickApp restart, so the same event can arrive as different text.
+t('the same event with its keys in another order is one event', () => {
+  const a = [1795000000, 'snap', { u: 58, f: 38, c: { x: 1, y: 2 } }];
+  const b = [1795000000, 'snap', { c: { y: 2, x: 1 }, f: 38, u: 58 }];
+  assert.equal(eventKey(a), eventKey(b));
+  const first = mergeDay(null, parseSlot(JSON.stringify({ date: '2026-11-18', ev: [a] })), {}).doc;
+  const r = mergeDay(first, parseSlot(JSON.stringify({ date: '2026-11-18', ev: [b] })), {});
+  assert.equal(r.added, 0);
+  assert.equal(r.doc.ev.length, 1);
+});
+
+t('canonical sorts keys at every level and keeps arrays in order', () => {
+  assert.equal(canonical({ b: [2, { d: 1, c: 0 }], a: null }), '{"a":null,"b":[2,{"c":0,"d":1}]}');
+});
+
+t('a genuine repeat in the slot is kept, and not multiplied by later reads', () => {
+  const e = [1795000000, 'W', 'Fan-only speeds'];
+  const s = parseSlot(JSON.stringify({ date: '2026-11-18', ev: [e, e, [1795000001, 'I', 'x']] }));
+  const one = mergeDay(null, s, {});
+  assert.equal(one.doc.ev.length, 3);
+  const two = mergeDay(one.doc, s, {});
+  assert.equal(two.added, 0);
+  assert.equal(two.doc.ev.length, 3);
+});
+
+t('normaliseDay collapses key-order duplicates and leaves the rest', () => {
+  const doc = { date: '2026-11-18', ev: [
+    [1, 'snap', { a: 1, b: 2 }], [1, 'snap', { b: 2, a: 1 }], [2, 'I', 'x'],
+  ] };
+  const r = normaliseDay(doc);
+  assert.equal(r.removed, 1);
+  assert.equal(r.doc.ev.length, 2);
+  assert.equal(normaliseDay(r.doc).removed, 0);
 });
 
 console.log(`unit-log-archive: ${n} passed`);
