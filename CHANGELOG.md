@@ -2,6 +2,27 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.44.0] - 2026-11-19
+
+### Added
+
+- `get_debug_messages` takes `until` (epoch seconds), so `since` + `until`
+  reads a time window. HC3 ignores time filters, so it is applied locally;
+  newer messages outside the window no longer use up `limit`. `until` earlier
+  than `since` is refused. Friction: an agent asked for `to` on 18 Nov.
+- `scripts/probe-multi-return.mjs`: runs identical Lua in a throwaway
+  QuickApp and a throwaway scene and reports how many values
+  `fibaro.getGlobalVariable` / `fibaro.getValue` return in each.
+
+### Documented
+
+- In a QuickApp `fibaro.getGlobalVariable` returns `value, modified`; in a
+  scene it returns only the value. `tonumber(fibaro.getGlobalVariable(x))`
+  therefore raises "base out of range" in a QuickApp (silently, under pcall).
+  Bracket it: `tonumber((fibaro.getGlobalVariable(x)))`. Isolated 19 Nov from
+  a 17 Nov field finding; `fibaro.getValue` returns one value in both. Added to
+  the QuickApp and Lua scenes guides.
+
 ## [4.43.1] - 2026-11-19
 
 ### Fixed

@@ -1218,6 +1218,10 @@
           "type": "number",
           "description": "Epoch seconds. Only messages with timestamp >= this value are returned. Also stops pagination once the oldest fetched page is older than this."
         },
+        "until": {
+          "type": "number",
+          "description": "Epoch seconds. Only messages with timestamp <= this value are returned; with since, this gives a time window. Applied locally (HC3 ignores time filters), so newer messages are still paged through: raise maxPages for a window far in the past."
+        },
         "type": {
           "type": "string",
           "description": "Filter by message type.",

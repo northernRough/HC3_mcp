@@ -23,6 +23,10 @@ export const debug: ToolModule = {
             type: 'number',
             description: 'Epoch seconds. Only messages with timestamp >= this value are returned. Also stops pagination once the oldest fetched page is older than this.',
           },
+          until: {
+            type: 'number',
+            description: 'Epoch seconds. Only messages with timestamp <= this value are returned; with since, this gives a time window. Applied locally (HC3 ignores time filters), so newer messages are still paged through: raise maxPages for a window far in the past.',
+          },
           type: {
             type: 'string',
             description: 'Filter by message type.',
@@ -58,6 +62,7 @@ export const debug: ToolModule = {
     async get_debug_messages(hc3, args: {
       tagContains?: string;
       since?: number;
+      until?: number;
       type?: string;
       limit?: number;
       maxPages?: number;
@@ -65,12 +70,17 @@ export const debug: ToolModule = {
       const limit = args.limit ?? 100;
       const maxPages = args.maxPages ?? 10;
       const since = args.since;
+      const until = args.until;
+      if (since !== undefined && until !== undefined && until < since) {
+        throw new Error(`get_debug_messages: until (${until}) is earlier than since (${since}), so nothing can match. Nothing was read.`);
+      }
       const typeFilter = args.type;
       const tagNeedle = args.tagContains?.toLowerCase();
 
       const matches = (m: any) => {
         if (typeFilter && m.type !== typeFilter) return false;
         if (since !== undefined && m.timestamp < since) return false;
+        if (until !== undefined && m.timestamp > until) return false;
         if (tagNeedle && !(typeof m.tag === 'string' && m.tag.toLowerCase().includes(tagNeedle))) return false;
         return true;
       };
