@@ -1620,6 +1620,43 @@
     }
   },
   {
+    "name": "get_log_archive",
+    "description": "The long view of the QuickApps' own event logs (eventlog.lua), kept on the Pi for two years by the log-archive timer. The HC3 itself keeps only a few days, so for anything older this is the only record. With no `qa`, lists what is archived: each QuickApp's id, name, first and last day and day count. With `qa` (a QuickApp id, or part of its name), returns its events as [epochSeconds, kind, data], filtered by date range (`from`/`to`, YYYY-MM-DD or epoch seconds, default the last 7 days), `kind` (e.g. \"W\", \"E\", \"start\", \"snap\", or a list) and `contains` (case-insensitive text match on the event's data). Newest first by default; `limit` caps the result (default 200, max 5000) and `total` says how many matched. `dropped` per day counts events the QuickApp discarded for size before the Pi read them. Only works on the machine running the archive timer (the Pi): elsewhere it says the archive is absent rather than returning nothing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "qa": {
+          "description": "QuickApp id (number) or part of its name (string). Omit to list the archive."
+        },
+        "from": {
+          "description": "First day, YYYY-MM-DD or epoch seconds. Default: 7 days before `to`."
+        },
+        "to": {
+          "description": "Last day, YYYY-MM-DD or epoch seconds. Default: today."
+        },
+        "kind": {
+          "description": "Event kind or list of kinds to keep (e.g. \"W\", [\"W\",\"E\"]). Default: all."
+        },
+        "contains": {
+          "type": "string",
+          "description": "Keep only events whose data contains this text (case-insensitive)."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum events to return. Default 200, max 5000."
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "newest",
+            "oldest"
+          ],
+          "description": "Default newest first."
+        }
+      }
+    }
+  },
+  {
     "name": "get_network_status",
     "description": "Get network configuration and status information",
     "inputSchema": {

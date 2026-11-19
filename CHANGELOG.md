@@ -2,6 +2,22 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.43.0] - 2026-11-19
+
+### Added
+
+- QuickApp log archive on the Pi. `scripts/log-archive-pi.mjs`, run every 5
+  minutes by `deploy/hc3-log-archive.{service,timer}`, reads every
+  `eventlog.lua` log child and merges each day into
+  `/var/lib/hc3-mcp/logs/<qaId>/<date>.json`, kept for two years. Read-only on
+  the gateway; merges rather than copies, so events a QuickApp later drops for
+  size, or a day the ring overwrites, survive once read. Lets the QuickApps keep
+  a short buffer on the HC3 (30-day logs there lay behind the reboots of
+  13-18 Nov 2026) without losing the long view.
+- `get_log_archive`: lists the archive, or returns one QuickApp's archived
+  events filtered by date range, kind and text. Says plainly when the archive is
+  absent (any machine but the Pi) instead of returning nothing.
+
 ## [4.42.0] - 2026-11-15
 
 ### Added

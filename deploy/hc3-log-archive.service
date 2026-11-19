@@ -1,0 +1,47 @@
+[Unit]
+# Keep the long view of every QuickApp's eventlog.lua log on the Pi.
+# See scripts/log-archive-pi.mjs. The gateway keeps only a short buffer (a
+# 30-day log held on the HC3 lay behind the reboots of 13-18 Nov 2026); this
+# collects it into /var/lib/hc3-mcp/logs, one file per QuickApp per day, and
+# keeps two years.
+#
+# READ-ONLY on the gateway: it reads log devices and writes nothing there.
+Description=Archive HC3 QuickApp event logs to the Pi
+Documentation=file:/opt/hc3-mcp/src/scripts/log-archive-pi.mjs
+After=network-online.target hc3-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hc3mcp
+Group=hc3mcp
+WorkingDirectory=/opt/hc3-mcp/src
+
+# Same credentials the MCP service uses. Every line in that file must start
+# with the variable name: systemd silently drops indented lines, so never
+# write it with nano (autoindent). See DEPLOYMENT.md, troubleshooting.
+EnvironmentFile=/etc/hc3-mcp/.env
+
+# The archive lives OUTSIDE the git checkout. /opt/hc3-mcp/src must stay
+# pristine: pi-update.sh is `set -e` with a bare `git pull`, so anything that
+# dirties the tree fails the deploy and silently kills the hourly timer.
+# StateDirectory creates and chowns /var/lib/hc3-mcp for us.
+StateDirectory=hc3-mcp
+Environment=HC3_LOG_ARCHIVE_DIR=/var/lib/hc3-mcp/logs
+Environment=HC3_LOG_ARCHIVE_DAYS=730
+
+ExecStart=/usr/bin/node /opt/hc3-mcp/src/scripts/log-archive-pi.mjs
+
+# A run reads a handful of log devices with a short pause between them; a
+# minute or two is generous. The guard is against a hung gateway call.
+TimeoutStartSec=5min
+
+# Hardening. No MemoryDenyWriteExecute: V8 needs writable+executable pages
+# and on aarch64 that flag kills the process with SIGTRAP (DEPLOYMENT.md).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true

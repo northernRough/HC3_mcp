@@ -602,6 +602,43 @@ Notes:
   human at a phone, and whether Z-Wave devices actually received settings rather
   than merely being told. An all-clear implying full coverage is worse than none.
 
+### QuickApp log archive (3 minutes)
+
+QuickApps that include `eventlog.lua` keep their own event log on a hidden
+"<QA name> log" child, one variable per day. Holding 30 days of that on the
+gateway pushed HC3 memory to 98% and lay behind the reboots of 13-18 Nov 2026,
+so the long view lives here instead: `scripts/log-archive-pi.mjs` reads every
+log child every 5 minutes and merges it into `/var/lib/hc3-mcp/logs`, one file
+per QuickApp per day, kept for two years. The gateway then needs only a short
+buffer (3 days) to ride out the Pi being off.
+
+It is read-only on the gateway, and merges rather than copies: events a
+QuickApp later drops from a day for size, or a day the ring overwrites, stay in
+the archive once read.
+
+```bash
+sudo cp /opt/hc3-mcp/src/deploy/hc3-log-archive.service /opt/hc3-mcp/src/deploy/hc3-log-archive.timer /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now hc3-log-archive.timer
+```
+
+Force one run now and check what it collected:
+
+```bash
+sudo systemctl start hc3-log-archive.service && sudo journalctl -u hc3-log-archive -n 5 --no-pager
+```
+
+```bash
+ls /var/lib/hc3-mcp/logs/ && cat /var/lib/hc3-mcp/logs/index.json
+```
+
+Expect one directory per QuickApp id and a line like `9 log device(s), 120 day
+slot(s) read, ...`. Read it from any MCP client with `get_log_archive` (no
+arguments lists what is archived). Only shorten a QuickApp's `DAYS` in
+`eventlog.lua` after its full history shows up here.
+
 ### Logs
 
 ```bash
