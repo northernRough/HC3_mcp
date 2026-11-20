@@ -2,6 +2,17 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.45.1] - 2026-11-20
+
+### Fixed
+
+- HTTP transport accepts the bearer token with or without the `Bearer `
+  prefix. claude.ai's custom connector request header arrived as the bare
+  token, so a connector holding the right key was refused (401) and showed
+  only "couldn't connect".
+- A refused request now logs one line to the journal with the reason
+  (no header, bare or bearer, and the supplied length), never the key.
+
 ## [4.45.0] - 2026-11-20
 
 ### Added
