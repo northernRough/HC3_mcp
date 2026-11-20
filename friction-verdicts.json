@@ -282,6 +282,36 @@
       "signatureContains": "Either deviceId or name",
       "verdict": "by-design",
       "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard."
+    },
+    {
+      "tool": "get_debug_messages",
+      "verdict": "by-design",
+      "note": "Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard refusing a name the tool does not take (deviceId, to). One of them, 'to' on 18 Nov, showed a real gap: there was no end time. 4.44.0 adds `until`; the others were caller mistakes.",
+      "signature": "get_debug_messages: unknown argument '<v>'. Nothing was done. This tool accepts: tagContains, since, type, limit, maxPages."
+    },
+    {
+      "tool": "filter_devices",
+      "signatureContains": "did not answer",
+      "verdict": "untested",
+      "note": "Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established."
+    },
+    {
+      "tool": "restart_quickapp",
+      "signatureContains": "did not answer",
+      "verdict": "untested",
+      "note": "Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established."
+    },
+    {
+      "tool": "get_debug_messages",
+      "signatureContains": "did not answer",
+      "verdict": "untested",
+      "note": "Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established."
+    },
+    {
+      "tool": "get_debug_messages",
+      "signatureContains": "did you mean",
+      "verdict": "by-design",
+      "note": "Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard with a suggestion ('tag' -> 'tagContains'). Working as intended."
     }
   ],
   "findings": [
@@ -772,6 +802,14 @@
       "note": "Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the get_event_history failure row: 19-20 s server time, 15 s client timeout.",
       "resolvedIn": "4.35.0",
       "resolvedAt": 1794601741
+    },
+    {
+      "at": 1794925731,
+      "tool": "general",
+      "verdict": "confirmed",
+      "resolvedIn": "4.44.0",
+      "resolvedAt": 1795131206,
+      "note": "Isolated 19 Nov 2026 with scripts/probe-multi-return.mjs (identical Lua in a throwaway QuickApp and scene): fibaro.getGlobalVariable returns (value, modified) in a QuickApp and one value in a scene; fibaro.getValue returns one value in both. The original fix bracketed three calls; only the two getGlobalVariable ones mattered. Documented in both Lua guides."
     }
   ]
 }

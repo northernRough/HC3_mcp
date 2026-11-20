@@ -165,6 +165,23 @@ cannot rebuild itself that way; do it from a second, throwaway QuickApp.
 nil (verified 14 Nov 2026), and \`fibaro.setGlobalVariable\` on it writes nowhere
 without an error. An \`== nil\` existence check never fires.
 
+## fibaro.getGlobalVariable returns TWO values in a QuickApp: bracket it
+
+Inside a QuickApp, \`fibaro.getGlobalVariable(name)\` returns
+\`value, modifiedTimestamp\`; inside a Lua scene it returns only the value.
+So \`tonumber(fibaro.getGlobalVariable(name))\` passes the timestamp to
+\`tonumber\` as its base and raises "bad argument #2 to 'tonumber' (base out of
+range)". Under a pcall that is silent: on 17 Nov 2026 a cold-day A/C rule did
+nothing for an hour this way. Write \`tonumber((fibaro.getGlobalVariable(name)))\`
+(the extra brackets keep only the first value) or assign to a local first. The
+same applies to anything that takes a second argument: \`string.format\`
+arguments, \`table.insert\`, a function of your own.
+
+Verified 19 Nov 2026 with identical Lua in a throwaway QuickApp and scene
+(scripts/probe-multi-return.mjs): QuickApp count 2, scene count 1;
+\`fibaro.getValue\` returned one value in both. **A scene probe does not prove
+QuickApp behaviour**: the two runtimes do not share a \`fibaro\` library.
+
 ## fibaro.getValue returns only the value here
 
 Widely quoted as returning \`value, lastModified\`. On this gateway (5.2x) the

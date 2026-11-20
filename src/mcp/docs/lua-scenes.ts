@@ -219,6 +219,14 @@ Port it to a QuickApp.
   (lastModified, as widely quoted) is nil here. Read \`modified\` from
   \`api.get("/devices/"..id)\`.
 
+## Scene and QuickApp fibaro libraries differ: don't port a probe across
+
+In a scene \`fibaro.getGlobalVariable(name)\` returns one value; in a
+QuickApp it returns \`value, modifiedTimestamp\` (verified 19 Nov 2026,
+identical Lua in both). \`tonumber(fibaro.getGlobalVariable(name))\` therefore
+works here and raises in a QuickApp. Code tested in a scene and then moved into
+a QuickApp must bracket the call: \`tonumber((fibaro.getGlobalVariable(name)))\`.
+
 ## A missing global reads as "", not nil
 
 \`fibaro.getGlobalVariable("NoSuchGlobal")\` returns an EMPTY STRING (verified

@@ -24,13 +24,23 @@ export const rooms: ToolModule = {
         }
       },
       {
+        name: 'get_sections',
+        description: 'List room sections: the grouping above rooms (e.g. a "Bedrooms" section holding the bedroom and ensuite rooms). Reads GET /api/sections and GET /api/rooms and returns each section, in sortOrder, with its rooms ({id, name}). Rooms whose sectionID matches no section are listed under `unsectioned`. Pass sectionId for one section. Use the ids with create_room/modify_room `sectionID` to move a room between sections. Read-only.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sectionId: { type: 'number', description: 'Optional: return only this section.' },
+          },
+        },
+      },
+      {
         name: 'create_room',
         description: 'Create a new room via POST /api/rooms. Returns the room with its HC3-assigned id. Post-create verify by refetch.',
         inputSchema: {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Room display name' },
-            sectionID: { type: 'number', description: 'Parent section id' },
+            sectionID: { type: 'number', description: 'Parent section id (list them with get_sections).' },
             icon: { type: 'string', description: 'Icon name (e.g. "room_living"). Defaults to HC3 default if omitted.' },
             category: { type: 'string', description: 'Room category (e.g. "livingroom", "bedroom", "other").' },
             visible: { type: 'boolean', description: 'Visible in UI. Defaults true.' }
@@ -40,7 +50,7 @@ export const rooms: ToolModule = {
       },
       {
         name: 'modify_room',
-        description: 'Update room fields (name, sectionID, icon, category, visible, defaultSensors, defaultThermostat, sortOrder) via PUT /api/rooms/{id}. Read-modify-write + post-write verify.',
+        description: 'Update room fields (name, sectionID — ids from get_sections, icon, category, visible, defaultSensors, defaultThermostat, sortOrder) via PUT /api/rooms/{id}. Read-modify-write + post-write verify.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -84,6 +94,38 @@ export const rooms: ToolModule = {
     async get_room(hc3, args: { roomId: number }): Promise<any> {
       if (typeof args?.roomId !== 'number') throw new Error('get_room requires numeric roomId.');
       return await hc3.request(`/api/rooms/${args.roomId}`);
+    },
+
+    async get_sections(hc3, args: { sectionId?: number } = {}): Promise<any> {
+      if (args?.sectionId !== undefined && typeof args.sectionId !== 'number') {
+        throw new Error('get_sections: sectionId must be a number.');
+      }
+      const [sections, rooms] = await Promise.all([
+        hc3.request('/api/sections'),
+        hc3.request('/api/rooms'),
+      ]);
+      if (!Array.isArray(sections) || !Array.isArray(rooms)) {
+        throw new Error('get_sections: HC3 did not return arrays for /api/sections and /api/rooms.');
+      }
+      const ids = new Set(sections.map((x: any) => x.id));
+      const roomsOf = (id: number) => rooms
+        .filter((r: any) => r.sectionID === id)
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((r: any) => ({ id: r.id, name: r.name }));
+      const out = [...sections]
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((x: any) => ({ id: x.id, name: x.name, sortOrder: x.sortOrder, rooms: roomsOf(x.id) }));
+      if (args?.sectionId !== undefined) {
+        const one = out.find(x => x.id === args.sectionId);
+        if (!one) {
+          throw new Error(`get_sections: no section ${args.sectionId}. Sections: ${out.map(x => `${x.id} ${x.name}`).join(', ')}.`);
+        }
+        return one;
+      }
+      const unsectioned = rooms
+        .filter((r: any) => !ids.has(r.sectionID))
+        .map((r: any) => ({ id: r.id, name: r.name, sectionID: r.sectionID }));
+      return { sections: out, unsectioned };
     },
 
     async create_room(hc3, args: {

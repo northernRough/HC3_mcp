@@ -319,7 +319,8 @@ A condensed summary follows. See the live `tools/list` from the running server (
 - `delete_device` - Delete a single device by id. Refuses ids <10, Z-Wave physical devices (without allow_physical), and devices with children (without cascade). Post-delete verified
 - `control_device` - Invoke device actions (turnOn, turnOff, setValue, setColor, etc.)
 - `modify_device` - Edit top-level fields (name, roomID, enabled, visible) and nested properties in a single verified PUT
-- `get_rooms` - List rooms and sections
+- `get_rooms` - List rooms (each carries its sectionID)
+- `get_sections` - List room sections with the rooms in each; ids for create_room/modify_room sectionID
 - `get_room` - Get a single room by id
 - `create_room` - Create a new room (pre-validates 20-char name limit)
 - `modify_room` - Update a room via read-modify-write + verify

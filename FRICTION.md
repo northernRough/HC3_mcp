@@ -1,6 +1,6 @@
 # Friction triage
 
-_Generated 2026-11-13 19:44 UTC from 198 entries at `/var/lib/hc3-mcp/friction.jsonl` (the Pi, production)._
+_Generated 2026-11-19 23:37 UTC from 236 entries at `/var/lib/hc3-mcp/friction.jsonl`._
 
 
 Every row below is a **candidate, not a finding**. Re-test each against a live
@@ -29,7 +29,7 @@ yet.
 clear to become a finding.
 
 
-## Recurring failures — 59 distinct
+## Recurring failures — 79 distinct
 
 
 A tool failing the same way repeatedly is usually a missing or wrong
@@ -39,52 +39,283 @@ cheapest wins available.
 
 | Verdict | Count | Tool | Last | Message |
 |---|---|---|---|---|
-| by-design | 12 | `filter_devices` | 6d ago | filter_devices requires filters array. <br>_Argument guard refusing a malformed call before it reaches HC3._ |
-| by-design | 11 | `get_device_property` | 6d ago | get_device_property: no device 2370 on this HC3. Find the right id with find_devices_by_name or get_devices. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Not-found message working as intended. All 11 are device 2370, the harness fixture `deviceChild` in scripts/test/default-args.mjs, which no longer exists on this HC3: stale fixture, not a defect. Fix the fixture._ |
-| by-design | 10 | `get_device_parameters` | 6d ago | get_device_parameters: no device 2370 on this HC3. Find the right id with find_devices_by_name or get_devices. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Same stale harness fixture (device 2370)._ |
-| by-design | 9 | `get_device_property` | 6d ago | get_device_property requires a non-empty propertyName. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard; same harness run as the 2370 rows._ |
-| confirmed, fixed 4.27.0 | 7 | `get_device_property` | 74d ago | HTTP 404: Not Found <br>_A bare 404 naming neither the device nor the property. The tool now re-reads the device on 404 and says which of the two is missing, listing the properties that exist; HC3HttpError carries the method and path. New occurrences will not match this signature._ |
-| confirmed | 6 | `delete_device` | 6d ago | delete_device: post-delete verify failed — device 5061 still exists after DELETE. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Verify does ONE GET immediately after the DELETE. HC3 deletes asynchronously (child devices especially); callers confirmed 5070, 5071, 5072 gone moments later (findings 1793566471, 1794098351). A false failure invites a retry or a 'cannot delete' report. Fix: poll a few seconds before declaring failure._ |
-| confirmed | 5 | `report_finding` | 6d ago | report_finding requires tool. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
-| confirmed | 5 | `get_device_info` | 6d ago | HTTP 404: Not Found (GET /api/devices/3748) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bare 404 with none of the 'no device N on this HC3' wording the other tools gained in 4.27.0._ |
-| confirmed, fixed 4.30.0 | 5 | `manage_plugin_interfaces` | 74d ago | HTTP 403: Forbidden <br>_The endpoint is refused on 5.210.12 for add and delete, single and multi, on QuickApps of two types AND on non-QuickApp device 3385 — whose interfaces and `modified` timestamp were byte-identical after both arms. Catalogued in KNOWN_DEAD_ENDPOINTS.md; the tool now carries it. Not fixed, because there is nothing here to fix: two of the seven are this project's own probe._ |
-| confirmed | 3 | `get_event_history` | 0d ago | The operation was aborted due to timeout <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3 takes 19-20 s for /api/events/history regardless of window (1 day: 19.1 s, 7 days: 20.4 s, one device with objectType). The HTTP client aborts at 15 s (hc3-client.ts). Fix: longer timeout for this endpoint._ |
-| confirmed | 3 | `update_multiple_quickapp_files` | 5d ago | HTTP 500: Internal Server Error (PUT /api/quickApp/5046/files) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HTTP 500 when any submitted file does not yet exist, and the write is PARTIAL: files that exist are written (finding 1794143327 saw the new main running). Fix: list files first, create missing ones via POST, then PUT the rest; report per file._ |
-| by-design | 3 | `modify_device` | 12d ago | modify_device requires at least one of topLevel or properties with at least one field. <br>_Argument guard._ |
-| confirmed, fixed 4.21.2 | 3 | `get_icon` | 90d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
-| confirmed | 2 | `report_finding` | 6d ago | report_finding requires reproduction. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
-| by-design | 2 | `patch_quickapp_file` | 6d ago | patch_quickapp_file refused edit 1 of 1: The text was not found. It must match byte for byte, including indent <br>_A stale or mis-indented `old` refused with nothing written. Working as intended, though a run of these on one file usually means the caller is holding an out-of-date copy._ |
-| by-design | 2 | `update_climate_zone` | 12d ago | HTTP 400: Bad Request (PUT /api/panels/climate/14) - {"type":"ERROR","reason":"validation error","message":"mo <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3's own validation (minimum gap between heating and cooling setpoints per slot), and the message names the slot. Worth stating the rule in the tool description._ |
-| by-design | 2 | `create_global_variable` | 27d ago | create_global_variable requires a non-empty varName. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard._ |
-| confirmed, fixed 4.27.0 | 2 | `get_device_parameters` | 74d ago | HTTP 404: Not Found <br>_Same bare 404. The opening device read is the tool's only unguarded request, so every one of these was a device that does not exist; it now says so._ |
-| confirmed, fixed 4.21.2 | 2 | `get_icon` | 90d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
-| confirmed, fixed 4.18.0 | 2 | `create_scene` | 90d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`conditions` sent as a structure rather than a Lua source string. Refused locally now, with the Lua to send instead printed in the error._ |
-| confirmed, fixed 4.29.0 | 2 | `create_scene` | 92d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`content` omitted. HC3 rejected the create from inside its Lua engine, naming engine.lua rather than the missing argument. create_scene now supplies a body that subscribes to nothing and reports contentDefaulted._ |
-| by-design | 1 | `get_device_property` | 6d ago | get_device_property: device 4984 (Shading) has no property 'env'. It exposes 30: apiVersion, buildNumber, cate <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Informative not-found listing the properties that exist. But two of these asked for 'interfaces' and 'parentId', which are top-level device fields, not properties: the message should say so and point at get_device_info._ |
-| confirmed | 1 | `modify_device` | 10d ago | Cannot use 'in' operator to search for 'quickAppVariables' in {"viewLayout": {"$jason": {"body": {"header": {" <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `properties` arrived as a JSON string, and the handler crashed with a TypeError instead of refusing clearly. Fix: parse a JSON-string object or refuse with a plain message._ |
-| by-design | 1 | `patch_quickapp_file` | 10d ago | patch_quickapp_file refused edit 3 of 3: Found 120, expected 1. Set count=120 to change them all, or extend 'o <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: ambiguous `old`, nothing written._ |
-| by-design | 1 | `patch_quickapp_file` | 11d ago | patch_quickapp_file: edits must be a non-empty array of {old, new} objects. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard._ |
-| confirmed | 1 | `report_finding` | 12d ago | report_finding requires expected. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
-| by-design | 1 | `update_climate_zone` | 12d ago | HTTP 400: Bad Request (PUT /api/panels/climate/16) - {"type":"ERROR","reason":"validation error","message":"mo <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3's own validation (minimum gap between heating and cooling setpoints per slot), and the message names the slot. Worth stating the rule in the tool description._ |
-| untested | 1 | `filter_devices` | 12d ago | HTTP 400: Bad Request (POST /api/devices/filter) - {"type":"ERROR","reason":"Invalid JSON","message":"get_valu <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 rejecting a filter with a null value. Probably the caller; the tool could refuse null filter values before sending._ |
-| by-design | 1 | `control_device` | 12d ago | Device 4739 (a bedroom suite A/C) does not declare action 'UIAction'. Valid actions for this device: setAutoOff, t <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
-| confirmed | 1 | `modify_device` | 12d ago | HTTP 404: Not Found (PUT /api/devices/4739) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 answers 404 for an EXISTING device when it refuses a field: a `type` change (finding 1786897950) and viewLayout on a QuickAppChild, which uses uiView (1793551362). Reads as 'wrong id'. Fix: on 404, re-read the device; if it exists, say a field was refused and name the known cases._ |
-| confirmed | 1 | `report_finding` | 12d ago | report_finding requires actual. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
-| by-design | 1 | `delete_device` | 12d ago | delete_device refuses device 3437 (guest thermostat): not a QuickApp and not an explicitly-installed plugin (i <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin._ |
-| by-design | 1 | `delete_device` | 12d ago | delete_device refuses device 3438 (m.suite thermostat): not a QuickApp and not an explicitly-installed plugin  <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin._ |
-| by-design | 1 | `delete_device` | 12d ago | delete_device refuses device 3470 (b.suite thermostat): not a QuickApp and not an explicitly-installed plugin  <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin._ |
-| by-design | 1 | `delete_device` | 12d ago | delete_device refuses device 3479 (principle bed thermostat): not a QuickApp and not an explicitly-installed p <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Guard: not a QuickApp or explicitly installed plugin._ |
-| confirmed | 1 | `set_quickapp_variable` | 13d ago | QuickApp variable 'undefined' does not exist on device 4739. Known variables: daikinId, defaultCoolingSetpoint <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). "QuickApp variable 'undefined'": the call carried no name and nothing checked. Same missing-argument class as get_quickapp_variable's false 'exists:false' (finding 1794098612). Fix: require name._ |
-| by-design | 1 | `audit_id_references` | 13d ago | Either deviceId or name must be provided. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard._ |
-| by-design | 1 | `get_device_property` | 13d ago | get_device_property: device 5045 (TEST zone thermostat (delete)) has no property 'interfaces'. It exposes 52:  <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Informative not-found listing the properties that exist. But two of these asked for 'interfaces' and 'parentId', which are top-level device fields, not properties: the message should say so and point at get_device_info._ |
-| by-design | 1 | `patch_quickapp_file` | 13d ago | patch_quickapp_file refused: file 'main' on device 4742 has changed since you read it. Expected md5 7d63b18aba <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). expectedHash guard working._ |
-| by-design | 1 | `get_device_property` | 17d ago | get_device_property: device 4638 (OW Current weather) has no property 'parentId'. It exposes 20: categories, d <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Informative not-found listing the properties that exist. But two of these asked for 'interfaces' and 'parentId', which are top-level device fields, not properties: the message should say so and point at get_device_info._ |
+| by-design | 12 | `filter_devices` | 12d ago | filter_devices requires filters array. <br>_Argument guard refusing a malformed call before it reaches HC3._ |
+| by-design, fixed 4.37.0 | 11 | `get_device_property` | 12d ago | get_device_property: no device 2370 on this HC3. Find the right id with find_devices_by_name or get_devices. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Not-found message working as intended. All 11 are device 2370, the harness fixture `deviceChild` in scripts/test/default-args.mjs, which no longer exists on this HC3: stale fixture, not a defect. Fix the fixture._ |
+| by-design, fixed 4.37.0 | 10 | `get_device_parameters` | 12d ago | get_device_parameters: no device 2370 on this HC3. Find the right id with find_devices_by_name or get_devices. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Same stale harness fixture (device 2370)._ |
+| by-design | 9 | `get_device_property` | 12d ago | get_device_property requires a non-empty propertyName. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard; same harness run as the 2370 rows._ |
+| confirmed, fixed 4.27.0 | 7 | `get_device_property` | 80d ago | HTTP 404: Not Found <br>_A bare 404 naming neither the device nor the property. The tool now re-reads the device on 404 and says which of the two is missing, listing the properties that exist; HC3HttpError carries the method and path. New occurrences will not match this signature._ |
+| confirmed, fixed 4.35.0 | 6 | `delete_device` | 12d ago | delete_device: post-delete verify failed — device 5061 still exists after DELETE. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Verify does ONE GET immediately after the DELETE. HC3 deletes asynchronously (child devices especially); callers confirmed 5070, 5071, 5072 gone moments later (findings 1793566471, 1794098351). A false failure invites a retry or a 'cannot delete' report. Fix: poll a few seconds before declaring failure._ |
+| confirmed, fixed 4.35.0 | 5 | `report_finding` | 12d ago | report_finding requires tool. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
+| confirmed, fixed 4.36.0 | 5 | `get_device_info` | 12d ago | HTTP 404: Not Found (GET /api/devices/3748) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Bare 404 with none of the 'no device N on this HC3' wording the other tools gained in 4.27.0._ |
+| confirmed, fixed 4.30.0 | 5 | `manage_plugin_interfaces` | 80d ago | HTTP 403: Forbidden <br>_The endpoint is refused on 5.210.12 for add and delete, single and multi, on QuickApps of two types AND on non-QuickApp device 3385 — whose interfaces and `modified` timestamp were byte-identical after both arms. Catalogued in KNOWN_DEAD_ENDPOINTS.md; the tool now carries it. Not fixed, because there is nothing here to fix: two of the seven are this project's own probe._ |
+| by-design | 3 | `get_debug_messages` | 2d ago | get_debug_messages: unknown argument 'deviceId'. Nothing was done. This tool accepts: tagContains, since, type <br>_Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard refusing a name the tool does not take (deviceId, to). One of them, 'to' on 18 Nov, showed a real gap: there was no end time. 4.44.0 adds `until`; the others were caller mistakes._ |
+| untested | 3 | `calibrate_dimmer` | 5d ago | calibrate_dimmer: writing parameter 13 = 1 (device calibration) sent no radio frames to node 43, so it did not |
+| untested | 3 | `calibrate_dimmer` | 5d ago | calibrate_dimmer: another calibration is running. One at a time: the sweeps read the mesh. |
+| confirmed, fixed 4.35.0 | 3 | `get_event_history` | 7d ago | The operation was aborted due to timeout <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3 takes 19-20 s for /api/events/history regardless of window (1 day: 19.1 s, 7 days: 20.4 s, one device with objectType). The HTTP client aborts at 15 s (hc3-client.ts). Fix: longer timeout for this endpoint._ |
+| confirmed, fixed 4.35.0 | 3 | `update_multiple_quickapp_files` | 11d ago | HTTP 500: Internal Server Error (PUT /api/quickApp/5046/files) <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HTTP 500 when any submitted file does not yet exist, and the write is PARTIAL: files that exist are written (finding 1794143327 saw the new main running). Fix: list files first, create missing ones via POST, then PUT the rest; report per file._ |
+| by-design | 3 | `modify_device` | 18d ago | modify_device requires at least one of topLevel or properties with at least one field. <br>_Argument guard._ |
+| confirmed, fixed 4.21.2 | 3 | `get_icon` | 96d ago | get_icon: could not fetch 'User1053' (device, .png). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
+| by-design | 2 | `get_debug_messages` | 5d ago | get_debug_messages: unknown argument 'tag' (did you mean 'tagContains'?). Nothing was done. This tool accepts: <br>_Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard with a suggestion ('tag' -> 'tagContains'). Working as intended._ |
+| untested | 2 | `calibrate_dimmer` | 5d ago | calibrate_dimmer: the light drew no measurable power (max 0 W). Is the load connected, or its power reporting  |
+| confirmed, fixed 4.35.0 | 2 | `report_finding` | 12d ago | report_finding requires reproduction. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Nine refusals, one missing field at a time (tool, reproduction, expected, actual), so a caller can need four round trips to file one finding, the moment findings are likeliest to be dropped. Fix: name every missing field in one error._ |
+| by-design | 2 | `patch_quickapp_file` | 12d ago | patch_quickapp_file refused edit 1 of 1: The text was not found. It must match byte for byte, including indent <br>_A stale or mis-indented `old` refused with nothing written. Working as intended, though a run of these on one file usually means the caller is holding an out-of-date copy._ |
+| by-design | 2 | `update_climate_zone` | 18d ago | HTTP 400: Bad Request (PUT /api/panels/climate/14) - {"type":"ERROR","reason":"validation error","message":"mo <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3's own validation (minimum gap between heating and cooling setpoints per slot), and the message names the slot. Worth stating the rule in the tool description. Rule stated in the tool description since 4.37.0._ |
+| by-design | 2 | `create_global_variable` | 33d ago | create_global_variable requires a non-empty varName. <br>_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Argument guard._ |
+| confirmed, fixed 4.27.0 | 2 | `get_device_parameters` | 80d ago | HTTP 404: Not Found <br>_Same bare 404. The opening device read is the tool's only unguarded request, so every one of these was a device that does not exist; it now says so._ |
+| confirmed, fixed 4.21.2 | 2 | `get_icon` | 96d ago | get_icon: could not fetch 'User1052' (device, .svg). HC3 returns 200 with a placeholder for missing icons rath <br>_The candidate paths omitted a segment: user device icons live at /assets/userIcons/devices/User<N>/. The tool's own error text asserted they were not served under any /assets path, which was a wrong negative, and a unit test pinned that assertion in place._ |
+| confirmed, fixed 4.18.0 | 2 | `create_scene` | 96d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`conditions` sent as a structure rather than a Lua source string. Refused locally now, with the Lua to send instead printed in the error._ |
+| confirmed, fixed 4.29.0 | 2 | `create_scene` | 98d ago | HTTP 400: Bad Request - {"type":"ERROR","reason":"SceneValidationError","message":"SceneError: /opt/fibaro/lua <br>_`content` omitted. HC3 rejected the create from inside its Lua engine, naming engine.lua rather than the missing argument. create_scene now supplies a body that subscribes to nothing and reports contentDefaulted._ |
+| untested | 1 | `get_debug_messages` | 1d ago | HC3 did not answer GET /api/debugMessages within 15 s. <br>_Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established._ |
+| untested | 1 | `restart_quickapp` | 1d ago | HC3 did not answer POST /api/plugins/restart within 15 s. <br>_Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established._ |
+| untested | 1 | `filter_devices` | 1d ago | HC3 did not answer POST /api/devices/filter within 15 s. <br>_Triaged 19 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Three different tools timed out at 15 s within two minutes on 18 Nov 18:24-18:26: the gateway stopped answering, not this tool. Same week as the HC3 reboots of 13-18 Nov. Cause on the HC3 side not established._ |
+| by-design | 1 | `control_device` | 1d ago | Device 3679 (wall & recess) does not declare action 'poll'. Valid actions for this device: configureFavoritePo <br>_The pre-check working. HC3 silently accepts and drops invalid actions on QuickApps with an empty actions map, so this refusal is the only signal a caller gets._ |
+| untested | 1 | `update_device_property` | 4d ago | update_device_property does not write wakeUpTime: it changes only a stale copy on the device record and never  |
+| untested | 1 | `get_quickapp_variable` | 5d ago | get_quickapp_variable: unknown argument 'variableName'. Nothing was done. This tool accepts: deviceId, name. |
+| untested | 1 | `get_devices` | 5d ago | get_devices: unknown argument 'visible'. Nothing was done. This tool accepts: roomId, deviceType, interface. |
+| untested | 1 | `calibrate_dimmer` | 5d ago | calibrate_dimmer: writing parameter 2 = 99 (open the maximum for the sweep) sent no radio frames to node 43, s |
+| untested | 1 | `calibrate_dimmer` | 5d ago | calibrate_dimmer: writing parameter 50 = 2 (power reports every 2% change, for the sweep) sent no radio frames |
+| untested | 1 | `patch_quickapp_file` | 5d ago | patch_quickapp_file: unknown arguments 'oldText', 'newText'. Nothing was done. This tool accepts: deviceId, fi |
+| untested | 1 | `get_device_parameters` | 5d ago | get_device_parameters: refreshFromDevice must be an array of up to 20 parameter numbers (1-255). |
+| untested | 1 | `get_zwave_node_diagnostics` | 5d ago | get_zwave_node_diagnostics: unknown argument 'nodeId'. Nothing was done. This tool accepts: min_outgoing_faile |
+| untested | 1 | `find_devices_by_name` | 6d ago | find_devices_by_name: unknown argument 'exact' (did you mean 'exactMatch'?). Nothing was done. This tool accep |
+| untested | 1 | `get_quickapp_variable` | 6d ago | get_quickapp_variable: missing required argument: name (Variable name). Nothing was done. |
 
 
-## Submitted findings — 62
+## Submitted findings — 72
 
 
-### `set_quickapp_variable` — 0d ago
+### `general` — 2d ago
+
+
+**Verdict:** confirmed, fixed 4.44.0
+
+
+_Isolated 19 Nov 2026 with scripts/probe-multi-return.mjs (identical Lua in a throwaway QuickApp and scene): fibaro.getGlobalVariable returns (value, modified) in a QuickApp and one value in a scene; fibaro.getValue returns one value in both. The original fix bracketed three calls; only the two getGlobalVariable ones mattered. Documented in both Lua guides._
+
+
+**Expected:** tonumber(fibaro.getGlobalVariable(name)) returns the global's numeric value inside a QuickApp, as it does inside a Lua scene.
+
+
+**Actual:** Inside QuickApp 5046 the expression failed (caught by pcall), so a cold-day rule never applied. Wrapping the call in extra brackets, tonumber((fibaro.getGlobalVariable(name))), fixed it at once: band went from 22.0-24.0 (schedule) to 22.0-26.0 (schedule, cold day). The same unbracketed expression in a Lua scene returned 12 correctly. Likely cause: in a QuickApp fibaro.getGlobalVariable and fibaro.getValue return (value, modifiedTimestamp), and tonumber takes the timestamp as a number base and errors; in a scene they appear to return one value.
+
+
+**Reproduction:**
+
+Scene 829 (deleted after): pcall(function() return tonumber(fibaro.getGlobalVariable('ColdDayBelowC')) end) -> true 12; same with getValue(4916,'value') -> true 8.30. QA 5046: identical expressions inside pcall made the rule silently not apply; the only change was adding the extra brackets (patch hash 6a2a9a03 -> 3a7cf6e9), after which it applied. Not isolated which of the three calls (two globals, one getValue) failed; all three were bracketed in one edit.
+
+
+**Cost:** Cold-day A/C hold silently did nothing for about an hour on a live system. Suggest adding to get_hc3_quickapp_programming_guide: always bracket fibaro.getGlobalVariable / fibaro.getValue when passing to tonumber, and note that a scene probe does not prove QuickApp behaviour.
+
+
+### `update_device_property` — 4d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Changing a battery device's wake-up interval through the device record (properties.wakeUpTime, via update_device_property or modify_device) should reconfigure the device.
+
+
+**Actual:** properties.wakeUpTime is a stale mirror that nothing uses. The real wake-up configuration is a separate Z-Wave API, found in the web UI bundle (wakeUpService):
+- GET /api/zwave/wake_ups/{nodeId} returns {addr, lastTime, expectedNextTime, configuration:{interval, destination}, intervalDefinition:{min,max,default}}.
+- PUT /api/zwave/wake_ups/{nodeId}/configuration with {destination, interval} returns 202 {actionId} and queues a setConfiguration in GET /api/zwave/mailbox/{nodeId}/wake_ups. That action is delivered at the next wake, and the UI shows a spinner until then.
+- POST /api/zwave/mailbox/{nodeId}/wake_ups/clear clears the queue.
+Verified on node 147 (FGMS001): the UI set 300 s while the sensor was awake, and the sensor then woke unprompted at 14:02:48, exactly 300 s after its last wake. /api/zwave/wake_ups/147 showed interval 300, while every /api/devices record for node 147 still showed wakeUpTime 43200. In the other direction, update_device_property wakeUpTime=600 changed only the device record and the device never woke on 10 minutes.
+
+
+**Reproduction:**
+
+One variable, the write path. A: update_device_property(4905, wakeUpTime, 600) plus one manual wake: no self-wake in 15 minutes, and /api/zwave/wake_ups unchanged. B: PUT /api/zwave/wake_ups/147/configuration {interval:300} (UI) plus one wake: self-wake 300 s later, and wake_ups reports interval 300, while devices/4905 wakeUpTime still says 43200.
+
+
+**Cost:** update_device_property and modify_device on wakeUpTime look as if they worked but never touch the device, and the record they read back can contradict the device. Suggested fix: a get/set_wake_up tool on /api/zwave/wake_ups (with the mailbox for pending actions and expectedNextTime), plus a silent_writes entry saying properties.wakeUpTime is not authoritative. Also: expectedNextTime makes waiting on a wake deterministic.
+
+
+### `update_device_property` — 4d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** After update_device_property(wakeUpTime=600) on a sleeping FGMS001 battery sensor, the next wake should transmit Wake Up Interval Set, and the sensor should then wake unprompted about every 10 minutes.
+
+
+**Actual:** The call returned null, and HC3's record changed to 600 at once with 0 frames sent. The sensor was woken by opening its cover at 13:37:21: 8 frames went out at 13:37:27 and 9 more when the cover closed at 13:38:05. After that it never woke unprompted. From 13:38:05 to 13:53:15 not one outgoing frame was sent; the only incoming frames were a motion clear at 13:39:05 and a temperature report at 13:53:14 (p62 = 900 s measuring cycle). No self-wake came anywhere near 13:48.
+
+
+**Reproduction:**
+
+Variable: the wakeUpTime value queued through update_device_property (POST /api/plugins/updateProperty), and nothing else. 1) The record shows 43200. Call update_device_property(4905, wakeUpTime, 600). 2) Wake the sensor once by opening and closing its cover. 3) Don't touch the sensor or the web UI. Watch the outgoing count in /api/zwave/nodes/diagnostics/transmissions and check /api/events/history for tamper events. Result: no unprompted wake within 15 minutes. The earlier run (00:3x) was confounded by manual wakes and showed the same: no 10-minute wakes. Not isolated: I can't tell whether the plugin write path never queues Wake Up Interval Set, or whether HC3 queues it but the 8 frames sent at the wake didn't include it. I haven't tested the web UI / PUT /api/devices path, which might transmit.
+
+
+**Cost:** Two clean-ish tests point the same way: update_device_property wakeUpTime changes only HC3's record and does not reconfigure the device. A read-back of wakeUpTime therefore proves nothing about the device. Suggested fix: say this in the tool description and in silent_writes, and test PUT /api/devices/{id} properties.wakeUpTime (modify_device) as the path that might actually transmit. Side effect: the record was left showing 600 when the device was probably still on 43200; I restored the record to 43200.
+
+
+### `get_system_info` — 4d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** No documented way to read HC3 uptime or last start time; an earlier session concluded serverStatus is a 'last alive' heartbeat and that CPU jiffies from get_diagnostics could not be converted to uptime.
+
+
+**Actual:** Working method, 15 Nov 2026, firmware 5.220.15. (1) get_system_info.serverStatus is the time the HC3 server process last started, not a heartbeat: it read 1794718868 (05:01:08) at 11:47, 6 h 46 min later, and matches the restart seen in event history (no events 04:56:27 to 05:01:46, then the system's own push 'The system was automatically rebooted due to the detection of an unexpected problem' at 05:02:07). (2) get_diagnostics cpuLoad user+system+idle per core summed to 2,367,347 to 2,381,762 at 11:47:20; at 100 Hz that is 6 h 35 min to 6 h 37 min, i.e. the OS booted at about the same time (the shortfall of about 3% is the fields not returned: iowait, irq, softirq). So the counters are 100 Hz and give OS uptime, which separates a full OS reboot from a server-process restart. (3) The auto-reboot push is recorded in /events/history as DeviceActionRanEvent sendPush on each mobile device id, so past watchdog reboots can be listed by searching those args for 'rebooted'.
+
+
+**Reproduction:**
+
+Single observation after one watchdog reboot; not repeated. Compare serverStatus with now and with the cpuLoad sum on a gateway whose last restart time is known another way. Not isolated: whether serverStatus also changes on a server-process restart without an OS reboot (on 13 Nov 2026 the event gap was only 23 s, 03:45:45 to 03:46:08, with no reboot push, which suggests it does).
+
+
+**Cost:** Suggest a get_uptime tool or fields in get_system_info: serverStartedAt (serverStatus) and osUptimeSeconds (cpu jiffies / 100), plus a list of auto-reboot pushes. Saves a probe scene each time a restart is investigated.
+
+
+_Reported by Claude session 15 Nov 2026_
+
+
+### `update_device_property` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Determine whether a wakeUpTime change made through the device record is transmitted to a sleeping device on its next wake.
+
+
+**Actual:** STILL UNANSWERED (15 Nov 2026, FGMS001 node 147). Frame counting cannot settle it: a wake with nothing queued sends 8 or 9 frames, and an interval-only wake sent 9. A 'self-wake' at 00:48:58, 10.5 min after a 600 s interval was queued and delivered, looked like proof but was not: the event history shows 'Tampering, product cover removed' at 00:48:53 and a lux jump, i.e. a person opened the sensor. Lesson: before calling any wake unprompted, check the event history for tamper / motion events in the preceding seconds. Also seen: each wake tends to bring a second burst ~40 s later; and readWholeConfiguration (web UI) runs show as DeviceActionRanEvent with isSupportedByDevice:false.
+
+
+**Reproduction:**
+
+Not isolated. Clean method: queue only wakeUpTime=600, wake once by hand, close the cover, then leave the device AND the HC3 UI untouched; confirm via event history that no tamper/motion precedes the next burst; an unprompted wake ~600 s later proves delivery. Queue the 43200 restore only after that.
+
+
+**Cost:** A false 'proven' was nearly recorded. Device may be left on a 600 s wake-up interval (battery drain) until verified.
+
+
+_Reported by Claude session 15 Nov 2026 (sleeping-device test, correction)_
+
+
+### `set_device_parameter` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Confirm how parameter writes to a sleeping battery device behave (previously an untested claim in the tool's outcome text).
+
+
+**Actual:** FGMS001 node 147 (root 4905), asleep, 15 Nov 2026, fw 5.220.15. set_device_parameter p40 50->51: 0 frames out, cache stayed 50, pendingActions stayed false. Device woken by hand (B button x3) at 00:32:13: within 2 s 11 frames went out and the cache read 51. So the write is QUEUED and delivered on the next wake, and pendingActions gives no sign of the queue (CONFIRMED). Also: the event history logged the action as DeviceActionRanEvent setConfiguration args [40,2,51] with "isSupportedByDevice": false, although the device took the value — that flag is not evidence of failure. Separately, update_device_property wakeUpTime 43200->43260 changed the device RECORD immediately (read-back 43260) with 0 frames and pendingActions false; whether the Wake Up Interval Set was transmitted on the wake is NOT isolated (the 11 frames also include HC3's routine sensor refreshes). update_device_property returned null.
+
+
+**Reproduction:**
+
+Single variable per arm: (1) queue only a parameter write on a sleeping device -> no frames, cache unchanged, pendingActions false; manual wake -> frames out, cache updated. Done. (2) For wakeUpTime still to do: a control wake with nothing queued (baseline frame count), then a wake with only the wakeUpTime change queued; compare outgoing frame counts.
+
+
+**Cost:** The set_device_parameter battery note is now verified; tools should not treat isSupportedByDevice:false as a failure. update_device_property's read-back of wakeUpTime proves only the record, not the device — its description should say so until the delivery test is done.
+
+
+_Reported by Claude session 15 Nov 2026 (sleeping-device test)_
+
+
+### `get_hc3_quickapp_programming_guide` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Undocumented here. Widely repeated advice: define a global function onAction(id, event) at top level of the QuickApp to replace the default handler (and its "onAction: {json}" trace line); event.deviceId identifies the target.
+
+
+**Actual:** Working method found on QA 5046, 14 Nov 2026. (1) A top-level `function onAction` in main is still the global at onInit (probe printed true) but HC3 replaces it with its own after onInit returns (probe 3 s later printed false; a marker inside my function never ran and the trace kept printing). (2) Re-assigning it from `setTimeout(function() onAction = mine end, 0)` inside onInit sticks: the "onAction:" trace stops and my function is called. (3) In my function event.deviceId was nil (warning logged: "Action setHeatingThermostatSetpoint for unknown child nil") although the default trace prints a deviceId; the device id is the first argument `id`. Dispatch with `local devId = tonumber(event.deviceId or id)` then quickApp:callAction / quickApp.childDevices[devId]:callAction(event.actionName, table.unpack(event.args or {})) works for child thermostat actions and for UIAction on the parent (verified by a tile button toggling). Globals at onInit include onAction but no onUIEvent; QuickApp has callAction, no actionHandler/UIHandler.
+
+
+**Reproduction:**
+
+Single variable each step on QA 5046: top-level definition only -> trace persists, marker silent. Add setTimeout(0) re-assignment in onInit -> trace gone, marker path runs, but deviceId nil. Change event.deviceId to (event.deviceId or id) -> child action handled (override set and cleared on child 5069), no trace line.
+
+
+**Cost:** Suggested addition to 'gotchas': how to silence the default onAction trace (190 of 212 lines in 10 h on one QA). Cost here: one failed fix and about 45 s in which actions to 5046's children were dropped while event.deviceId was trusted.
+
+
+_Reported by Claude session 14 Nov 2026_
+
+
+### `get_hc3_quickapp_programming_guide` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Per guide 'gotchas' ("A QuickApp thermostat in a climate zone does not get every setpoint"): a QuickApp thermostat in a climate zone does NOT receive setHeating/CoolingThermostatSetpoint at schedule slot changes.
+
+
+**Actual:** On 14 Nov 2026 (firmware as running that day) Room Climate QA 5046's 14 hvacSystemAuto/hvacSystemHeat children each received setHeatingThermostatSetpoint / setCoolingThermostatSetpoint with "manual":false within 1 s of 15:00, 15:30, 17:00, 17:30, 18:00, 19:30, 20:45, 22:00, 23:00 and 23:30: 19 actions per burst, sent to every child including rooms whose value did not change. Values match the zones' new slot values (e.g. 23:30: 5065 heat 23 -> 19, 5067 22.5 -> 18).
+
+
+**Reproduction:**
+
+Not isolated. Observed in get_debug_messages tagContains CLIMATE-5046 (default onAction trace). I have not established the sender: it may be the climate panel (behaviour changed since the 1 Nov test, or that test missed it), or another QuickApp/scene calling the children. Check with get_event_history DeviceActionRanEvent on 5069 around a schedule boundary. No setThermostatMode was seen in the bursts.
+
+
+**Cost:** The guide entry may be wrong or out of date. Room Climate treats an incoming setpoint equal to the zone's own value as 'clear the override', so these bursts end tile/Madoka overrides early.
+
+
+_Reported by Claude session 14 Nov 2026_
+
+
+### `general` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Follow-up to the limited-user lockout finding: how long the lockout lasts.
+
+
+**Actual:** Admin requests from the Pi were refused (401) at ~23:31 and worked again (200) at the first re-check at 23:33, 14 Nov 2026. Lockout lasted under ~2 minutes after 12 failed Basic-auth requests. MCP server tools worked normally afterwards.
+
+
+**Reproduction:**
+
+Single observation; one re-check after 120 s, no requests in between. Duration may scale with the number of failures; not tested.
+
+
+**Cost:** Short, self-clearing, but a scripted credential loop still blocks every account on the host (including MCP server and snapshot) while it lasts.
+
+
+_Reported by Claude session 14 Nov 2026_
+
+
+### `general` — 5d ago
+
+
+**Verdict:** untested
+
+
+**Expected:** Creating a limited HC3 user (POST /api/users), setting its password as the admin, and test-reading /api/zwave/* as that user, without affecting the admin login.
+
+
+**Actual:** 1) POST /api/users {name,type:'user'} -> 400 MISSING_PARAMETER "email: missing required parameter". With email added -> 201 (user 5081).
+2) PUT /api/users/5081 {password,passwordConfirm} as superuser -> 403 {"reason":"Password change forbidden","message":"Only the user can change the password"}. So the new user has NO usable password via REST.
+3) 12 Basic-auth requests as that user (wrong/unset password) from the Pi: /api/zwave/... answered 403 nginx HTML page, /api/devices and /api/users answered 401.
+4) Immediately after, the SUPERUSER's own requests from the same host answered 401 on /api/devices/3749 and /api/users/2 (and a rights PUT mid-sequence returned 401). /api/settings/info still 200 (unauthenticated). Looks like an IP-level failed-login lockout covering every account from that address, including the MCP server's.
+
+
+**Reproduction:**
+
+Not fully isolated. Sequence: create user 5081; admin PUT password -> 403; then 12 GETs with Basic [redacted] hc3-reader:<unset password> within ~10 s. Admin worked immediately before (200 on create/rights PUT), 401 immediately after. Not yet tested: how many failed logins trigger it, how long it lasts, whether it is per-IP or per-session. Whether a limited user with advanced.zWave can read /api/zwave/* is UNANSWERED (the user never had a valid password) — do not record it as impossible.
+
+
+**Cost:** Locked the MCP server and nightly snapshot out of HC3 (same host) for an unknown period. Suggested: document in api-notes 'users' — email required on create; admin cannot set another user's password (user must set it, e.g. via invite/web UI); never test a credential in a loop: one failed attempt, then stop.
+
+
+_Reported by Claude session 14 Nov 2026 (limited-user test for scene 82 / QA 4826)_
+
+
+### `set_quickapp_variable` — 6d ago
 
 
 **Verdict:** confirmed, fixed 4.34.0
@@ -110,7 +341,7 @@ On 4984: set_quickapp_variable winterOutdoorC 15 (untyped var, previous "12") re
 _Reported by Claude session 13 Nov 2026, Shading 4984 restore_
 
 
-### `general` — 0d ago
+### `general` — 6d ago
 
 
 **Verdict:** confirmed, fixed 4.34.0
@@ -136,7 +367,7 @@ Not a defect with a single variable; a missing capability. Ask the MCP for "the 
 _Reported by Claude session 13 Nov 2026, Shading 4984 restore_
 
 
-### `general` — 0d ago
+### `general` — 6d ago
 
 
 **Verdict:** confirmed
@@ -182,7 +413,7 @@ The wrong assumption is the expensive part: "disabled = parked = safe" is how th
 _Reported by Claude, working on Shading 4984 with the owner_
 
 
-### `general` — 0d ago
+### `general` — 7d ago
 
 
 **Verdict:** refuted
@@ -215,10 +446,10 @@ Not isolated. I have not found what triggered the engine-wide restart, or why on
 **Cost:** The user lost their current Shading QA code with no warning. The MCP can list HC3 backups (get_backups) but cannot download one or pull a QA out of it. Nothing in the MCP saves QA file versions before it overwrites them either, so there was no way to recover through the MCP. Suggested fix: save each QA file to the StateDirectory before update_quickapp_file, update_multiple_quickapp_files or patch_quickapp_file overwrites it, and add a tool to list and restore those copies.
 
 
-### `get_event_history` — 2d ago
+### `get_event_history` — 8d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the get_event_history failure row: 19-20 s server time, 15 s client timeout._
@@ -241,10 +472,10 @@ Not isolated. Two things differed between the failing and working call: window l
 _Reported by Claude, claude.ai session 11 Nov 2026_
 
 
-### `update_multiple_quickapp_files` — 5d ago
+### `update_multiple_quickapp_files` — 11d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Partial write reported as total failure. See the failure row._
@@ -264,10 +495,10 @@ Fresh QA with only main. update_multiple_quickapp_files with main + 4 non-existe
 **Cost:** A caller who trusts the 500 believes the QA is unchanged while it is running half-deployed code (here it crash-looped until the other files were created). Suggest the tool reports which files were written before the failure.
 
 
-### `update_multiple_quickapp_files` — 5d ago
+### `update_multiple_quickapp_files` — 11d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). See the update_multiple_quickapp_files failure row._
@@ -287,10 +518,10 @@ Fresh QA 5073 from create_quickapp (only 'main' exists). Call 1: update_multiple
 **Cost:** One failed push and a detour. Suggest the tool checks list_quickapp_files first and either creates missing files via POST or returns 'file X does not exist, use create_quickapp_file'.
 
 
-### `general` — 5d ago
+### `general` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). `load` is not available in the scene sandbox. Guide gap; a server-side syntax check (luaparse) would be the real pre-flight._
@@ -313,10 +544,10 @@ Single line in a fresh Lua scene: `local f = load("return 1")` errors with attem
 _Reported by Claude chat session, 8 Nov 2026_
 
 
-### `mcp__hc3__get_quickapp_variable` — 6d ago
+### `mcp__hc3__get_quickapp_variable` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The reported results carry no `name` key: the handler received no name and returned exists:false instead of refusing. A missing argument became a confident wrong answer about the user's system. Fix: require name._
@@ -369,10 +600,10 @@ Workaround for callers today: read properties.quickAppVariables from get_device_
 _Reported by Claude, working on Outdoor Mean 4916 with the owner_
 
 
-### `mcp__hc3__delete_device` — 6d ago
+### `mcp__hc3__delete_device` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row._
@@ -415,10 +646,10 @@ Workaround for callers today: after a delete_device error of this exact shape, c
 _Reported by Claude, working on Irrigation 4933 with the owner_
 
 
-### `mcp__hc3__find_devices_by_name` — 6d ago
+### `mcp__hc3__find_devices_by_name` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Both halves confirmed in code: only parentId 0/1 kept, so every Z-Wave endpoint child is invisible to a name search; and the parameter is exactMatch, so `exact` was silently ignored._
@@ -468,10 +699,10 @@ Suggested fix: the underlying query appears scoped to parentId 0 or 1 and should
 _Reported by Claude, working on deviceBinder 4826 with the owner_
 
 
-### `general` — 6d ago
+### `general` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). fibaro.getDevicesID() is a device-list query returning a table, not a self-id; `fn and fn()` guards hide the wrong type. Guide gap._
@@ -509,10 +740,10 @@ Suggested fix for the HC3 guidance this server serves: state plainly that plugin
 _Reported by Claude, working on deviceBinder 4826 with the owner_
 
 
-### `get_quickapps` — 6d ago
+### `get_quickapps` — 12d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). 842 KB for 33 QuickApps, every layout tree included. Fix: compact list by default (id, name, type, room, enabled), full records on request._
@@ -535,10 +766,10 @@ Firmware 5.210.12, 33 QuickApps on the gateway. get_quickapps() with no argument
 _Reported by Claude, via the owner's Shading QuickApp session, 2026-11-07_
 
 
-### `delete_device` — 12d ago
+### `delete_device` — 18d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). False post-delete failure; see the delete_device failure row._
@@ -555,10 +786,10 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Fal
 delete_device on a QA child, then get_device_info on the same id straight after. Seen once; not isolated.
 
 
-### `modify_device` — 12d ago
+### `modify_device` — 18d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout on a QuickAppChild: bare 404; children use uiView. Tool fix tracked under the modify_device 404 failure row._
@@ -575,10 +806,10 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). vie
 Child 4739 (com.fibaro.binarySwitch, parent QA 4710, useEmbeddedView true, uiView []). modify_device properties {viewLayout: {$jason...}, uiCallbacks:[...]} -> HTTP 404 PUT /api/devices/4739. modify_device properties {uiView:[{type:"horizontal",name,components:[{type:"button",name:"howToButton",text,eventBinding:{onReleased:[{type:"deviceAction",params:{actionName:"UIAction",args:["onReleased","howToButton"]}}]}}]}, {...label...}]} -> verified, and get_plugin_view shows the rows appended below the embedded binarySwitch buttons. Tap behaviour not yet confirmed.
 
 
-### `create_quickapp_file` — 12d ago
+### `create_quickapp_file` — 18d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Unknown arguments are silently ignored (localPath on create; dryRun on update_multiple, which then wrote). Same class as find_devices_by_name's exact vs exactMatch (1794097426). Fix in the dispatcher: report unknown arguments._
@@ -595,10 +826,10 @@ _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Unk
 QA 5046. create_quickapp_file {deviceId, fileName:"howto", localPath:"/home/claude/climate/howto.lua"}, then update_multiple_quickapp_files {files:[{name:"howto", localPath:...}], dryRun:true}. Not isolated whether dryRun or the missing content caused the 500.
 
 
-### `set_quickapp_variable` — 12d ago
+### `set_quickapp_variable` — 18d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A child variable write is not seen by the running parent, and the parent's next child setVariable writes its stale copy back. Fix: on a QuickAppChild, warn and offer to restart the parent._
@@ -618,10 +849,10 @@ One variable changed: whether the child's own code called setVariable after the 
 **Cost:** Two Daikin units silently kept their links to deleted thermostats for about 20 minutes; a Madoka change was routed to the wrong device. Suggested fix: set_quickapp_variable on a device with parentId should warn that the parent must be restarted, or restart it, and re-read after a delay.
 
 
-### `update_climate_zone` — 13d ago
+### `update_climate_zone` — 19d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A QuickApp thermostat in a climate zone gets setpoints on join, mode change and edit, NOT at schedule slot changes. Guide gap: read the zone's current setpoints._
@@ -641,7 +872,7 @@ One variable changed: the trigger (add to zone / mode change / slot change). The
 **Cost:** Design consequence: a QuickApp thermostat in a climate zone must read the zone's current setpoints itself (GET /panels/climate/{id}, properties.currentTemperatureHeating / currentTemperatureCooling / mode) rather than rely on pushes. Add this to the QuickApp programming guide.
 
 
-### `patch_quickapp_file` — 13d ago
+### `patch_quickapp_file` — 19d ago
 
 
 **Verdict:** confirmed
@@ -664,13 +895,13 @@ Not fully isolated. Two patch calls in quick succession gave a double restart an
 **Cost:** Lost startup writes on a QuickApp that controls hardware. Workaround used: patch one file, wait for the restart to settle, then patch the next. Suggested fix: a multi-file patch (edits plus expectedHash per file) written in one update, so the QuickApp restarts once.
 
 
-### `general` — 13d ago
+### `general` — 19d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.38.0
 
 
-_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). GET /api/temperature/{from}/{to}/summary-graph/devices/temperature/{id} serves history. Not probed here; candidate get_temperature_history tool._
+_Probed 14 Nov 2026. GET /api/temperature/{from}/{to}/summary-graph/devices/temperature/{id} returns [[epochMs, value]...]: 3704 581 points/30 days, 4645 1622. New tool get_temperature_history (4.38.0); live 7 days for 3704: 106 points._
 
 
 **Expected:** No documented REST route to temperature history; /api/panels/history and /api/history/temperature/{id} both 501.
@@ -687,10 +918,10 @@ Probe QA 5042 (deleted), firmware 5.2x, 31 Oct 2026: api.get on each path in tur
 **Cost:** Worth a tool (get_temperature_history) and an entry in dead_endpoints for /devices/{id}/history (misleading 200). It removed the need for room-temperature snapshots in the new 30-day QuickApp logs.
 
 
-### `general` — 13d ago
+### `general` — 19d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Measured: QA variables to 800 KB work, cost linear (~1.2 ms per KB on every read of the device); QuickAppChild holds its own variables. Guide gap: keep large state on a hidden child._
@@ -710,10 +941,10 @@ Probe QA 5038 (since deleted): one variable rewritten at increasing sizes, one v
 **Cost:** Worth documenting in the QuickApp guide: large state should live on a hidden child, not the parent, because every read of the parent device (other QAs, MCP get_device_info) pays ~1.2 ms per KB.
 
 
-### `general` — 13d ago
+### `general` — 19d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). fibaro.getValue returns only the value here, no modified timestamp (six devices). Guide gap._
@@ -736,13 +967,13 @@ Scene 816 (deleted after use): for each id, pcall(fibaro.getValue, id, "value") 
 _Reported by Claude chat session, 31 Oct 2026_
 
 
-### `get_device_parameters / set_device_parameter` — 13d ago
+### `get_device_parameters / set_device_parameter` — 19d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed
 
 
-_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The web UI exports, imports and reads parameter profiles live. Feature request; the UI's endpoints need capturing first._
+_Probed 14 Nov 2026. The web UI's three buttons resolved from its bundle: download = GET /api/zwave/parameters_templates/{addr} (200 on 187.0; get_device_parameters already reads it); upload = POST /api/zwave/user_parameters_templates then PUT /api/zwave/parameters_templates/{addr}/override {userTemplateId}; per-parameter read = POST /api/zwave/polling/configuration_parameters/{addr}/{n}, which answers 202. The polling route is NOT the pollConfigurationParameter device action that returns -3, so 'no live read-back' was recorded on the wrong route. Whether a poll refreshes the cache is unproven: all three polled parameters already matched. Upload/override not run (writes)._
 
 
 **Expected:** Server documentation says HC3 5.x has no working mesh read-back of Z-Wave parameters over REST (getParameter, reconfigure, pollConfigurationParameter not implemented), and the server offers no way to export or import a device's parameter profile; the only write path is set_device_parameter, one parameter per call.
@@ -762,10 +993,10 @@ Not isolated: observed through the user's UI actions, not reproduced through the
 _Reported by Claude chat session, 31 Oct 2026_
 
 
-### `get_hc3_quickapp_programming_guide` — 17d ago
+### `get_hc3_quickapp_programming_guide` — 24d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). updateView propertyName='visible' hides components at runtime; slider min/max/step survive from the layout; get_plugin_view renders from viewLayout, not uiView. Guide gap._
@@ -785,7 +1016,7 @@ QA 4984 (Shading), 27 Oct 2026. Only variable changed: newValue true vs false fo
 **Cost:** Saves the next session from assuming elements cannot be hidden and from building a text-swap fallback. Suggest adding both facts to the ui topic.
 
 
-### `modify_device` — 18d ago
+### `modify_device` — 24d ago
 
 
 **Verdict:** untested
@@ -808,7 +1039,7 @@ Not isolated. modify_device {properties:{wakeUpTime:43200}} on device 3809 (prev
 **Cost:** The user asked for all battery wake-up intervals to be set to 12 h; the change may be cache-only and silently ineffective. Suggest documenting wakeUpTime in silent_writes once tested, and exposing a device's last wake-up time if HC3 records it.
 
 
-### `set_device_parameter` — 18d ago
+### `set_device_parameter` — 24d ago
 
 
 **Verdict:** untested
@@ -831,10 +1062,10 @@ Not isolated. Call set_device_parameter on a battery Z-Wave sensor while it slee
 **Cost:** A caller cannot tell whether a parameter write to a sleeping device is waiting or lost. Suggest the tool detect battery devices (batteryLevel / wakeUpTime) and say plainly that the write only lands at the next wake-up, and report wakeUpTime = 0 as 'device may never wake on its own'.
 
 
-### `general` — 18d ago
+### `general` — 24d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Opening and closing a net.TCPSocket per request (~8/min) crashes the QuickApp with 'Bad file descriptor' after ~20 min, increasingly often. Guide gap: one persistent socket._
@@ -854,7 +1085,7 @@ Not isolated. Two variables changed together in the fix: (1) one persistent sock
 **Cost:** Ventilation QA restarted ~100 times over 5 hours before it was noticed; every restart re-initialises state and tile. Suggest adding to the tcp guide: prefer one persistent socket; avoid open/close per request; do not let closed sockets be collected (or note that the cause is unconfirmed).
 
 
-### `set_quickapp_variable` — 19d ago
+### `set_quickapp_variable` — 25d ago
 
 
 **Verdict:** confirmed, fixed 4.34.0
@@ -880,10 +1111,10 @@ Create a QA variable with value "false" (string). Call set_quickapp_variable wit
 _Reported by Claude, Ventilation QA cut-over 25 Oct 2026_
 
 
-### `get_device_info` — 19d ago
+### `get_device_info` — 25d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). properties.associations [] is UNKNOWN, not none, on devices included under Z-Wave engine 3 without zwaveMigrated (association demonstrably working). Belongs in api notes._
@@ -906,10 +1137,10 @@ Compare get_device_info 3809 vs 4905, properties.associations. The one variable 
 _Reported by Claude, Ventilation QA session 25 Oct 2026_
 
 
-### `get_device_info` — 19d ago
+### `get_device_info` — 25d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Narrowed by 1792934622._
@@ -932,10 +1163,10 @@ Read get_device_info 4905: properties.associations is []. Then read get_event_hi
 _Reported by Claude, Ventilation QA session 25 Oct 2026_
 
 
-### `control_device` — 20d ago
+### `control_device` — 26d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Reporter's Zniffer capture: HC3 stamps neighborListResponseTimestamp and resets lastWorkingRoute before the node answers. Read-back after requestNodeNeighborUpdate is not evidence. Belongs in api notes._
@@ -955,10 +1186,10 @@ Send requestNodeNeighborUpdate to several mains nodes ~25 s apart, read neighbor
 **Cost:** Read-back of neighbour update results is not proof of success; I initially reported nine shorter routes from these records. Suggest the tool/notes warn that neighborList*/lastWorkingRoute after requestNodeNeighborUpdate are queued/optimistic, and that only a later real exchange (or a capture) confirms the route.
 
 
-### `filter_devices` — 20d ago
+### `filter_devices` — 26d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's filter endpoint ignores requested property attributes and returns id/name only. Fix: fetch requested properties in the tool, or refuse._
@@ -978,10 +1209,10 @@ filter_devices({filters:[{filter:"deviceID",value:[3744]}], attributes:["id","na
 **Cost:** Minor: two wasted calls; fell back to get_device_property one property at a time. Suggest documenting the attribute path syntax or erroring on unknown attribute names instead of dropping them.
 
 
-### `set_quickapp_variable` — 26d ago
+### `set_quickapp_variable` — 32d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Writing a variable on a QuickAppChild does NOT restart the parent (and see 1793544288: the parent's in-memory copy later overwrites it). The restart warning should be scoped to parent QuickApps._
@@ -1004,10 +1235,10 @@ Not fully isolated. Observed once each for two writes to the same child. Varying
 _Reported by Claude, Fibaro project session 18 Oct 2026_
 
 
-### `modify_device` — 27d ago
+### `modify_device` — 33d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Submitting isLight:false with a deviceRole: HC3 removes isLight and the light interface, and verify throws on a correct outcome. Fix: treat submitted false read back as absent as a match._
@@ -1027,10 +1258,10 @@ Not isolated: deviceRole and isLight were changed in one call. Likely: changing 
 **Cost:** A false failure on a correct outcome. Suggest noting that deviceRole drives isLight/light interface, and treating a submitted false that reads back as absent as a match for isLight.
 
 
-### `control_device` — 27d ago
+### `control_device` — 33d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). The declared-actions pre-check blocks custom QuickApp methods (e.g. dumpCapabilities) on QAs whose type declares actions, though HC3 dispatches any QuickApp method. Fix: allow undeclared methods on QuickApps, with a note that delivery cannot be verified._
@@ -1050,10 +1281,10 @@ QA 4710 (type hvacSystemCool) has a declared actions map from its device type. A
 **Cost:** The declared-actions pre-check blocks every custom QuickApp method on devices whose type declares actions, though HC3 dispatches any QuickApp method. Workaround: a temporary scene running fibaro.call. Suggest: when the target is a QuickApp, allow undeclared actions (perhaps with a force flag) since QuickApp methods are not listed in the actions map.
 
 
-### `general` — 27d ago
+### `general` — 33d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Contrast to 1792258245: TCPSocket works in a QuickApp._
@@ -1073,10 +1304,10 @@ Identical probe Lua, one variable changed: run inside a lua scene (net.TCPSocket
 **Cost:** Working method: raw TCP probes must use a temporary QuickApp (create_quickapp + update_multiple_quickapp_files + get_debug_messages + delete_device), not the scene probe pattern. Onkyo-built Pioneers send unsolicited NJA/status packets on connect, so a probe must read in a loop rather than take the first packet.
 
 
-### `general` — 27d ago
+### `general` — 33d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). net.TCPSocket is nil in scenes (QuickApps have it, see 1792258320). Raw TCP probes need a temporary QuickApp. Guide gap._
@@ -1096,10 +1327,10 @@ Create a lua scene whose actions are: fibaro.debug("T", tostring(net and net.TCP
 **Cost:** Raw TCP probes (e.g. AV receiver IP control) cannot be done with the create_scene/run_scene_sync probe pattern; they need a temporary QuickApp instead. Suggest adding this to get_hc3_lua_scenes_guide.
 
 
-### `set_device_parameter` — 27d ago
+### `set_device_parameter` — 33d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). isSupportedByDevice:false and cacheUpdated:false do NOT mean failure on FGR223 parents (5.220.15): slats rotated after the write. The tool's result should stop reading as failure on those signals._
@@ -1119,7 +1350,7 @@ One variable: param 152 write. Before: setValue2 ignored by both 4925 and 4922 (
 **Cost:** My earlier finding drew a wrong negative conclusion; disregard its suggestion. Implication: the earlier Qubino param 71 finding (isSupportedByDevice:false, cache unchanged) may also be wrong, since that was judged on the same signals. Suggest tool output say plainly that cacheUpdated:false plus isSupportedByDevice:false is NOT evidence of failure.
 
 
-### `set_device_parameter` — 27d ago
+### `set_device_parameter` — 34d ago
 
 
 **Verdict:** refuted
@@ -1142,7 +1373,7 @@ Not isolated. Write a changed value to an FGR223 parent via set_device_parameter
 **Cost:** The tool description says setConfiguration is the working channel on 5.x. On 5.220.15 parent nodes it looks ignored, so parameter repairs via MCP may silently fail. Suggest: flag cacheUpdated:false plus isSupportedByDevice:false as a probable failure in the tool output.
 
 
-### `set_device_parameter` — 30d ago
+### `set_device_parameter` — 36d ago
 
 
 **Verdict:** untested
@@ -1165,10 +1396,10 @@ Not isolated. Two variables untested: (a) whether the frame transmits but the di
 **Cost:** The power recovery scene's dimmer step (scene 805, and the old scene 285 before it) may never have calibrated any Qubino. Do not record "parameter 71 recalibration works" as settled. Candidate workaround: drive each dimmer intermediate -> full -> off/restore, which the user confirms frees a stuck dimmer.
 
 
-### `create_global_variable` — 30d ago
+### `create_global_variable` — 36d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An empty-string value is dropped by the client before it reaches the server. Fix: make value optional, defaulting to ""._
@@ -1188,13 +1419,13 @@ Not isolated to the server: the failure happened before the request left the cli
 **Cost:** Minor: had to seed the global with a placeholder and rely on scene logic to clear it. Suggest the tool accept value omitted as meaning "" (make value optional, defaulting to empty), which sidesteps the empty-string path entirely.
 
 
-### `general` — 31d ago
+### `general` — 37d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.38.0
 
 
-_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Scene fibaro.getGlobalVariable on a missing global not returning nil. Plausible, not reproduced here; the exact return value was not logged._
+_Probed 14 Nov 2026. Throwaway scene 818: fibaro.getGlobalVariable on a missing global returns "" (type string, ==nil false, =="" true), so an ==nil existence check never fires. Documented in the scenes and QuickApp guides (4.38.0)._
 
 
 **Expected:** In a scene, fibaro.getGlobalVariable(name) on a global that does not exist returns nil, so `if getGlobalVariable(name) == nil then create it` works as an existence check.
@@ -1211,10 +1442,10 @@ Not fully isolated. Scene 806 v1.0.0 (firmware 5.220.15): pcall(fibaro.getGlobal
 **Cost:** Scene baseline silently not stored; would have re-run "first run" logic forever and never detected a reboot. Caught by reading globals back. Suggest adding to get_hc3_lua_scenes_guide (api topic): never use fibaro.getGlobalVariable == nil as an existence test; use the REST status. Pairs with the known create_global_variable note that setGlobalVariable is a silent no-op on a missing global.
 
 
-### `filter_devices` — 31d ago
+### `filter_devices` — 37d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.35.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Probed 13 Nov: HC3's hasNoProperty filter returns 0 devices in every combination (alone, or with enabled/isPlugin), while 695 enabled non-plugin devices lack 'power'. A silent wrong answer. Fix: evaluate hasNoProperty in the tool, or refuse it. The 'omit attributes = ids only' half also holds._
@@ -1234,13 +1465,13 @@ Not fully isolated. Ran hasNoProperty+enabled+isPlugin together; did not test ha
 **Cost:** Silent empty result could be read as "no unmetered actuators". Workaround cost one extra call. Suggest documenting hasNoProperty behaviour and that omitting attributes returns ids only.
 
 
-### `create_backup` — 51d ago
+### `create_backup` — 57d ago
 
 
-**Verdict:** untested
+**Verdict:** confirmed, fixed 4.38.0
 
 
-_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). POST /api/service/backups answers 400 'unsupported action'. Not probed: a working call reboots the gateway. Needs the web UI's real request body captured before changing the tool._
+_Probed 14 Nov 2026. Root cause found without rebooting, from the HC3 web UI's own bundle (chunk 1662): it POSTs {action:'create', params:{type, description, skipHistoryData}}. The tool sent {name, type}; HC3 dispatches on `action`, found none, answered 'unsupported action'. Body fixed in 4.38.0; a live run (which reboots the gateway for a local backup) still to do._
 
 
 **Expected:** Local backup created on HC3 (firmware 5.210.12), gateway reboots to take it.
@@ -1260,7 +1491,7 @@ Called create_backup {name: "Pre 5.220.11 upgrade - 5.210.12", type: "local"} im
 _Reported by Claude chat session, 2026-09-23_
 
 
-### `manage_plugin_interfaces` — 74d ago
+### `manage_plugin_interfaces` — 80d ago
 
 
 **Verdict:** confirmed, fixed 4.30.0
@@ -1286,10 +1517,10 @@ Single variable: same deviceId, same action=delete, interfaces list varied from 
 _Reported by Claude session 2026-08-31 towels QAs_
 
 
-### `update_device_property` — 89d ago
+### `update_device_property` — 95d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A non-numeric value on a multilevelSensor is silently declined: no error, null result, modified unchanged; self:updateProperty does not throw either. Belongs in api notes silent_writes._
@@ -1312,10 +1543,10 @@ Device 4984, com.fibaro.multilevelSensor QuickApp, firmware 5.210.12, value curr
 _Reported by Claude, via the owner's Shading QuickApp session, 2026-08-16_
 
 
-### `general` — 89d ago
+### `general` — 95d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). A QuickApp writing its OWN variables through the device API restarts itself, in a loop if done in onInit. Scope: self:setVariable does NOT restart (Shading writes state every tick; firmwareWatch relies on it), so the copier must have written via api.put on its own device. Guide gap: state the distinction._
@@ -1338,10 +1569,10 @@ Firmware 5.210.12. Failing: QuickApp 4984's own main.lua calls self:setVariable(
 _Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
-### `modify_device` — 89d ago
+### `modify_device` — 95d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.36.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). HC3 refuses a `type` change with a bare 404 on an existing device. Tool fix tracked under the modify_device 404 failure row._
@@ -1364,10 +1595,10 @@ Firmware 5.210.12, device 4953, a live com.fibaro.genericDevice QuickApp. Failin
 _Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
-### `general` — 89d ago
+### `general` — 95d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). api.post('/plugins/updateView', {componentName, propertyName='options', newValue}) replaces select options live with no restart and nothing else disturbed. Guide gap._
@@ -1390,13 +1621,13 @@ QuickApp 4953, firmware 5.210.12, com.fibaro.genericDevice, view containing a se
 _Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
-### `modify_device` — 89d ago
+### `modify_device` — 95d ago
 
 
-**Verdict:** untested
+**Verdict:** refuted
 
 
-_Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). viewLayout + uiCallbacks in one write left every eventBinding null on 5.210.12. NOT reproduced as such on 5.220.15: Shading's layout there carries no eventBinding blocks at all, and the 13 Nov tile-restore test (viewLayout + uiView + uiCallbacks in one write) rendered and stored identically. Different format, so neither confirms nor refutes._
+_Probed 14 Nov 2026. On 5.220.15 the stored viewLayout carries no eventBinding blocks at all (throwaway QA 5078). viewLayout + uiCallbacks written in one PUT: the named callback was kept and call_ui_event reached the handler ('F6 PRESSED btn1'). The 16 Aug failure belonged to the 5.210 layout format. A real finger tap (UIAction path) was not tested._
 
 
 **Expected:** Submitting viewLayout and uiCallbacks together in one modify_device call would produce a working tile, since both writes verify individually.
@@ -1416,7 +1647,7 @@ On QuickApp 4984 (com.fibaro.multilevelSensor, firmware 5.210.12). Working case:
 _Reported by Claude, via the owner's Shading QuickApp migration session, 2026-08-16_
 
 
-### `get_icon` — 90d ago
+### `get_icon` — 96d ago
 
 
 **Verdict:** confirmed, fixed 4.21.2
@@ -1442,7 +1673,7 @@ Path claim, single variable is the path: get_icon({category:"device", name:"User
 _Reported by Claude, Shading QA migration, attaching the Awning icon to QA 4953_
 
 
-### `manage_plugin_interfaces` — 90d ago
+### `manage_plugin_interfaces` — 96d ago
 
 
 **Verdict:** confirmed, fixed 4.30.0
@@ -1468,7 +1699,7 @@ Single variable varied across three calls on the same device 4952 immediately af
 _Reported by Claude, Shading QA migration, follow-up isolation on QA 4952_
 
 
-### `manage_plugin_interfaces` — 90d ago
+### `manage_plugin_interfaces` — 96d ago
 
 
 **Verdict:** confirmed, fixed 4.30.0
@@ -1494,10 +1725,10 @@ Single variable: the call itself. 1) create_quickapp name="Shading" type="com.fi
 _Reported by Claude, working on the Shading QA migration (scene 247 to QA 4952)_
 
 
-### `get_hc3_lua_scenes_guide` — 90d ago
+### `get_hc3_lua_scenes_guide` — 96d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). An uncaught api.* error kills a scene with no log at all, and run_scene_sync still reports success. QA files are /api/quickApp/{id}/files/{name}, not /devices/{id}/files. Guide gap: say both, and wrap api calls in pcall + log._
@@ -1527,7 +1758,7 @@ Only the path differs. Adding a fibaro.debug before the call, and pcall around i
 _Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `patch_quickapp_file` — 90d ago
+### `patch_quickapp_file` — 96d ago
 
 
 **Verdict:** confirmed
@@ -1563,7 +1794,7 @@ To test: call patch_quickapp_file, then load a dozen unrelated HC3 MCP tools via
 _Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `upload_icon` — 90d ago
+### `upload_icon` — 96d ago
 
 
 **Verdict:** confirmed
@@ -1600,7 +1831,7 @@ Same file, same device, same firmware (5.210.12). Note B must run inside the own
 _Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `get_hc3_quickapp_programming_guide` — 90d ago
+### `get_hc3_quickapp_programming_guide` — 96d ago
 
 
 **Verdict:** confirmed
@@ -1639,7 +1870,7 @@ To settle it on a spare QA: (a) register a multi-select under onToggled only, re
 _Reported by Claude, working with the owner on QA 4933 (Irrigation), 15 Aug 2026_
 
 
-### `get_ios_devices` — 92d ago
+### `get_ios_devices` — 98d ago
 
 
 **Verdict:** confirmed
@@ -1665,10 +1896,10 @@ Vary only the path: api.get("/iosDevices") and api.get("/iosDevices/937") from t
 _Reported by Claude, working with the owner, 5.210.12_
 
 
-### `general` — 92d ago
+### `general` — 98d ago
 
 
-**Verdict:** confirmed
+**Verdict:** confirmed, fixed 4.37.0
 
 
 _Triaged 13 Nov 2026 against the Pi's log (/var/lib/hc3-mcp/friction.jsonl). Reporter tested every arm. /mobile/push VALIDATES (400 wrong id kind or category, 404 unknown id, 500 missing category or empty list); fibaro.alert returns nil and reports nothing. Corrects the 'both fail silently' assumption. Guide gap: the routing section covers id kinds, not this._
@@ -1691,7 +1922,7 @@ Single variable in each pair. For /mobile/push, hold body and category constant 
 _Reported by Claude, working with the owner, 5.210.12_
 
 
-### `general` — 92d ago
+### `general` — 98d ago
 
 
 **Verdict:** confirmed
@@ -1717,7 +1948,7 @@ Single variable is the path. From a Lua scene, api.get("/scenes/788/variables") 
 _Reported by Claude, working with the owner, 5.210.12_
 
 
-### `create_scene` — 92d ago
+### `create_scene` — 98d ago
 
 
 **Verdict:** confirmed, fixed 4.29.0
@@ -1743,7 +1974,7 @@ Isolated to one variable. Call create_scene twice with identical name/roomId/typ
 _Reported by Claude, working with the owner, 5.210.12_
 
 
-### `general` — 94d ago
+### `general` — 100d ago
 
 
 **Verdict:** by-design
