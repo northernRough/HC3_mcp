@@ -40,6 +40,7 @@ export function defaultArgsFor(toolName) {
         // room
         get_rooms:              {},
         get_room:               { roomId: f.room },
+        get_sections:           {},
         // global
         get_global_variables:   {},
         // qa / quickapp

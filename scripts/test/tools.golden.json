@@ -581,7 +581,7 @@
         },
         "sectionID": {
           "type": "number",
-          "description": "Parent section id"
+          "description": "Parent section id (list them with get_sections)."
         },
         "icon": {
           "type": "string",
@@ -2000,6 +2000,19 @@
     }
   },
   {
+    "name": "get_sections",
+    "description": "List room sections: the grouping above rooms (e.g. a \"Bedrooms\" section holding the bedroom and ensuite rooms). Reads GET /api/sections and GET /api/rooms and returns each section, in sortOrder, with its rooms ({id, name}). Rooms whose sectionID matches no section are listed under `unsectioned`. Pass sectionId for one section. Use the ids with create_room/modify_room `sectionID` to move a room between sections. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sectionId": {
+          "type": "number",
+          "description": "Optional: return only this section."
+        }
+      }
+    }
+  },
+  {
     "name": "get_server_info",
     "description": "Report the MCP server's identity: package name, version (read from package.json at startup so it stays in sync with the shipped tarball), transport (stdio or http), and the HC3 host the server is configured to talk to. Useful for \"which version of the MCP am I connected to\" and \"which HC3 is this MCP wired to\" questions without needing to inspect the initialize handshake. No HC3 round-trip; reports local server state only.",
     "inputSchema": {
@@ -2412,7 +2425,7 @@
   },
   {
     "name": "modify_room",
-    "description": "Update room fields (name, sectionID, icon, category, visible, defaultSensors, defaultThermostat, sortOrder) via PUT /api/rooms/{id}. Read-modify-write + post-write verify.",
+    "description": "Update room fields (name, sectionID — ids from get_sections, icon, category, visible, defaultSensors, defaultThermostat, sortOrder) via PUT /api/rooms/{id}. Read-modify-write + post-write verify.",
     "inputSchema": {
       "type": "object",
       "properties": {

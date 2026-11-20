@@ -2,6 +2,21 @@
 
 All notable changes to the "hc3-mcp-server" package will be documented in this file.
 
+## [4.45.0] - 2026-11-20
+
+### Added
+
+- `get_sections`: lists room sections (the grouping above rooms) in
+  sortOrder, each with its rooms, plus any rooms whose `sectionID` matches no
+  section. `sectionId` returns one. Reads `GET /api/sections` and
+  `GET /api/rooms`; read-only. Until now the section ids that
+  `create_room` / `modify_room` accept could not be discovered without a raw
+  call (friction finding, 20 Nov).
+
+### Fixed
+
+- README described `get_rooms` as listing sections; it lists rooms only.
+
 ## [4.44.0] - 2026-11-19
 
 ### Added
