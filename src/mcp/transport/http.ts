@@ -67,11 +67,17 @@ export function setupHttp(opts: { dispatch: Dispatch; hc3: HC3Client }): void {
     // MCP_HTTP_ALLOW_UNAUTH=true. When disabled, identity is expected to be
     // enforced by an external layer (Cloudflare Access, reverse proxy, firewall).
     if (haveToken) {
+      // Accept "Bearer <token>" and the bare token. claude.ai's custom
+      // connector "Request headers" sent the value without the Bearer prefix
+      // (seen on the wire, 20 Nov 2026), and refusing it left a correctly keyed
+      // connector unable to connect with no clue why.
       const authHeader = req.headers['authorization'];
-      const supplied = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
-        ? authHeader.slice(7).trim()
-        : '';
+      const raw = typeof authHeader === 'string' ? authHeader.trim() : '';
+      const supplied = /^bearer\s+/i.test(raw) ? raw.replace(/^bearer\s+/i, '').trim() : raw;
       if (!supplied || !constantTimeEq(supplied)) {
+        // Say why, never what: presence and length only, so a refused client
+        // can be diagnosed from the journal without the key ever being logged.
+        console.error(`[http] 401 ${method} ${url.split('?')[0]} auth=${raw ? (/^bearer\s+/i.test(raw) ? 'bearer' : 'bare') + ` len=${supplied.length}` : 'none'}`);
         writeJson(res, 401, { error: 'unauthorized' });
         return;
       }
